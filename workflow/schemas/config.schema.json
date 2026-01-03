@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/harvardinformatics/snpArcher/schemas/config.schema.json",
+  "title": "snpArcher Configuration",
+  "description": "Schema for snpArcher v2 configuration validation",
+  "type": "object",
+  "properties": {
+    "samples": {
+      "type": "string",
+      "description": "Path to sample sheet CSV"
+    },
+    "reference": {
+      "type": "object",
+      "description": "Reference genome configuration",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "description": "Reference genome identifier, used in output file naming"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to reference FASTA file"
+        },
+        "accession": {
+          "type": "string",
+          "description": "NCBI accession for reference genome (alternative to path)"
+        }
+      },
+      "required": ["name"],
+      "oneOf": [
+        {"required": ["path"]},
+        {"required": ["accession"]}
+      ]
+    },
+    "intervals": {
+      "type": "boolean",
+      "default": true,
+      "description": "Use interval-based approach for variant calling"
+    },
+    "sentieon": {
+      "type": "boolean",
+      "default": false,
+      "description": "Use Sentieon tools instead of GATK"
+    },
+    "sentieon_lic": {
+      "type": "string",
+      "description": "Path to Sentieon license file"
+    },
+    "remote_reads": {
+      "type": "boolean",
+      "default": false,
+      "description": "Reads are stored in remote location"
+    },
+    "remote_reads_prefix": {
+      "type": "string",
+      "description": "Remote prefix for reads location"
+    },
+    "bigtmp": {
+      "type": "string",
+      "description": "Path for temporary files requiring large disk space"
+    },
+    "cov_filter": {
+      "type": "boolean",
+      "default": true,
+      "description": "Include coverage thresholds in callable sites"
+    },
+    "generate_trackhub": {
+      "type": "boolean",
+      "default": true,
+      "description": "Generate UCSC Genome Browser trackhub"
+    },
+    "trackhub_email": {
+      "type": "string",
+      "format": "email",
+      "description": "Email address for trackhub (required by UCSC)"
+    },
+    "mark_duplicates": {
+      "type": "boolean",
+      "default": true,
+      "description": "Mark optical duplicates before variant calling"
+    },
+    "sort_reads": {
+      "type": "boolean",
+      "default": false,
+      "description": "Sort reads by name before adapter trimming"
+    },
+    "minNmer": {
+      "type": "integer",
+      "minimum": 50,
+      "default": 500,
+      "description": "Minimum N-mer length for interval splitting"
+    },
+    "num_gvcf_intervals": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 50,
+      "description": "Maximum number of GVCF intervals to create"
+    },
+    "db_scatter_factor": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.15,
+      "description": "Scatter factor for GenomicsDB intervals"
+    },
+    "ploidy": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 2,
+      "description": "Ploidy for variant calling"
+    },
+    "minP": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "GATK HaplotypeCaller --min-pruning (1 for low cov, 2 for high cov)"
+    },
+    "minD": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "GATK HaplotypeCaller --min-dangling-branch-length (1 for low cov, 4 for high cov)"
+    },
+    "het_prior": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.005,
+      "description": "Prior probability of heterozygous site"
+    },
+    "mappability_min": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 1,
+      "description": "Minimum mappability score for callable sites"
+    },
+    "mappability_k": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 150,
+      "description": "K-mer size for mappability calculation"
+    },
+    "mappability_merge": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 100,
+      "description": "Merge mappability regions separated by this many bp"
+    },
+    "cov_merge": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 100,
+      "description": "Merge coverage regions separated by this many bp"
+    },
+    "nClusters": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 3,
+      "description": "Number of clusters for QC PCA"
+    },
+    "GoogleAPIKey": {
+      "type": "string",
+      "description": "Google Maps API key for QC dashboard"
+    },
+    "min_depth": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 2,
+      "description": "Minimum average depth for QC inclusion"
+    },
+    "contig_size": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 10000,
+      "description": "Filter SNPs on contigs smaller than this"
+    },
+    "maf": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 0.5,
+      "default": 0.01,
+      "description": "Minimum minor allele frequency"
+    },
+    "missingness": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.75,
+      "description": "Maximum missingness threshold"
+    },
+    "scaffolds_to_exclude": {
+      "type": "string",
+      "default": "mtDNA,Y",
+      "description": "Comma-separated list of scaffolds to exclude"
+    },
+    "cov_threshold_lower": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Lower absolute coverage threshold"
+    },
+    "cov_threshold_upper": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Upper absolute coverage threshold"
+    },
+    "cov_threshold_stdev": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Coverage threshold in standard deviations"
+    },
+    "cov_threshold_rel": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Coverage threshold as relative scaling factor"
+    }
+  },
+  "required": ["samples", "reference"]
+}
