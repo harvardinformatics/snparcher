@@ -65,52 +65,76 @@ srr,SRR12345678
 
 ### library_id
 
-Optional library identifier used for duplicate marking. 
+Library identifier used for read group assignment and duplicate marking.
 
-- If a `sample_id` appears on multiple rows (multiple sequencing runs), `library_id` distinguishes them
+**Purpose**: The `library_id` is written into the BAM read group (`LB` tag) and used by duplicate marking tools to identify which reads came from the same library preparation.
+
+**Behavior**:
+
 - If not specified, defaults to `sample_id`
-- Samples with the same `library_id` are considered the same library for deduplication
+- Reads with the same `library_id` are considered the same library for deduplication
+- Different `library_id` values = different library preparations = deduplicated separately
 
-## Examples
+**Validation**: Must match pattern `^[A-Za-z0-9_-]*$` (alphanumeric, underscores, hyphens only).
 
-### Basic usage
+## Handling Multiple Sequencing Runs
 
-```csv
-sample_id,input_type,input
-sample1,fastq,/data/sample1_R1.fq.gz;/data/sample1_R2.fq.gz
-sample2,fastq,/data/sample2_R1.fq.gz;/data/sample2_R2.fq.gz
-sample3,srr,SRR12345678
-```
+When a sample has been sequenced multiple times, each sequencing run should be a separate row in the sample sheet. snpArcher will:
 
-### Multiple sequencing runs per sample
+1. **Map each row independently** to produce per-run BAM files
+2. **Merge all BAMs** for the same `sample_id` into a single BAM
+3. **Mark duplicates** using the `library_id` to identify which reads share a library
 
-When a sample was sequenced multiple times:
+!!! note "Internal unit tracking"
+    snpArcher automatically assigns an internal unit identifier to each row for intermediate file paths. You do not need to specify run IDs manually.
 
-```csv
-sample_id,input_type,input,library_id
-sampleA,fastq,/data/sampleA_run1_R1.fq.gz;/data/sampleA_run1_R2.fq.gz,libA
-sampleA,fastq,/data/sampleA_run2_R1.fq.gz;/data/sampleA_run2_R2.fq.gz,libA
-sampleB,fastq,/data/sampleB_R1.fq.gz;/data/sampleB_R2.fq.gz,
-```
+### Same library, multiple sequencing runs
 
-In this example:
-- `sampleA` has two sequencing runs from the same library (`libA`)
-- Both runs will be merged and deduplicated together
-- `sampleB` has one run; `library_id` defaults to `sampleB`
-
-### Multiple libraries per sample
-
-When a sample has multiple library preparations:
+When the same library was sequenced multiple times (e.g., to increase depth):
 
 ```csv
 sample_id,input_type,input,library_id
-sampleA,fastq,/data/sampleA_lib1_R1.fq.gz;/data/sampleA_lib1_R2.fq.gz,lib1
-sampleA,fastq,/data/sampleA_lib2_R1.fq.gz;/data/sampleA_lib2_R2.fq.gz,lib2
+sample_A,fastq,/data/sample_A_lane1_R1.fq.gz;/data/sample_A_lane1_R2.fq.gz,lib_A
+sample_A,fastq,/data/sample_A_lane2_R1.fq.gz;/data/sample_A_lane2_R2.fq.gz,lib_A
 ```
 
-In this example:
-- `sampleA` has two different library preparations
-- Each library is deduplicated separately, then merged
+**Result**: Both runs are merged, and duplicates are marked together (same library = duplicates can span runs).
+
+### Different libraries, same sample
+
+When multiple library preparations were made from the same sample:
+
+```csv
+sample_id,input_type,input,library_id
+sample_A,fastq,/data/sample_A_libX_R1.fq.gz;/data/sample_A_libX_R2.fq.gz,lib_X
+sample_A,fastq,/data/sample_A_libY_R1.fq.gz;/data/sample_A_libY_R2.fq.gz,lib_Y
+```
+
+**Result**: Both runs are merged into one BAM, but duplicates are marked separately per library (different libraries = independent duplicate marking).
+
+### Complex example
+
+Consider 2 samples with different sequencing scenarios:
+
+| sample_id | library_id | Description |
+|-----------|------------|-------------|
+| sample_A | lib_A_1 | First library, lane 1 |
+| sample_A | lib_A_1 | First library, lane 2 (same lib, re-sequenced) |
+| sample_A | lib_A_2 | Second library |
+| sample_B | (default) | Single run, single library |
+
+```csv
+sample_id,input_type,input,library_id
+sample_A,fastq,/data/A_lib1_lane1_R1.fq.gz;/data/A_lib1_lane1_R2.fq.gz,lib_A_1
+sample_A,fastq,/data/A_lib1_lane2_R1.fq.gz;/data/A_lib1_lane2_R2.fq.gz,lib_A_1
+sample_A,fastq,/data/A_lib2_R1.fq.gz;/data/A_lib2_R2.fq.gz,lib_A_2
+sample_B,fastq,/data/B_R1.fq.gz;/data/B_R2.fq.gz,
+```
+
+**Processing**:
+
+- `sample_A`: 3 BAMs merged → duplicates marked (lib_A_1 together, lib_A_2 separate) → final BAM
+- `sample_B`: 1 BAM → duplicates marked → final BAM
 
 ## Metadata Columns
 
@@ -124,14 +148,57 @@ sample2,fastq,/data/s2_R1.fq.gz;/data/s2_R2.fq.gz,40.7128,-74.0060,NYC
 
 ## Validation
 
-The sample sheet is validated at workflow start using JSON Schema. Validation checks:
+The sample sheet is validated at workflow start. Validation includes schema checks and semantic rules.
 
-- Required columns are present
-- `sample_id` matches allowed pattern
-- `input_type` is a valid value
+### Schema Validation
+
+Basic structure validation using JSON Schema:
+
+- Required columns are present (`sample_id`, `input_type`, `input`)
+- `sample_id` matches allowed pattern (alphanumeric, underscores, hyphens)
+- `input_type` is a valid value (`fastq`, `srr`, `bam`, `gvcf`)
 - `input` is not empty
 
-To see validation errors, run:
+### Semantic Validation Rules
+
+**1. Multi-row samples require explicit library_id**
+
+If a `sample_id` appears on multiple rows, ALL rows for that sample must have an explicit `library_id`. This prevents incorrect duplicate marking.
+
+```csv
+# ERROR - sample_A has 2 rows but no library_id
+sample_id,input_type,input
+sample_A,fastq,/data/run1_R1.fq.gz;/data/run1_R2.fq.gz
+sample_A,fastq,/data/run2_R1.fq.gz;/data/run2_R2.fq.gz
+
+# OK - single-row sample, library_id defaults to sample_id
+sample_id,input_type,input
+sample_B,fastq,/data/B_R1.fq.gz;/data/B_R2.fq.gz
+
+# OK - multi-row sample with explicit library_id on all rows
+sample_id,input_type,input,library_id
+sample_A,fastq,/data/run1_R1.fq.gz;/data/run1_R2.fq.gz,lib1
+sample_A,fastq,/data/run2_R1.fq.gz;/data/run2_R2.fq.gz,lib1
+```
+
+**2. No mixed input types per sample**
+
+All rows for a `sample_id` must have the same `input_type`. You cannot mix FASTQ and BAM inputs for the same sample.
+
+```csv
+# ERROR - sample_A has mixed input_types (fastq and bam)
+sample_id,input_type,input,library_id
+sample_A,fastq,/data/run1_R1.fq.gz;/data/run1_R2.fq.gz,lib1
+sample_A,bam,/data/existing.bam,lib2
+```
+
+**3. No duplicate rows**
+
+Exact duplicate rows (same `sample_id`, `library_id`, and `input`) are not allowed.
+
+### Viewing Validation Errors
+
+To see validation errors, run a dry-run:
 
 ```bash
 snakemake -n --configfile config/config.yaml

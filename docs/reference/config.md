@@ -18,8 +18,8 @@ Reference genome configuration. Must specify `name` and either `path` or `access
 
 ```yaml
 reference:
-  name: "my_genome"           # Identifier used in output naming
-  path: "/path/to/ref.fa"     # Local FASTA file
+  name: "my_genome"               # Identifier used in output naming
+  path: "/path/to/ref.fna.gz"     # Local FASTA file (bgzip-compressed)
 ```
 
 Or using an NCBI accession:
@@ -29,6 +29,31 @@ reference:
   name: "ecoli_k12"
   accession: "GCF_000005845.2"
 ```
+
+#### Reference format requirements
+
+When providing a local reference via `path`:
+
+- **Bgzip-compressed FASTA** (`.fna.gz`, `.fa.gz`) is **required**
+- The file is **symlinked** to the results directory (no copying)
+- Regular gzip is **not supported** and will cause indexing to fail
+
+If your reference is uncompressed or gzip-compressed, convert it to bgzip format:
+
+```bash
+# From uncompressed FASTA
+bgzip genome.fna               # Creates genome.fna.gz
+
+# From regular gzip
+gunzip genome.fna.gz           # Decompress
+bgzip genome.fna               # Recompress with bgzip
+```
+
+Bgzip (block gzip) allows random access, which is required by `samtools faidx` and 
+other indexing tools. The `bgzip` command is part of [htslib](http://www.htslib.org/).
+
+When using an NCBI `accession`, snpArcher downloads and bgzip-compresses the 
+reference automatically.
 
 ## Variant Calling Options
 
@@ -194,7 +219,7 @@ remote_reads_prefix: ""   # Remote storage prefix
 samples: "config/samples.csv"
 reference:
   name: "my_organism"
-  path: "/data/reference/genome.fa"
+  path: "/data/reference/genome.fna.gz"  # Must be bgzip-compressed
 
 # Variant calling
 intervals: true
