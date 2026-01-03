@@ -1,0 +1,70 @@
+[project]
+name = "snparcher"
+version = "2.0.0-dev"
+description = "A Snakemake workflow for population genomic variant calling"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = []
+
+# ============ PIXI CONFIGURATION ============
+
+[tool.pixi.workspace]
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64", "osx-arm64", "osx-64"]
+
+[tool.pixi.dependencies]
+python = ">=3.11"
+snakemake = ">=9.0"
+pandas = "*"
+pyyaml = "*"
+
+[tool.pixi.feature.dev.dependencies]
+ruff = "*"
+snakefmt = "*"
+
+[tool.pixi.feature.docs.dependencies]
+mkdocs = "*"
+mkdocs-material = "*"
+
+[tool.pixi.environments]
+default = { features = [], solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+docs = { features = ["docs"], solve-group = "default" }
+
+# Tasks for default environment (workflow operations)
+[tool.pixi.tasks]
+lint-snakemake = "snakemake --lint"
+test-dry-run = "snakemake -n --configfile .test/ci/config/config.yaml"
+
+# Tasks for dev environment
+[tool.pixi.feature.dev.tasks]
+lint = "ruff check workflow/"
+format = "ruff format workflow/ && snakefmt workflow/"
+check = { depends-on = ["lint", "lint-snakemake"] }
+
+# Tasks for docs environment
+[tool.pixi.feature.docs.tasks]
+docs-serve = "mkdocs serve"
+docs-build = "mkdocs build"
+
+# ============ RUFF CONFIGURATION ============
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

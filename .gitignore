@@ -50,3 +50,9 @@ tmp/
 # pixi environments
 .pixi
 *.egg-info
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# MkDocs build output
+site/
