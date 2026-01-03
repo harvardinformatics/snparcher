@@ -25,6 +25,7 @@ python = ">=3.11"
 snakemake = ">=9.0"
 pandas = "*"
 pyyaml = "*"
+conda = "*"
 
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
@@ -43,8 +44,10 @@ docs = { features = ["docs"], solve-group = "default" }
 [tool.pixi.tasks]
 lint-snakemake = "snakemake --lint"
 test-dry-run = "snakemake -n --configfile .test/ci/config/config.yaml"
+test-simple = "snakemake --snakefile workflow/Snakefile --configfile .test/fastq-to-vcf/config/config.yaml --directory .test/fastq-to-vcf --cores 4 --use-conda vcf"
+test = { depends-on = ["test-simple"] }
 
-# Tasks for dev environment
+# Tasks for dev environment (linting/formatting only)
 [tool.pixi.feature.dev.tasks]
 lint = "ruff check workflow/"
 format = "ruff format workflow/ && snakefmt workflow/"
