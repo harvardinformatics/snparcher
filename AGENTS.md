@@ -99,6 +99,24 @@ Do not create custom utility modules. Use:
 - Standard library
 - Well-maintained third-party packages
 
+### Comments
+
+Avoid comments that state the obvious. Do not use banner-style section comments:
+
+```python
+# Bad - unnecessary banner comments
+# =============================================================================
+# Config Validation
+# =============================================================================
+validate(config, schema="../schemas/config.schema.json")
+
+# Good - code speaks for itself
+validate(config, schema="../schemas/config.schema.json")
+```
+
+Docstrings are preferred over inline comments for functions. Only add comments
+when explaining non-obvious logic or important caveats.
+
 ## Snakemake Standards
 
 ### Version

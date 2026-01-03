@@ -146,3 +146,29 @@ Future CLI will provide entry points for partial runs:
 - `snparcher postprocess`
 
 Design deferred until core workflow refactor is complete.
+
+### Conda Environment Version Pinning
+
+**Problem**: Conda env files (`workflow/envs/*.yml`) currently use unpinned versions
+(`>=` instead of `==`) to support ARM (osx-arm64) testing. This is a tradeoff:
+- Pinned versions: Better reproducibility, but many older bioinformatics packages
+  lack ARM builds
+- Unpinned versions: ARM-compatible, but builds may differ across platforms/time
+
+**Recommended solution: Snakemake Wrappers**
+
+[Snakemake wrappers](https://snakemake-wrappers.readthedocs.io/) bundle tool + conda env
+together, with versions managed by wrapper maintainers. Benefits:
+- Wrapper maintainers handle cross-platform version compatibility
+- Wrappers are automatically tested across platforms
+- Reduces maintenance burden for snpArcher
+- Provides standardized, well-tested implementations
+
+**Migration plan**: Replace custom shell commands with wrappers where available:
+- `bio/bwa/mem` for alignment
+- `bio/fastp` for read filtering
+- `bio/gatk/haplotypecaller` for variant calling
+- `bio/samtools/faidx` for reference indexing
+- etc.
+
+This is tracked in `TODO.md` under "Conda Environment Versions".
