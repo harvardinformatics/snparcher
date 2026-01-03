@@ -28,4 +28,6 @@ jobs:
           cache: false
 
       - name: Run test
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: pixi run test-simple
