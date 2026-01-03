@@ -83,3 +83,66 @@ Document pipeline “modes” that map to future CLI options (e.g., ingest-fastq
 
 Add light import rules (copy/link/validate) that normalize into the same path layout, so downstream rules stay unchanged.
 
+## Decisions Made
+
+The following decisions have been finalized for v2:
+
+### Sample Sheet Format
+
+- **Format**: CSV (familiar to bio users, Excel-editable)
+- **Columns**: `sample_id`, `input_type`, `input`, `library_id` (optional)
+- **Paired FASTQ**: Semicolon-separated in `input` column: `r1.fq.gz;r2.fq.gz`
+- **Input types**: `fastq`, `bam`, `gvcf`, `srr` (fastq/srr implemented first)
+- **Sample ID validation**: `^[A-Za-z0-9_-]+$`
+- **Library ID default**: Uses `sample_id` when not specified
+- **Metadata**: Extra columns allowed (pass-through for QC module)
+
+### Config Structure
+
+- **Reference genome**: Nested under `reference:` with `name`, `path`, `accession`
+- **Single reference per run**: Multi-reference runs no longer supported
+- **Flat structure**: Keep flat-with-comments style for user readability
+- **Schema validation**: JSON Schema via Snakemake's built-in `validate()`
+
+### Wildcards
+
+- **Simplified**: Only `{sample}` and `{library}` wildcards
+- **No `{refGenome}`**: Removed from paths since single-reference per run
+
+## Deferred Decisions
+
+The following items are deferred for later discussion/implementation:
+
+### Reference Genome Caching
+
+The design doc proposes a `ref_cache_dir` and registry abstraction for reference management. This is deferred to avoid scope creep. Current implementation: simple `path` OR `accession` in config.
+
+Future considerations:
+- Cache directory for downloaded references
+- Checksum verification
+- Resolution order: config path → cache → download → error
+
+### SRA RunSelector Integration
+
+Need a helper script or documentation for converting SRA RunSelector output to v2 sample sheet format. This would ease migration for users reanalyzing existing SRA data.
+
+### Postprocessing Sample Sheet
+
+The postprocessing module needs sample inclusion/exclusion and MK ingroup/outgroup designation. Options:
+- Separate `postprocess_samples.csv`
+- Keep in main sample sheet with additional columns
+- Defer until postprocessing module refactor
+
+### Metadata Pass-through to QC
+
+Extra columns in sample sheet (lat, long, population) should be available to QC module. Implementation details deferred until QC module refactor.
+
+### CLI Interface
+
+Future CLI will provide entry points for partial runs:
+- `snparcher ingest-fastq`
+- `snparcher call`
+- `snparcher qc`
+- `snparcher postprocess`
+
+Design deferred until core workflow refactor is complete.
