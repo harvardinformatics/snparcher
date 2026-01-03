@@ -1,64 +1,114 @@
-from snakemake.utils import min_version
-min_version("7.0")
+"""
+snpArcher v2 - Population genomic variant calling workflow.
+
+A Snakemake workflow for generating variant calls from raw sequence data.
+Supports both GATK and Sentieon pipelines.
+"""
 
 configfile: "config/config.yaml"
+
 include: "rules/common.smk"
-include: "rules/sumstats.smk"
-include: "rules/fastq.smk"
-include: "rules/reference.smk"
-include: "rules/mappability.smk"
 
 setup_curlrc()
 onerror: cleanup_curlrc()
 onsuccess: cleanup_curlrc()
 
+include: "rules/reference.smk"
+include: "rules/fastq.smk"
+include: "rules/stats/sumstats.smk"
 
-if config['sentieon']:
-    include: "rules/sentieon.smk"
+if config.get("sentieon", False):
+    include: "rules/align/sentieon.smk"
 else:
-    include: "rules/fastq2bam.smk"
-    if config['intervals']:
-        include: "rules/bam2vcf_gatk_intervals.smk"
-        include: "rules/intervals.smk"
+    include: "rules/align/bwa.smk"
+
+if config.get("sentieon", False):
+    include: "rules/call/sentieon.smk"
+else:
+    if config.get("intervals", False):
+        include: "rules/call/intervals.smk"
+        include: "rules/call/gatk_intervals.smk"
     else:
-        include: "rules/bam2vcf_gatk.smk"
+        include: "rules/call/gatk.smk"
 
-if config['cov_filter']:
-    include: "rules/cov_filter.smk"
+include: "rules/filter/mappability.smk"
 
-module qc:
-    snakefile:
-        "modules/qc/Snakefile"
-    config:
-        config
+if config.get("cov_filter", True):
+    include: "rules/filter/coverage.smk"
 
-use rule * from qc as qc_*
+# TODO: Update modules for v2 sample sheet format
+# module qc:
+#     snakefile:
+#         "modules/qc/Snakefile"
+#     config:
+#         config
+#
+# use rule * from qc as qc_*
+#
+# module mk:
+#     snakefile:
+#         "modules/mk/Snakefile"
+#     config:
+#         config
+#
+# use rule * from mk as mk_*
+#
+# module postprocess:
+#     snakefile:
+#         "modules/postprocess/Snakefile"
+#     config:
+#         config
+#
+# use rule * from postprocess as postprocess_*
+#
+# module trackhub:
+#     snakefile:
+#         "modules/trackhub/Snakefile"
+#     config:
+#         config
+#
+# use rule * from trackhub as trackhub_*
 
-module mk:
-    snakefile:
-        "modules/mk/Snakefile"
-    config:
-        config
 
-use rule * from mk as mk_*
+def get_output():
+    """Determine workflow output based on configuration."""
+    outputs = []
+    outputs.append(f"results/{REF_NAME}_raw.vcf.gz")
+    outputs.append(f"results/{REF_NAME}_raw.vcf.gz.tbi")
+    outputs.append(f"results/summary_stats/{REF_NAME}_bam_sumstats.txt")
+    outputs.append(f"results/{REF_NAME}_callable_sites.bed")
+    return outputs
 
-module postprocess:
-    snakefile:
-        "modules/postprocess/Snakefile"
-    config:
-        config
-
-use rule * from postprocess as postprocess_*
-
-module trackhub:
-    snakefile:
-        "modules/trackhub/Snakefile"
-    config:
-        config
-
-use rule * from trackhub as trackhub_*
 
 rule all:
     input:
-        get_output()
+        get_output(),
     default_target: True
+
+
+rule vcf:
+    input:
+        vcf=f"results/{REF_NAME}_raw.vcf.gz",
+        tbi=f"results/{REF_NAME}_raw.vcf.gz.tbi",
+
+
+rule bams:
+    input:
+        expand("results/bams/{sample}.bam", sample=SAMPLE_IDS),
+        expand("results/bams/{sample}.bam.bai", sample=SAMPLE_IDS),
+
+
+rule gvcfs:
+    input:
+        expand("results/gvcfs/{sample}.g.vcf.gz", sample=SAMPLE_IDS),
+        expand("results/gvcfs/{sample}.g.vcf.gz.tbi", sample=SAMPLE_IDS),
+
+
+rule stats:
+    input:
+        f"results/summary_stats/{REF_NAME}_bam_sumstats.txt",
+
+
+rule callable_sites:
+    input:
+        f"results/{REF_NAME}_callable_sites.bed",

@@ -44,7 +44,7 @@
       "description": "Use Sentieon tools instead of GATK"
     },
     "sentieon_lic": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Path to Sentieon license file"
     },
     "remote_reads": {
@@ -53,11 +53,11 @@
       "description": "Reads are stored in remote location"
     },
     "remote_reads_prefix": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Remote prefix for reads location"
     },
     "bigtmp": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Path for temporary files requiring large disk space"
     },
     "cov_filter": {
@@ -71,8 +71,7 @@
       "description": "Generate UCSC Genome Browser trackhub"
     },
     "trackhub_email": {
-      "type": "string",
-      "format": "email",
+      "type": ["string", "null"],
       "description": "Email address for trackhub (required by UCSC)"
     },
     "mark_duplicates": {
@@ -161,7 +160,7 @@
       "description": "Number of clusters for QC PCA"
     },
     "GoogleAPIKey": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Google Maps API key for QC dashboard"
     },
     "min_depth": {
@@ -206,14 +205,18 @@
       "description": "Upper absolute coverage threshold"
     },
     "cov_threshold_stdev": {
-      "type": "number",
+      "type": ["number", "null"],
       "minimum": 0,
       "description": "Coverage threshold in standard deviations"
     },
     "cov_threshold_rel": {
-      "type": "number",
+      "type": ["number", "null"],
       "minimum": 0,
       "description": "Coverage threshold as relative scaling factor"
+    },
+    "final_prefix": {
+      "type": ["string", "null"],
+      "description": "Prefix for final output files"
     }
   },
   "required": ["samples", "reference"]
