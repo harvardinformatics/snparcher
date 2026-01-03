@@ -100,7 +100,6 @@ rule call_genomicsdb_import:
     resources:
         mem_mb=16000,
         mem_mb_reduced=14400,
-        tmpdir=get_big_temp,
     shell:
         """
         export TILEDB_DISABLE_FILE_LOCKING=1
@@ -141,7 +140,6 @@ rule call_genotype_gvcfs:
     resources:
         mem_mb=16000,
         mem_mb_reduced=14400,
-        tmpdir=get_big_temp,
     shell:
         """
         tar -xf {input.db}

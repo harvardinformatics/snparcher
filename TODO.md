@@ -59,6 +59,21 @@ together, with versions managed upstream. Benefits:
 - [ ] `reference_index` (bwa index) -> `bio/bwa/index` wrapper
 - [ ] `reference_index` (samtools faidx) -> `bio/samtools/faidx` wrapper
 
+## Temp Directory Handling
+
+**Current state:** Removed custom `bigtmp` config and `get_big_temp()` function.
+Rules now use Snakemake's default `resources.tmpdir`.
+
+**Future:** When [snakemake/snakemake#3820](https://github.com/snakemake/snakemake/pull/3820)
+is merged, consider using the new `choose_tmp()` ioutils function for HPC environments
+with heterogeneous temp storage (e.g., some nodes have fast NVMe, others only NFS).
+
+Example usage (once available):
+```yaml
+default-resources:
+  tmpdir: "choose_tmp(['/fast_nvme', '/scratch'])"
+```
+
 ## Design Issues to Address
 
 - [ ] **Sumstats coupling** - stats rules force BAM generation even when starting from GVCF

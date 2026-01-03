@@ -195,14 +195,6 @@ trackhub_email: ""        # Required if trackhub enabled
 
 ## Advanced Options
 
-### bigtmp
-
-Directory for temporary files requiring large disk space. Defaults to system temp directory.
-
-```yaml
-bigtmp: "/scratch/tmp"
-```
-
 ### Remote Reads
 
 For cloud execution with reads in remote storage.

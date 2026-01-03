@@ -21,8 +21,6 @@ rule fastq_download_srr:
         "logs/fastq_download_srr/{sample}/{srr}.txt"
     benchmark:
         "benchmarks/fastq_download_srr/{sample}_{srr}.txt"
-    resources:
-        tmpdir=get_big_temp,
     shell:
         """
         set +e

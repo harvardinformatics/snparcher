@@ -56,10 +56,6 @@
       "type": ["string", "null"],
       "description": "Remote prefix for reads location"
     },
-    "bigtmp": {
-      "type": ["string", "null"],
-      "description": "Path for temporary files requiring large disk space"
-    },
     "cov_filter": {
       "type": "boolean",
       "default": true,

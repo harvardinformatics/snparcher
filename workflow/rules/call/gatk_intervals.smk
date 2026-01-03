@@ -108,8 +108,6 @@ rule call_concat_gvcfs:
         "logs/call_concat_gvcfs/{sample}.txt"
     benchmark:
         "benchmarks/call_concat_gvcfs/{sample}.txt"
-    resources:
-        tmpdir=get_big_temp,
     shell:
         """
         bcftools concat -D -a -Ou {input.gvcfs} 2> {log} \
@@ -169,7 +167,6 @@ rule call_genomicsdb_import_interval:
     resources:
         mem_mb=16000,
         mem_mb_reduced=14400,
-        tmpdir=get_big_temp,
     shell:
         """
         export TILEDB_DISABLE_FILE_LOCKING=1
@@ -210,7 +207,6 @@ rule call_genotype_gvcfs_interval:
     resources:
         mem_mb=16000,
         mem_mb_reduced=14400,
-        tmpdir=get_big_temp,
     shell:
         """
         tar -xf {input.db}
@@ -277,8 +273,6 @@ rule call_gather_vcfs:
     benchmark:
         "benchmarks/call_gather_vcfs.txt"
     threads: 4
-    resources:
-        tmpdir=get_big_temp,
     shell:
         """
         bcftools concat -D -a -Ou {input.vcfs} 2> {log} \

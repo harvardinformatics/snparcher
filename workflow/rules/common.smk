@@ -4,10 +4,7 @@ snpArcher v2 - Common configuration, sample sheet parsing, and helper functions.
 
 import json
 import os
-import random
 import statistics
-import string
-import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -302,16 +299,6 @@ def collect_fastp_stats_input(wildcards):
         sample=wildcards.sample,
         unit=units,
     )
-
-
-def get_big_temp(wildcards):
-    """Get temp directory for rules needing large temp space."""
-    if config.get("bigtmp"):
-        base = config["bigtmp"].rstrip("/")
-        suffix = "".join(random.choices(string.ascii_uppercase, k=12))
-        return f"{base}/{suffix}/"
-    else:
-        return tempfile.gettempdir()
 
 
 def setup_curlrc():

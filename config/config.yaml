@@ -9,7 +9,6 @@ sentieon: False #set to True if you want to use sentieon, False if you want GATK
 sentieon_lic: "" #set to path of sentieon license
 remote_reads: False # Set True if reads are in a location seperate from --default-remote-prefix.
 remote_reads_prefix: "" # set to google bucket prefix where reads live. FOR SNAKEMAKE 7.X.X ONLY.
-bigtmp: "" #Set to a path with lots of free space to use for commands that require large amounts of temp space; defaults to system tmpdir if empty
 cov_filter: True #set to True if you want to include coverage thresholds in the callable sites bed file (default uses mappability only)
 generate_trackhub: True #Set to true if you want to generate a Genome Browser Trackhub. Dependent on postprocessing module.
 trackhub_email: ""
