@@ -36,10 +36,11 @@ logs/
 *_dryrun.txt
 results/
 tmp/
-.test/ecoli/benchmarks/
-.test/ecoli/logs/
-.test/ecoli/results/
-.test/ecoli/data/
+# Test outputs
+.test/*/benchmarks/
+.test/*/logs/
+.test/*/results/
+.test/*/.snakemake/
 *.lic
 .test/ci/results
 .test/ci/benchmarks
@@ -50,3 +51,9 @@ tmp/
 # pixi environments
 .pixi
 *.egg-info
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# MkDocs build output
+site/
