@@ -1,569 +1,483 @@
-import sys
+"""
+snpArcher v2 - Common configuration, sample sheet parsing, and helper functions.
+"""
+
 import os
-import tempfile
-import random
-import string
 import statistics
-import json
 from pathlib import Path
-from collections import defaultdict
 
 import pandas as pd
-import snparcher_utils
-from yaml import safe_load
-from pkg_resources import parse_version
+from snakemake.utils import min_version, validate
 
-# Can't be less than 7 cuz of min version in snakefile
-SNAKEMAKE_VERSION = 8 if parse_version(snakemake.__version__) >= parse_version("8.0.0") else 7
-logger.warning(f"snpArcher: Using Snakemake {snakemake.__version__}")
-if SNAKEMAKE_VERSION >= 8:
-    DEFAULT_STORAGE_PREFIX = StorageSettings.default_storage_prefix if StorageSettings.default_storage_prefix is not None else ""
-else:
-    # backwards compatability w/ snakemake <= 7
-    DEFAULT_STORAGE_PREFIX = workflow.default_remote_prefix
-    if config["remote_reads"]:
-        from snakemake.remote.GS import RemoteProvider as GSRemoteProvider
-        GS = GSRemoteProvider()
-        GS_READS_PREFIX = config['remote_reads_prefix']
+min_version("9.0")
 
-samples = snparcher_utils.parse_sample_sheet(config)
+validate(config, schema="../schemas/config.schema.json")
 
+# =============================================================================
+# Config Defaults
+# =============================================================================
+config.setdefault("variant_calling", {})
+config["variant_calling"].setdefault("tool", "gatk")
+config["variant_calling"].setdefault("gatk", {})
+config["variant_calling"]["gatk"].setdefault("min_pruning", 1)
+config["variant_calling"]["gatk"].setdefault("min_dangling", 1)
+config["variant_calling"]["gatk"].setdefault("het_prior", 0.005)
+config["variant_calling"]["gatk"].setdefault("ploidy", 2)
+config["variant_calling"].setdefault("sentieon", {})
+config["variant_calling"]["sentieon"].setdefault("license", "")
 
-def get_output():
-    
-    if config["final_prefix"] == "":
-        raise (WorkflowError("'final_prefix' is not set in config."))
-    out = []
-    genomes = samples["refGenome"].unique().tolist()
-    sample_counts = samples.drop_duplicates(
-        subset=["BioSample", "refGenome"]
-    ).value_counts(
-        subset=["refGenome"]
-    )  # get BioSample for each refGenome
-    out.extend
-    if config["final_prefix"] == "":
-        raise (WorkflowError("'final_prefix' is not set in config."))
-    out = []
-    
-    sample_counts = samples.drop_duplicates(
-        subset=["BioSample", "refGenome"]
-    ).value_counts(
-        subset=["refGenome"]
-    )  # get BioSample for each refGenome
-    
-    for ref in genomes:
-        # Workaround for Snakemake issue 2762. There is problem with running nested checkpoints in snakemake8. Adding mapfile in rule all forces gvcf interval checkpoint to run.
-        # This is actually kind of a good thing to do since it makes dryrun more clear (shows all bam>gvcf jobs now).
-        if not config["sentieon"]:
-            out.extend(expand("results/{refGenome}/genomics_db_import/DB_mapfile.txt", refGenome=ref))
-        out.extend(
-            expand( "results/{refGenome}/{prefix}_raw.vcf.gz",refGenome=ref, prefix=config["final_prefix"]))
-        out.extend(
-            expand( "results/{refGenome}/summary_stats/{prefix}_bam_sumstats.txt", refGenome=ref, prefix=config["final_prefix"]))
-        out.extend(
-            expand("results/{refGenome}/{prefix}_callable_sites.bed", refGenome=ref, prefix=config["final_prefix"]))
-        if sample_counts[ref] > 2:
-            out.append(rules.qc_all.input)
-        if "SampleType" in samples.columns:
-            out.append(rules.postprocess_all.input)
-            if all(
-                i in samples["SampleType"].tolist() for i in ["ingroup", "outgroup"]
-            ):
-                out.append(rules.mk_all.input)
-            if config["generate_trackhub"]:
-                if not config["trackhub_email"]:
-                    raise (
-                        WorkflowError(
-                            "If generating trackhub, you must provide an email in the config file."
-                        )
-                    )
-                out.append(rules.trackhub_all.input)
-    return out
+config.setdefault("intervals", {})
+config["intervals"].setdefault("enabled", True)
+config["intervals"].setdefault("min_nmer", 500)
+config["intervals"].setdefault("num_gvcf_intervals", 50)
+config["intervals"].setdefault("db_scatter_factor", 0.15)
+
+config.setdefault("reads", {})
+config["reads"].setdefault("mark_duplicates", True)
+config["reads"].setdefault("sort", False)
+
+config.setdefault("remote_reads", {})
+config["remote_reads"].setdefault("enabled", False)
+config["remote_reads"].setdefault("prefix", "")
+
+config.setdefault("callable_sites", {})
+config["callable_sites"].setdefault("coverage", {})
+config["callable_sites"]["coverage"].setdefault("enabled", True)
+config["callable_sites"]["coverage"].setdefault("stdev", 2)
+config["callable_sites"]["coverage"].setdefault("merge_distance", 100)
+config["callable_sites"].setdefault("mappability", {})
+config["callable_sites"]["mappability"].setdefault("enabled", True)
+config["callable_sites"]["mappability"].setdefault("min_score", 1)
+config["callable_sites"]["mappability"].setdefault("kmer", 150)
+config["callable_sites"]["mappability"].setdefault("merge_distance", 100)
+
+config.setdefault("normalize_gvcfs", True)
+
+REF_NAME = config["reference"]["name"]
+REF_PATH = config["reference"].get("path")
+REF_ACCESSION = config["reference"].get("accession")
+REF_FILE = f"{REF_NAME}.fna.gz"  # Reference filename (bgzip-compressed)
+
+samples = pd.read_csv(config["samples"])
+validate(samples, schema="../schemas/samples.schema.json")
 
 
-def merge_bams_input(wc):
+def _validate_library_ids_for_multi_row_samples(df: pd.DataFrame) -> None:
+    """Error if a sample_id appears multiple times without explicit library_id."""
+    sample_counts = df.groupby("sample_id").size()
+    multi_row_samples = sample_counts[sample_counts > 1].index.tolist()
+
+    if not multi_row_samples:
+        return
+
+    has_library_col = "library_id" in df.columns
+
+    for sample_id in multi_row_samples:
+        sample_rows = df[df["sample_id"] == sample_id]
+        if has_library_col:
+            missing_mask = sample_rows["library_id"].isna() | (sample_rows["library_id"] == "")
+        else:
+            missing_mask = pd.Series([True] * len(sample_rows), index=sample_rows.index)
+
+        if missing_mask.any():
+            missing_indices = missing_mask[missing_mask].index.tolist()
+            raise ValueError(
+                f"Sample '{sample_id}' has {len(sample_rows)} rows but is missing "
+                f"library_id on rows {missing_indices}. "
+                f"When a sample has multiple rows, library_id must be specified for all rows."
+            )
+
+
+def _validate_no_mixed_input_types(df: pd.DataFrame) -> None:
+    """Error if a sample_id has rows with different input_types."""
+    for sample_id, group in df.groupby("sample_id"):
+        input_types = group["input_type"].unique()
+        if len(input_types) > 1:
+            raise ValueError(
+                f"Sample '{sample_id}' has mixed input_types: {', '.join(input_types)}. "
+                f"All rows for a sample must have the same input_type."
+            )
+
+
+def _validate_no_duplicate_rows(df: pd.DataFrame) -> None:
+    """Error if exact duplicate rows exist (same sample_id + library_id + input)."""
+    cols = ["sample_id", "input"]
+    if "library_id" in df.columns:
+        cols.append("library_id")
+
+    duplicates = df[df.duplicated(subset=cols, keep=False)]
+    if not duplicates.empty:
+        first_dup = duplicates.iloc[0]
+        lib_info = f", library_id='{first_dup['library_id']}'" if "library_id" in cols else ""
+        raise ValueError(
+            f"Duplicate row detected: sample_id='{first_dup['sample_id']}'{lib_info}, "
+            f"input='{first_dup['input']}'"
+        )
+
+
+def _fill_missing_library_ids(df: pd.DataFrame) -> pd.DataFrame:
+    """Fill missing library_id values with sample_id (only for single-row samples)."""
+    df = df.copy()
+    if "library_id" not in df.columns:
+        df["library_id"] = df["sample_id"]
+    else:
+        mask = df["library_id"].isna() | (df["library_id"] == "")
+        df.loc[mask, "library_id"] = df.loc[mask, "sample_id"]
+    return df
+
+
+def _assign_unit_ids(df: pd.DataFrame) -> pd.DataFrame:
+    """Assign sequential unit IDs (0, 1, 2...) within each sample."""
+    df = df.copy()
+    df["_unit_id"] = df.groupby("sample_id").cumcount()
+    return df
+
+
+def _parse_fastq_paths(df: pd.DataFrame) -> pd.DataFrame:
+    """Parse semicolon-separated FASTQ paths into _fq1 and _fq2 columns."""
+    df = df.copy()
+    fq1_list = []
+    fq2_list = []
+
+    for _, row in df.iterrows():
+        if row["input_type"] == "fastq":
+            parts = row["input"].split(";")
+            if len(parts) != 2:
+                raise ValueError(
+                    f"Invalid fastq input for {row['sample_id']}: "
+                    f"expected 'r1;r2' format, got '{row['input']}'"
+                )
+            fq1_list.append(parts[0].strip())
+            fq2_list.append(parts[1].strip())
+        else:
+            fq1_list.append(None)
+            fq2_list.append(None)
+
+    df["_fq1"] = fq1_list
+    df["_fq2"] = fq2_list
+    return df
+
+
+_validate_library_ids_for_multi_row_samples(samples)
+_validate_no_mixed_input_types(samples)
+_validate_no_duplicate_rows(samples)
+
+samples = _fill_missing_library_ids(samples)
+samples = _assign_unit_ids(samples)
+samples = _parse_fastq_paths(samples)
+
+SAMPLE_IDS = samples["sample_id"].unique().tolist()
+
+
+# =============================================================================
+# Sample Type Infrastructure
+# =============================================================================
+def get_sample_input_type(sample_id: str) -> str:
+    """Get the input type for a sample (all rows must have same type)."""
+    return samples.loc[samples["sample_id"] == sample_id, "input_type"].iloc[0]
+
+
+def get_samples_by_type(input_type: str) -> list[str]:
+    """Get list of sample IDs with a specific input type."""
+    mask = samples["input_type"] == input_type
+    return samples.loc[mask, "sample_id"].unique().tolist()
+
+
+# Sample lists by input type for routing
+FASTQ_SAMPLES = get_samples_by_type("fastq")
+SRR_SAMPLES = get_samples_by_type("srr")
+BAM_SAMPLES = get_samples_by_type("bam")
+GVCF_SAMPLES = get_samples_by_type("gvcf")
+
+# Samples requiring alignment (fastq + srr)
+ALIGN_SAMPLES = FASTQ_SAMPLES + SRR_SAMPLES
+
+# Samples with BAM files (generated or provided, not GVCF-only)
+BAM_REQUIRED_SAMPLES = ALIGN_SAMPLES + BAM_SAMPLES
+
+
+def get_provided_bam(wildcards) -> dict[str, str]:
+    """Get user-provided BAM path for BAM input type samples."""
+    row = samples.loc[samples["sample_id"] == wildcards.sample].iloc[0]
+    if row["input_type"] != "bam":
+        raise ValueError(f"Sample {wildcards.sample} is not BAM input type")
+    bam_path = row["input"]
+    return {"bam": bam_path, "bai": f"{bam_path}.bai"}
+
+
+def get_provided_gvcf(wildcards) -> dict[str, str]:
+    """Get user-provided GVCF path for GVCF input type samples."""
+    row = samples.loc[samples["sample_id"] == wildcards.sample].iloc[0]
+    if row["input_type"] != "gvcf":
+        raise ValueError(f"Sample {wildcards.sample} is not GVCF input type")
+    gvcf_path = row["input"]
+    return {"gvcf": gvcf_path, "tbi": f"{gvcf_path}.tbi"}
+
+
+wildcard_constraints:
+    sample="[A-Za-z0-9_-]+",
+    unit="[0-9]+",
+
+
+def get_sample_units(sample_id: str) -> list[int]:
+    """Get all unit IDs for a sample."""
+    return samples.loc[samples["sample_id"] == sample_id, "_unit_id"].tolist()
+
+
+def get_sample_libraries(sample_id: str) -> list[str]:
+    """Get unique library IDs for a sample."""
+    return samples.loc[samples["sample_id"] == sample_id, "library_id"].unique().tolist()
+
+
+def get_units_for_library(sample_id: str, library_id: str) -> list[int]:
+    """Get unit IDs for a specific sample+library combination."""
+    mask = (samples["sample_id"] == sample_id) & (samples["library_id"] == library_id)
+    return samples.loc[mask, "_unit_id"].tolist()
+
+
+def get_unit_row(sample_id: str, unit_id: int) -> pd.Series:
+    """Get the sample sheet row for a specific sample+unit."""
+    mask = (samples["sample_id"] == sample_id) & (samples["_unit_id"] == unit_id)
+    return samples.loc[mask].iloc[0]
+
+
+def get_ref_path():
+    """Get the reference genome path."""
+    if REF_PATH:
+        return REF_PATH
+    elif REF_ACCESSION:
+        return f"results/reference/{REF_FILE}"
+    else:
+        raise ValueError("No reference path or accession specified in config")
+
+
+# =============================================================================
+# Reference File Input Functions
+# =============================================================================
+def get_ref_bundle(wildcards=None) -> dict[str, str]:
+    """Get all reference files as a bundle for rule inputs.
+
+    Usage:
+        input:
+            unpack(get_ref_bundle),  # Unpacks to ref=, fai=, dictf=
+    """
+    return {
+        "ref": f"results/reference/{REF_FILE}",
+        "fai": f"results/reference/{REF_FILE}.fai",
+        "dictf": f"results/reference/{REF_NAME}.dict",
+    }
+
+
+def get_ref_with_bwa(wildcards=None) -> dict[str, str | list[str]]:
+    """Get reference files plus BWA indexes."""
+    bundle = get_ref_bundle()
+    bundle["bwa_idx"] = expand(
+        f"results/reference/{REF_FILE}.{{ext}}",
+        ext=["sa", "pac", "bwt", "ann", "amb"],
+    )
+    return bundle
+
+
+def get_reads(wildcards):
+    """Get read files for a sample unit."""
+    row = get_unit_row(wildcards.sample, int(wildcards.unit))
+
+    if row["input_type"] == "fastq":
+        r1 = row["_fq1"]
+        r2 = row["_fq2"]
+
+        if config["remote_reads"]["enabled"]:
+            return {"r1": storage(r1), "r2": storage(r2)}
+
+        if not (os.path.exists(r1) and os.path.exists(r2)):
+            raise WorkflowError(
+                f"FASTQ files not found for {wildcards.sample} unit {wildcards.unit}: {r1}, {r2}"
+            )
+        return {"r1": r1, "r2": r2}
+
+    elif row["input_type"] == "srr":
+        srr = row["input"]
+        return {
+            "r1": f"results/fastq/{wildcards.sample}/{srr}_1.fastq.gz",
+            "r2": f"results/fastq/{wildcards.sample}/{srr}_2.fastq.gz",
+        }
+
+    else:
+        raise ValueError(f"Unsupported input_type: {row['input_type']}")
+
+
+def get_reads_fastp(wildcards):
+    """Get reads for fastp, optionally sorted."""
+    if config["reads"]["sort"]:
+        return {
+            "r1": f"results/sorted_reads/{wildcards.sample}/{wildcards.unit}_1.fastq.gz",
+            "r2": f"results/sorted_reads/{wildcards.sample}/{wildcards.unit}_2.fastq.gz",
+        }
+    else:
+        return get_reads(wildcards)
+
+
+def get_read_group(wildcards):
+    """Generate read group string for BWA."""
+    row = get_unit_row(wildcards.sample, int(wildcards.unit))
+    lib = row["library_id"]
+    return rf"'@RG\tID:{lib}_{wildcards.unit}\tSM:{wildcards.sample}\tLB:{lib}\tPL:ILLUMINA'"
+
+
+def get_unit_bams(wildcards):
+    """Get all pre-merge BAM files for a sample."""
+    units = get_sample_units(wildcards.sample)
     return expand(
-        "results/{{refGenome}}/bams/preMerge/{{sample}}/{run}.bam",
-        run=samples.loc[samples["BioSample"] == wc.sample]["Run"].tolist(),
+        "results/bams/preMerge/{sample}/{unit}.bam",
+        sample=wildcards.sample,
+        unit=units,
     )
 
+
+def get_dedup_input(wildcards):
+    """Get BAM input for deduplication."""
+    units = get_sample_units(wildcards.sample)
+
+    if len(units) == 1:
+        return {
+            "bam": f"results/bams/preMerge/{wildcards.sample}/{units[0]}.bam",
+            "bai": f"results/bams/preMerge/{wildcards.sample}/{units[0]}.bam.bai",
+        }
+    else:
+        return {
+            "bam": f"results/bams/merged/{wildcards.sample}.bam",
+            "bai": f"results/bams/merged/{wildcards.sample}.bam.bai",
+        }
+
+
+def get_final_bam(wildcards):
+    """Get final BAM path for a sample.
+
+    Routes based on input type:
+    - BAM input: returns symlinked BAM path in results/bams/
+    - fastq/srr: returns workflow-generated BAM
+
+    Note: This function should not be called for GVCF samples.
+    Use wildcard constraints to prevent GVCF samples from reaching rules that need BAMs.
+    """
+    input_type = get_sample_input_type(wildcards.sample)
+
+    if input_type == "bam":
+        # BAM samples use symlinked BAM in results/bams/
+        return {
+            "bam": f"results/bams/{wildcards.sample}.bam",
+            "bai": f"results/bams/{wildcards.sample}.bam.bai",
+        }
+
+    # fastq/srr samples use workflow-generated BAM
+    if config["reads"]["mark_duplicates"]:
+        return {
+            "bam": f"results/bams/{wildcards.sample}.bam",
+            "bai": f"results/bams/{wildcards.sample}.bam.bai",
+        }
+    else:
+        return get_dedup_input(wildcards)
+
+
+def get_coverage_d4_files(wildcards=None):
+    return {
+        "d4": expand("results/callable_sites/{sample}.per-base.d4.gz", sample=SAMPLE_IDS),
+        "d4gzi": expand("results/callable_sites/{sample}.per-base.d4.gz.gzi", sample=SAMPLE_IDS),
+    }
+
+
+def get_mosdepth_summary_files():
+    return expand("results/callable_sites/{sample}.mosdepth.summary.txt", sample=SAMPLE_IDS)
+
+
+def get_java_mem(wildcards, resources):
+    """Calculate Java heap size from resources.mem_mb with 10% overhead for JVM.
+
+    Use this as a params function to automatically calculate the Java heap size
+    based on the mem_mb resource. This removes the need to manually specify
+    mem_mb_reduced in rules.
+
+    Args:
+        wildcards: Snakemake wildcards object (unused, required for params signature)
+        resources: Snakemake resources object
+
+    Returns:
+        Java heap size in MB as integer (90% of mem_mb)
+
+    Example:
+        rule example:
+            resources:
+                mem_mb=8000,
+            params:
+                java_mem=get_java_mem,
+            shell:
+                "gatk Tool --java-options '-Xmx{params.java_mem}m' ..."
+    """
+    import math
+
+    mem_mb = getattr(resources, "mem_mb", 4096)
+    return math.floor(mem_mb * 0.9)
+
+
 def setup_curlrc():
+    """Add -L flag to curlrc for pyd4 remote access."""
     curlrc_path = Path("~/.curlrc").expanduser()
     marker = "# Added by snpArcher"
     entry = f"-L {marker}\n"
+
     if curlrc_path.exists():
         with curlrc_path.open("r+") as f:
             if "-L" not in f.read():
                 f.write(f"\n{entry}\n")
-                logger.info(f"Added -L to {curlrc_path} for pyd4")
-            
     else:
         with curlrc_path.open("a+") as f:
             f.write(f"{entry}\n")
 
+
 def cleanup_curlrc():
+    """Remove snpArcher-added -L flag from curlrc."""
     curlrc_path = Path("~/.curlrc").expanduser()
     marker = "# Added by snpArcher"
     entry = f"-L {marker}\n"
-    logger.info(f"Removing -L we added from {curlrc_path}...")
+
     if curlrc_path.exists():
         with curlrc_path.open("r") as f:
             lines = f.readlines()
-            # remove entry if its there
-            new_lines = [line for line in lines if line.strip() != entry.strip()]
-            if len(new_lines) == 0:
-                # our entry was only thing there, we can delete .curlrc
-                curlrc_path.unlink()
-            else:
-            # write back any options that were there.
-                with curlrc_path.open("w") as f:
-                    f.writelines(new_lines)
-
-def get_ref(wildcards):
-    
-    if "refPath" in samples.columns:
-        _refs = (
-            samples.loc[(samples["refGenome"] == wildcards.refGenome)]["refPath"]
-            .dropna()
-            .unique()
-            .tolist()
-        )             
-        if _refs:
-            return _refs
-    # if not user-specified refpath, force MissingInputError in copy_ref with dummyfile, which allows download_ref to run b/c of ruleorder.
-    logger.warning(f"snpArcher: refPath specified in sample sheet header, but no path provided for refGenome '{wildcards.refGenome}'\n" + 
-                    f"Will try to download '{wildcards.refGenome}' from NCBI. If this is a genome accession, you can ignore this warning.")
-    return []
-
-def get_bams(wc):
-    out = {"bam": None, "bai": None}
-    if config["mark_duplicates"]:
-        out["bam"] = "results/{refGenome}/bams/{sample}_final.bam"
-        out["bai"] = "results/{refGenome}/bams/{sample}_final.bam.bai"
-        return out
-    else:
-        return dedup_input(wc)
-
-def sentieon_combine_gvcf_cmd_line(wc):
-    gvcfs = sentieon_combine_gvcf_input(wc)["gvcfs"]
-    return " ".join(["-v " + gvcf for gvcf in gvcfs])
+        new_lines = [line for line in lines if line.strip() != entry.strip()]
+        if len(new_lines) == 0:
+            curlrc_path.unlink()
+        else:
+            with curlrc_path.open("w") as f:
+                f.writelines(new_lines)
 
 
-def get_interval_gvcfs(wc):
-    checkpoint_output = checkpoints.create_gvcf_intervals.get(**wc).output[0]
-    with checkpoint_output.open() as f:
-        lines = [l.strip() for l in f.readlines()]
-    list_files = [os.path.basename(x) for x in lines]
-    list_numbers = [f.replace("-scattered.interval_list", "") for f in list_files]
-    gvcfs = expand(
-        "results/{{refGenome}}/interval_gvcfs/{{sample}}/{l}.raw.g.vcf.gz",
-        l=list_numbers,
-    )
+def collect_cov_stats(cov_sum_files):
+    """Parse mosdepth coverage summary files."""
+    sample_cov = {}
 
-    return gvcfs
+    for fn in cov_sum_files:
+        with open(fn, "r") as f:
+            for line in f:
+                if "mean" in line:
+                    continue
+                fields = line.split()
+                chrom = fields[0]
+                cov = float(fields[3])
 
-
-def get_interval_gvcfs_idx(wc):
-    tbis = [f + ".tbi" for f in get_interval_gvcfs(wc)]
-    return tbis
-
-
-def get_db_interval_count(wc):
-    _samples = (
-        samples.loc[(samples["refGenome"] == wc.refGenome)]["BioSample"]
-        .unique()
-        .tolist()
-    )
-    out = max(
-        int((config["db_scatter_factor"]) * len(_samples) * config["num_gvcf_intervals"]),1)
-    return out
-
-
-def get_interval_vcfs(wc):
-    checkpoint_output = checkpoints.create_db_intervals.get(**wc).output[0]
-    with checkpoint_output.open() as f:
-        lines = [l.strip() for l in f.readlines()]
-    list_files = [os.path.basename(x) for x in lines]
-
-    list_numbers = [f.replace("-scattered.interval_list", "") for f in list_files]
-    vcfs = expand("results/{{refGenome}}/vcfs/intervals/filtered_L{l}.vcf.gz", l=list_numbers)
-
-    return vcfs
-
-
-def get_interval_vcfs_idx(wc):
-    tbis = [f + ".tbi" for f in get_interval_vcfs(wc)]
-    return tbis
-
-
-def get_gvcfs_db(wc):
-    _samples = samples.loc[(samples["refGenome"] == wc.refGenome)]["BioSample"].unique().tolist()
-    gvcfs = expand("results/{{refGenome}}/gvcfs/{sample}.g.vcf.gz", sample=_samples)
-    tbis = expand("results/{{refGenome}}/gvcfs/{sample}.g.vcf.gz.tbi", sample=_samples)
-    return {"gvcfs": gvcfs, "tbis": tbis}
-
-
-def dedup_input(wc):
-    runs = samples.loc[samples["BioSample"] == wc.sample]["Run"].tolist()
-
-    if len(runs) == 1:
-        bam = expand("results/{{refGenome}}/bams/preMerge/{{sample}}/{run}.bam", run=runs)
-        bai = expand("results/{{refGenome}}/bams/preMerge/{{sample}}/{run}.bam.bai", run=runs)
-    else:
-        bam = "results/{refGenome}/bams/postMerge/{sample}.bam"
-        bai = "results/{refGenome}/bams/postMerge/{sample}.bam.bai"
-    return {"bam": bam, "bai": bai}
-
-
-def sentieon_combine_gvcf_input(wc):
-    _samples = samples["BioSample"].unique().tolist()
-    gvcfs = expand("results/{{refGenome}}/gvcfs/{sample}.g.vcf.gz", sample=_samples)
-    tbis = expand("results/{{refGenome}}/gvcfs/{sample}.g.vcf.gz.tbi", sample=_samples)
-    return {"gvcfs": gvcfs, "tbis": tbis}
-
-
-def get_reads(wc):
-    """Returns local read files if present. Defaults to SRR if no local reads in sample sheet."""
-    row = samples.loc[samples["Run"] == wc.run]
-    r1 = f"results/data/fastq/{wc.refGenome}/{wc.sample}/{wc.run}_1.fastq.gz"
-    r2 = f"results/data/fastq/{wc.refGenome}/{wc.sample}/{wc.run}_2.fastq.gz"
-    if "fq1" in samples.columns and "fq2" in samples.columns:
-        if row["fq1"].notnull().any() and row["fq2"].notnull().any():
-            r1 = row.fq1.item()
-            r2 = row.fq2.item()
-            if config["remote_reads"]:
-                if SNAKEMAKE_VERSION>=8:
-                    # remote read path must have full remote prefix, eg: gs://reads_bucket/sample1/...
-                    # depends on snakemake>8 to figure out proper remote provider from prefix using storage()
-                    return {"r1": storage(r1), "r2": storage(r2)}
+                if chrom in sample_cov:
+                    sample_cov[chrom].append(cov)
                 else:
-                    return get_remote_reads(wc)
-            if os.path.exists(row.fq1.item()) and os.path.exists(row.fq2.item()):
-                return {"r1": r1, "r2": r2}
-            else:
-                raise WorkflowError(
-                    f"fq1 and fq2 specified for {wc.sample}, but files were not found."
-                )
-        else:
-            # this allows mixed srr and user-specified paths for reads
-            return {"r1": r1, "r2": r2}
-    else:
-        return {"r1": r1, "r2": r2}
+                    sample_cov[chrom] = [cov]
 
-def get_reads_fastp(wc):
-    if config.get("sort_reads", False):
-        return {"r1":"results/{refGenome}/sorted_reads/{sample}/{run}_1.fastq.gz", "r2":"results/{refGenome}/sorted_reads/{sample}/{run}_2.fastq.gz"}
-    else:
-        return get_reads(wc)
-
-def get_remote_reads(wildcards):
-    """Use this for reads on a different remote bucket than the default. For backwards compatibility."""
-    # print(wildcards)
-    row = samples.loc[samples["Run"] == wildcards.run]
-    r1 = GS.remote(os.path.join(GS_READS_PREFIX, row.fq1.item()))
-    r2 = GS.remote(os.path.join(GS_READS_PREFIX, row.fq2.item()))
-    return {"r1": r1, "r2": r2}
-
-def collect_fastp_stats_input(wc):
-    return expand(
-        "results/{{refGenome}}/summary_stats/{{sample}}/{run}.fastp.out",
-        run=samples.loc[samples["BioSample"] == wc.sample]["Run"].tolist(),
-    )
-
-
-def get_read_group(wc):
-    """Denote sample name and library_id in read group."""
-    libname = samples.loc[samples["Run"] == wc.run]["LibraryName"].tolist()[0]
-    return r"'@RG\tID:{lib}\tSM:{sample}\tLB:{lib}\tPL:ILLUMINA'".format(
-        sample=wc.sample, lib=libname
-    )
-
-
-def get_input_sumstats(wildcards):
-    _samples = samples.loc[(samples["refGenome"] == wildcards.refGenome)]["BioSample"].unique().tolist()
-    aln = expand("results/{{refGenome}}/summary_stats/{sample}_AlnSumMets.txt", sample=_samples)
-    cov = expand("results/{{refGenome}}/summary_stats/{sample}_coverage.txt", sample=_samples)
-    fastp = expand("results/{{refGenome}}/summary_stats/{sample}_fastp.out", sample=_samples)
-    insert = expand("results/{{refGenome}}/summary_stats/{sample}_insert_metrics.txt",sample=_samples)
-    qd = expand("results/{{refGenome}}/summary_stats/{sample}_qd_metrics.txt", sample=_samples)
-    mq = expand("results/{{refGenome}}/summary_stats/{sample}_mq_metrics.txt", sample=_samples)
-    gc = expand("results/{{refGenome}}/summary_stats/{sample}_gc_metrics.txt", sample=_samples)
-    gc_summary = expand("results/{{refGenome}}/summary_stats/{sample}_gc_summary.txt", sample=_samples)
-    if config["sentieon"]:
-        out = {
-            "alnSumMetsFiles": aln,
-            "fastpFiles": fastp,
-            "coverageFiles": cov,
-            "insert_files": insert,
-            "qc_files": qd,
-            "mq_files": mq,
-            "gc_files": gc,
-            "gc_summary": gc_summary,
-        }
-        return out
-    else:
-        out = {
-            "alnSumMetsFiles": aln,
-            "fastpFiles": fastp,
-            "coverageFiles": cov,
-        }
-        return out
-
-
-def get_input_for_mapfile(wildcards):
-    sample_names = samples.loc[(samples["refGenome"] == wildcards.refGenome)]["BioSample"].unique().tolist()
-    if config["intervals"]:
-        return expand("results/{{refGenome}}/gvcfs_norm/{sample}.g.vcf.gz", sample=sample_names)
-    else:
-        return expand("results/{{refGenome}}/gvcfs/{sample}.g.vcf.gz", sample=sample_names)
-
-
-def get_input_for_coverage(wildcards):
-    # Gets the correct sample given the organism and reference genome for the bedgraph merge step
-    _samples = samples.loc[(samples["refGenome"] == wildcards.refGenome)]["BioSample"].unique().tolist()
-    
-    d4files = expand("results/{{refGenome}}/callable_sites/{sample}.per-base.d4.gz", sample=_samples)
-    d4gzifiles = expand("results/{{refGenome}}/callable_sites/{sample}.per-base.d4.gz.gzi", sample=_samples)
-    return {"d4":d4files, "d4gzi":d4gzifiles}
-
-
-def get_input_covstats(wildcards):
-    # Gets the correct sample given the organism and reference genome for the bedgraph merge step
-    _samples = samples.loc[(samples["refGenome"] == wildcards.refGenome)]["BioSample"].unique().tolist()
-    
-    covstats = expand("results/{{refGenome}}/callable_sites/{sample}.mosdepth.summary.txt",sample=_samples)
-    return {"covStatFiles": covstats}
-
-
-def get_bedgraphs(wildcards):
-    """Snakemake seems to struggle with unpack() and default_remote_prefix. So we have to do this one by one."""
-    _samples = (
-        samples.loc[
-            (samples["Organism"] == wildcards.Organism)
-            & (samples["refGenome"] == wildcards.refGenome)
-        ]["BioSample"]
-        .unique()
-        .tolist()
-    )
-    bedgraphFiles = expand(
-        config["output"]
-        + "{{Organism}}/{{refGenome}}/"
-        + config["bamDir"]
-        + "preMerge/{sample}"
-        + ".sorted.bg",
-        sample=_samples,
-    )
-    return bedgraphFiles
-
-
-def get_big_temp(wildcards):
-    """Sets a temp dir for rules that need more temp space that is typical on some cluster environments. Defaults to system temp dir."""
-    if config["bigtmp"]:
-        if config["bigtmp"].endswith("/"):
-            return (
-                config["bigtmp"]
-                + "".join(random.choices(string.ascii_uppercase, k=12))
-                + "/"
-            )
-        else:
-            return (
-                config["bigtmp"]
-                + "/"
-                + "".join(random.choices(string.ascii_uppercase, k=12))
-                + "/"
-            )
-    else:
-        return tempfile.gettempdir()
-
-
-def collectCovStats(covSumFiles):
-    covStats = {}
-    sampleCov = {}
-
-    for fn in covSumFiles:
-        f = open(fn, "r")
-        for line in f:
-            if "mean" in line:
-                continue
-
-            fields = line.split()
-            chrom = fields[0]
-            cov = float(fields[3])
-
-            if chrom in sampleCov:
-                sampleCov[chrom].append(cov)
-            else:
-                sampleCov[chrom] = [cov]
-
-    for chr in sampleCov:
-        mean_cov = statistics.mean(sampleCov[chr])
+    cov_stats = {}
+    for chrom in sample_cov:
+        mean_cov = statistics.mean(sample_cov[chrom])
         try:
-            std_cov = statistics.stdev(sampleCov[chr])
-        except:
+            std_cov = statistics.stdev(sample_cov[chrom])
+        except statistics.StatisticsError:
             std_cov = "NA"
-        covStats[chr] = {"mean": mean_cov, "stdev": std_cov}
+        cov_stats[chrom] = {"mean": mean_cov, "stdev": std_cov}
 
-    return covStats
-
-
-def collectFastpOutput(fastpFiles):
-    FractionReadsPassFilter = defaultdict(float)
-    NumReadsPassFilter = defaultdict(int)
-
-    for fn in fastpFiles:
-        sample = os.path.basename(fn)
-        sample = sample.replace("_fastp.out", "")
-        
-        
-        with open(fn, "r") as f:
-            data = json.load(f)
-        unfiltered = data["summary"]["before_filtering"]["total_reads"]
-        pass_filter = data["summary"]["after_filtering"]["total_reads"]
-        FractionReadsPassFilter[sample] = float(pass_filter / unfiltered)
-        NumReadsPassFilter[sample] = pass_filter
-
-    return (FractionReadsPassFilter, NumReadsPassFilter)
-
-def combine_fastp_files(fastpFiles, outputfile):
-    unfiltered = 0
-    pass_filter = 0
-    for fn in fastpFiles:
-        with open(fn, "r") as f:
-            data = json.load(f)
-        unfiltered += data["summary"]["before_filtering"]["total_reads"]
-        pass_filter += data["summary"]["after_filtering"]["total_reads"]
-    out = {"summary": {"before_filtering":{"total_reads": unfiltered}, "after_filtering":{"total_reads": pass_filter}}}
-    with open(outputfile[0], "w") as f:
-        json.dump(out, f)
-
-def collectAlnSumMets(alnSumMetsFiles):
-    aln_metrics = defaultdict(dict)
-    for fn in alnSumMetsFiles:
-        sample = os.path.basename(fn)
-        sample = sample.replace("_AlnSumMets.txt", "")
-        with open(fn, "r") as f:
-            lines = f.readlines()
-            total_aligns = int(lines[0].split()[0])
-            num_dups = int(lines[4].split()[0])
-            num_mapped = int(lines[6].split()[0])
-            percent_mapped = lines[7].split()[0].strip("%")
-            percent_proper_paired = lines[14].split()[0].strip("%")
-
-            percent_dups = num_dups / total_aligns if total_aligns != 0 else 0
-            aln_metrics[sample]["Total alignments"] = total_aligns
-            aln_metrics[sample]["Percent Mapped"] = percent_mapped
-            aln_metrics[sample]["Num Duplicates"] = num_dups
-            aln_metrics[sample]["Percent Properly Paired"] = percent_proper_paired
-
-    return aln_metrics
+    return cov_stats
 
 
-def collectCoverageMetrics(coverageFiles):
-    SeqDepths = defaultdict(float)
-    CoveredBases = defaultdict(float)
-
-    for fn in coverageFiles:
-        # these files contain coverage data by scaffold; take weighted average
-        sample = os.path.basename(fn)
-        sample = sample.replace("_coverage.txt", "")
-        numSites = []
-        covbases = 0
-        depths = []  # samtools coverage function prints depth per scaffold
-        f = open(fn, "r")
-        for line in f:
-            if not line.startswith("#rname"):
-                line = line.split()
-                numSites.append(int(line[2]) - int(line[1]) + 1)
-                depths.append(float(line[6]))
-                covbases += float(line[4])
-        f.close()
-        total = sum(numSites)
-        depthsMean = 0
-        for i in range(len(depths)):
-            depthsMean += depths[i] * numSites[i] / (total)
-        SeqDepths[sample] = depthsMean
-        CoveredBases[sample] = covbases
-    return (SeqDepths, CoveredBases)
-
-
-def collect_inserts(files):
-    med_inserts = defaultdict(float)
-    med_insert_std = defaultdict(float)
-
-    for file in files:
-        sample = os.path.basename(file)
-        sample = sample.replace("_insert_metrics.txt", "")
-        with open(file, "r") as f:
-            for i, line in enumerate(f):
-                if i == 2:
-                    line = line.strip().split()
-                    try:
-                        med_inserts[sample] = line[0]
-                        med_insert_std[sample] = line[1]
-                    except IndexError:
-                        continue
-
-    return med_inserts, med_insert_std
-
-
-def printBamSumStats(
-    depths,
-    covered_bases,
-    aln_metrics,
-    FractionReadsPassFilter,
-    NumReadsPassFilter,
-    out_file,
-    med_insert_sizes=None,
-    med_abs_insert_std=None,
-):
-    samples = depths.keys()
-    if med_insert_sizes is None:
-        with open(out_file, "w") as f:
-            print(
-                "Sample\tTotal_Reads\tPercent_mapped\tNum_duplicates\tPercent_properly_paired\tFraction_reads_pass_filter\tNumReadsPassingFilters",
-                file=f,
-            )
-            for samp in samples:
-                print(
-                    samp,
-                    "\t",
-                    aln_metrics[samp]["Total alignments"],
-                    "\t",
-                    aln_metrics[samp]["Percent Mapped"],
-                    "\t",
-                    aln_metrics[samp]["Num Duplicates"],
-                    "\t",
-                    aln_metrics[samp]["Percent Properly Paired"],
-                    "\t",
-                    FractionReadsPassFilter[samp],
-                    "\t",
-                    NumReadsPassFilter[samp],
-                    file=f,
-                )
-    else:
-        with open(out_file, "w") as f:
-            print(
-                "Sample\tTotal_Reads\tPercent_mapped\tNum_duplicates\tPercent_properly_paired\tFraction_reads_pass_filter\tNumReadsPassingFilters\tMedianInsertSize\tMedianAbsDev_InsertSize",
-                file=f,
-            )
-            for samp in samples:
-                print(
-                    samp,
-                    "\t",
-                    aln_metrics[samp]["Total alignments"],
-                    "\t",
-                    aln_metrics[samp]["Percent Mapped"],
-                    "\t",
-                    aln_metrics[samp]["Num Duplicates"],
-                    "\t",
-                    aln_metrics[samp]["Percent Properly Paired"],
-                    "\t",
-                    FractionReadsPassFilter[samp],
-                    "\t",
-                    NumReadsPassFilter[samp],
-                    "\t",
-                    med_insert_sizes[samp],
-                    "\t",
-                    med_abs_insert_std[samp],
-                    file=f,
-                )
