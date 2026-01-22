@@ -4,15 +4,14 @@ samples: "config/samples.csv"
 
 reference:
   name: "my_organism"
-  path: "/data/reference/genome.fna.gz"  # Must be bgzip-compressed
+  source: "/data/reference/genome.fna.gz"  # Can be a refseq/genbank accession, url, or path
 
 variant_calling:
-  tool: "gatk"
+  expected_coverage: "low"  # low | high | auto (future)
+  tool: "gatk" # gatk | sentieon
+  ploidy: 2
   gatk:
-    min_pruning: 1
-    min_dangling: 1
     het_prior: 0.005
-    ploidy: 2
 
 intervals:
   enabled: true
@@ -20,14 +19,9 @@ intervals:
   num_gvcf_intervals: 50
   db_scatter_factor: 0.15
 
-reads:
-  mark_duplicates: true
-  sort: false
-
-remote_reads:
-  enabled: false
 
 callable_sites:
+  generate_bed_file: True
   coverage:
     enabled: true
     stdev: 2
@@ -53,3 +47,4 @@ modules:
       exclude_scaffolds: "mtDNA,Y"
   trackhub:
     enabled: false
+    email: "example@email.com"
