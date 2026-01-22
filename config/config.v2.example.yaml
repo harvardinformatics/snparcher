@@ -1,0 +1,55 @@
+# snpArcher v2 Configuration Example
+
+samples: "config/samples.csv"
+
+reference:
+  name: "my_organism"
+  path: "/data/reference/genome.fna.gz"  # Must be bgzip-compressed
+
+variant_calling:
+  tool: "gatk"
+  gatk:
+    min_pruning: 1
+    min_dangling: 1
+    het_prior: 0.005
+    ploidy: 2
+
+intervals:
+  enabled: true
+  min_nmer: 500
+  num_gvcf_intervals: 50
+  db_scatter_factor: 0.15
+
+reads:
+  mark_duplicates: true
+  sort: false
+
+remote_reads:
+  enabled: false
+
+callable_sites:
+  coverage:
+    enabled: true
+    stdev: 2
+    merge_distance: 100
+  mappability:
+    enabled: true
+    min_score: 1
+    kmer: 150
+    merge_distance: 100
+
+modules:
+  qc:
+    enabled: false
+    clusters: 3
+    min_depth: 2
+    google_api_key: ""
+  postprocess:
+    enabled: false
+    filtering:
+      contig_size: 10000
+      maf: 0.01
+      missingness: 0.75
+      exclude_scaffolds: "mtDNA,Y"
+  trackhub:
+    enabled: false
