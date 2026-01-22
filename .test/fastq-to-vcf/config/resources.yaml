@@ -1,0 +1,127 @@
+########################################
+## RESOURCES ##
+########################################
+
+# fastq download
+get_fastq_pe:
+    threads: 1
+    mem: 4000
+# compress fastq
+gzip_fastq:
+    mem: 4000
+# fastp program
+fastp:
+    threads: 1
+    mem: 4000
+# index reference
+index_ref:
+    mem: 4000
+# genmap map
+genmap:
+    threads: 1
+    mem: 4000
+genmap_sort:
+    mem: 4000
+  # bwa mapping
+bwa_map:
+    threads: 1
+    mem: 4000
+# sort bam with picard's SortSam tool
+sort_bam:
+    mem: 4000
+# mark duplicates with picard's MarkDuplicates
+dedup:
+    threads: 1
+    mem: 4000
+# calculate BAM summaries with samtools and picard
+bam_sumstats:
+    mem: 4000
+merge_bams:
+    mem: 4000
+bedtools:
+    mem: 4000
+    
+###
+# Intervals workflow
+###
+
+# preprocess genome, create intervals
+# picard's create CreateSequenceDictionary, samtools faidx
+process_ref:
+    mem: 4000
+# custom python algo to create intervals
+create_db_intervals:
+  mem: 5000
+
+create_gvcf_intervals:
+  mem: 5000
+
+## Callable sites workflow
+
+# genmap map
+genmap:
+    threads: 1
+    mem: 4000
+genmap_sort:
+    mem: 4000
+compute_d4:
+    mem: 4000
+    threads: 1
+merge_d4:
+    mem: 4000
+callable_bed:
+    mem: 4000
+
+
+## Callable sites workflow
+
+# genmap map
+genmap:
+    threads: 10
+    mem: 10000
+genmap_sort:
+    mem: 4000
+compute_d4:
+    mem: 4000
+    threads: 4
+merge_d4:
+    mem: 10000
+callable_bed:
+    mem: 10000
+
+###
+# bam2vcf workflows
+###
+
+# gatk HaplotypeCaller
+bam2gvcf:
+    mem: 4000
+# gatk GenomicsDBImport
+gvcf2DB:
+    mem: 4000
+# gatk GenotypeGVCFs
+DB2vcf:
+    mem: 4000
+## freebayes program only! ##
+bam2vcf:
+    mem: 4000
+# gatk filterVcfs
+filterVcfs:
+    mem: 4000
+# gatk GatherVcfs
+gatherVcfs:
+    mem: 4000
+# picard SortVcf
+sortVcf:
+    mem: 4000
+# vcftools program
+vcftools:
+    mem: 4000
+# bedtools program
+bedtools:
+    mem: 4000
+# plink
+plink:
+    threads: 1
+admixture:
+    mem: 4000

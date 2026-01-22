@@ -1,6 +1,6 @@
-BioSample,LibraryName,refGenome,Run,Organism,BioProject,SampleType
-test1,test1lib,GCF_000146045.2,SRR22893406,yeast,project,exclude
-test2,test2lib,GCF_000146045.2,SRR22893439,yeast,project,exclude
-test3,test3lib,GCF_000146045.2,SRR22893395,yeast,project
-test4,test4lib,GCF_000146045.2,SRR22893419,yeast,project
-test5,test5lib,GCF_000146045.2,SRR22893436,yeast,project
+sample_id,input_type,input,library_id
+test1,srr,SRR22893406,test1lib
+test2,srr,SRR22893439,test2lib
+test3,srr,SRR22893395,test3lib
+test4,srr,SRR22893419,test4lib
+test5,srr,SRR22893436,test5lib

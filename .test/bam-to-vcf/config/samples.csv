@@ -1,0 +1,3 @@
+sample_id,input_type,input,library_id
+SAMN12676327,bam,data/SAMN12676327.bam,
+SAMN12676342,bam,data/SAMN12676342.bam,
