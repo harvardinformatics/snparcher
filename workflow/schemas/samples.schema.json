@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/harvardinformatics/snpArcher/schemas/samples.schema.json",
+  "title": "snpArcher Sample Sheet Row",
+  "description": "Schema for snpArcher v2 sample sheet row validation",
+  "type": "object",
+  "properties": {
+    "sample_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Sample identifier. Used as sample name in final VCF and output files. Must contain only alphanumeric characters, underscores, and hyphens."
+    },
+    "input_type": {
+      "type": "string",
+      "enum": ["fastq", "bam", "gvcf", "srr"],
+      "description": "Type of input data. Currently supported: fastq, srr. Future: bam, gvcf."
+    },
+    "input": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Input path(s) or SRR accession. For paired-end FASTQ, use semicolon separator: /path/to/r1.fq.gz;/path/to/r2.fq.gz"
+    },
+    "library_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]*$",
+      "description": "Library identifier for duplicate marking. Required when a sample_id appears on multiple rows. Defaults to sample_id if not specified."
+    }
+  },
+  "required": ["sample_id", "input_type", "input"],
+  "additionalProperties": true
+}

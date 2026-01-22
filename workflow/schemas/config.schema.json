@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/harvardinformatics/snpArcher/schemas/config.schema.json",
+  "title": "snpArcher Configuration",
+  "description": "Schema for snpArcher v2 configuration validation",
+  "type": "object",
+  "properties": {
+    "samples": {
+      "type": "string",
+      "description": "Path to sample sheet CSV"
+    },
+    "reference": {
+      "type": "object",
+      "description": "Reference genome configuration",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "description": "Reference genome identifier, used in output file naming"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to reference FASTA file (must be bgzip-compressed)"
+        },
+        "accession": {
+          "type": "string",
+          "description": "NCBI accession for reference genome (alternative to path)"
+        }
+      },
+      "required": ["name"],
+      "oneOf": [
+        {"required": ["path"]},
+        {"required": ["accession"]}
+      ]
+    },
+    "variant_calling": {
+      "type": "object",
+      "description": "Variant calling configuration",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": ["gatk", "sentieon"],
+          "default": "gatk",
+          "description": "Variant calling tool to use"
+        },
+        "gatk": {
+          "type": "object",
+          "description": "GATK variant calling parameters",
+          "properties": {
+            "min_pruning": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "description": "GATK HaplotypeCaller --min-pruning (1 for low cov, 2 for high cov)"
+            },
+            "min_dangling": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "description": "GATK HaplotypeCaller --min-dangling-branch-length (1 for low cov, 4 for high cov)"
+            },
+            "het_prior": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.005,
+              "description": "Prior probability of heterozygous site"
+            },
+            "ploidy": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 2,
+              "description": "Ploidy for variant calling"
+            }
+          }
+        },
+        "sentieon": {
+          "type": "object",
+          "description": "Sentieon variant calling parameters",
+          "properties": {
+            "license": {
+              "type": "string",
+              "description": "Path to Sentieon license file"
+            }
+          }
+        }
+      }
+    },
+    "intervals": {
+      "type": "object",
+      "description": "Interval-based variant calling configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use interval-based approach for variant calling"
+        },
+        "min_nmer": {
+          "type": "integer",
+          "minimum": 50,
+          "default": 500,
+          "description": "Minimum N-mer length for interval splitting"
+        },
+        "num_gvcf_intervals": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 50,
+          "description": "Maximum number of GVCF intervals to create"
+        },
+        "db_scatter_factor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.15,
+          "description": "Scatter factor for GenomicsDB intervals"
+        }
+      }
+    },
+    "reads": {
+      "type": "object",
+      "description": "Read processing options",
+      "properties": {
+        "mark_duplicates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mark optical duplicates before variant calling"
+        },
+        "sort": {
+          "type": "boolean",
+          "default": false,
+          "description": "Sort reads by name before adapter trimming"
+        }
+      }
+    },
+    "remote_reads": {
+      "type": "object",
+      "description": "Remote reads configuration for cloud execution",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reads are stored in remote location"
+        },
+        "prefix": {
+          "type": "string",
+          "default": "",
+          "description": "Remote prefix for reads location"
+        }
+      }
+    },
+    "callable_sites": {
+      "type": "object",
+      "description": "Callable sites filtering configuration",
+      "properties": {
+        "coverage": {
+          "type": "object",
+          "description": "Coverage-based filtering",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable coverage-based filtering of callable sites"
+            },
+            "stdev": {
+              "type": "number",
+              "minimum": 0,
+              "default": 2,
+              "description": "Filter regions outside mean ± N standard deviations"
+            },
+            "merge_distance": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 100,
+              "description": "Merge passing coverage regions separated by this many bp"
+            }
+          }
+        },
+        "mappability": {
+          "type": "object",
+          "description": "Mappability-based filtering",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable mappability-based filtering"
+            },
+            "min_score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 1,
+              "description": "Minimum mappability score for callable sites"
+            },
+            "kmer": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 150,
+              "description": "K-mer size for mappability calculation"
+            },
+            "merge_distance": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 100,
+              "description": "Merge passing mappability regions separated by this many bp"
+            }
+          }
+        }
+      }
+    },
+    "modules": {
+      "type": "object",
+      "description": "Optional module configurations",
+      "properties": {
+        "qc": {
+          "type": "object",
+          "description": "Quality control module",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable QC module"
+            },
+            "clusters": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3,
+              "description": "Number of clusters for PCA"
+            },
+            "min_depth": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 2,
+              "description": "Minimum average depth for QC inclusion"
+            },
+            "google_api_key": {
+              "type": "string",
+              "default": "",
+              "description": "Google Maps API key for geographic plots (optional)"
+            }
+          }
+        },
+        "postprocess": {
+          "type": "object",
+          "description": "Postprocessing module for clean VCF generation",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable postprocessing module"
+            },
+            "filtering": {
+              "type": "object",
+              "description": "VCF filtering parameters",
+              "properties": {
+                "contig_size": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 10000,
+                  "description": "Filter SNPs on contigs smaller than this"
+                },
+                "maf": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 0.5,
+                  "default": 0.01,
+                  "description": "Minimum minor allele frequency"
+                },
+                "missingness": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "default": 0.75,
+                  "description": "Maximum missingness threshold"
+                },
+                "exclude_scaffolds": {
+                  "type": "string",
+                  "default": "mtDNA,Y",
+                  "description": "Comma-separated list of scaffolds to exclude"
+                }
+              }
+            }
+          }
+        },
+        "trackhub": {
+          "type": "object",
+          "description": "UCSC Genome Browser trackhub module",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Generate UCSC Genome Browser trackhub"
+            },
+            "email": {
+              "type": "string",
+              "default": "",
+              "description": "Email address for trackhub (required by UCSC)"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["samples", "reference"]
+}
