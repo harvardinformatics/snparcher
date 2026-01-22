@@ -13,23 +13,19 @@ Rules:
 rule align_sentieon_map:
     """Map paired-end reads using Sentieon BWA."""
     input:
-        ref=f"results/reference/{REF_FILE}",
+        unpack(get_ref_with_bwa),
         r1="results/filtered_fastqs/{sample}/{unit}_1.fastq.gz",
         r2="results/filtered_fastqs/{sample}/{unit}_2.fastq.gz",
-        indexes=expand(
-            f"results/reference/{REF_FILE}.{{ext}}",
-            ext=["sa", "pac", "bwt", "ann", "amb", "fai"],
-        ),
     output:
         bam=temp("results/bams/preMerge/{sample}/{unit}.bam"),
         bai=temp("results/bams/preMerge/{sample}/{unit}.bam.bai"),
     params:
         rg=get_read_group,
-        lic=config.get("sentieon_lic", ""),
+        lic=config["variant_calling"]["sentieon"]["license"],
     conda:
         "../../envs/sentieon.yml"
     log:
-        "logs/align_sentieon_map/{sample}/{unit}.txt"
+        "logs/align_sentieon_map/{sample}/{unit}.txt",
     benchmark:
         "benchmarks/align_sentieon_map/{sample}_{unit}.txt"
     threads: 8
@@ -38,10 +34,10 @@ rule align_sentieon_map:
         export MALLOC_CONF=lg_dirty_mult:-1
         export SENTIEON_LICENSE={params.lic}
         sentieon bwa mem -M -R {params.rg} -t {threads} -K 10000000 \
-            {input.ref} {input.r1} {input.r2} \
+            {input.ref} {input.r1} {input.r2} 2> {log} \
             | sentieon util sort --bam_compression 1 -r {input.ref} \
-                -o {output.bam} -t {threads} --sam2bam -i -
-        samtools index {output.bam} {output.bai}
+                -o {output.bam} -t {threads} --sam2bam -i - 2>> {log}
+        samtools index {output.bam} {output.bai} 2>> {log}
         """
 
 
@@ -55,14 +51,14 @@ rule align_sentieon_merge:
     conda:
         "../../envs/fastq2bam.yml"
     log:
-        "logs/align_sentieon_merge/{sample}.txt"
+        "logs/align_sentieon_merge/{sample}.txt",
     benchmark:
         "benchmarks/align_sentieon_merge/{sample}.txt"
     threads: 4
     shell:
         """
         samtools merge -@ {threads} {output.bam} {input} 2> {log}
-        samtools index {output.bam}
+        samtools index {output.bam} 2>> {log}
         """
 
 
@@ -76,11 +72,11 @@ rule align_sentieon_dedup:
         score=temp("results/summary_stats/{sample}/sentieon_dedup_score.txt"),
         metrics=temp("results/summary_stats/{sample}/sentieon_dedup_metrics.txt"),
     params:
-        lic=config.get("sentieon_lic", ""),
+        lic=config["sentieon_lic"],
     conda:
         "../../envs/sentieon.yml"
     log:
-        "logs/align_sentieon_dedup/{sample}.txt"
+        "logs/align_sentieon_dedup/{sample}.txt",
     benchmark:
         "benchmarks/align_sentieon_dedup/{sample}.txt"
     threads: 8
@@ -88,8 +84,8 @@ rule align_sentieon_dedup:
         """
         export SENTIEON_LICENSE={params.lic}
         sentieon driver -t {threads} -i {input.bam} \
-            --algo LocusCollector --fun score_info {output.score}
+            --algo LocusCollector --fun score_info {output.score} &> {log}
         sentieon driver -t {threads} -i {input.bam} \
             --algo Dedup --score_info {output.score} \
-            --metrics {output.metrics} --bam_compression 1 {output.bam}
+            --metrics {output.metrics} --bam_compression 1 {output.bam} &>> {log}
         """

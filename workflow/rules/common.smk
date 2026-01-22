@@ -2,10 +2,8 @@
 snpArcher v2 - Common configuration, sample sheet parsing, and helper functions.
 """
 
-import json
 import os
 import statistics
-from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +12,46 @@ from snakemake.utils import min_version, validate
 min_version("9.0")
 
 validate(config, schema="../schemas/config.schema.json")
+
+# =============================================================================
+# Config Defaults
+# =============================================================================
+config.setdefault("variant_calling", {})
+config["variant_calling"].setdefault("tool", "gatk")
+config["variant_calling"].setdefault("gatk", {})
+config["variant_calling"]["gatk"].setdefault("min_pruning", 1)
+config["variant_calling"]["gatk"].setdefault("min_dangling", 1)
+config["variant_calling"]["gatk"].setdefault("het_prior", 0.005)
+config["variant_calling"]["gatk"].setdefault("ploidy", 2)
+config["variant_calling"].setdefault("sentieon", {})
+config["variant_calling"]["sentieon"].setdefault("license", "")
+
+config.setdefault("intervals", {})
+config["intervals"].setdefault("enabled", True)
+config["intervals"].setdefault("min_nmer", 500)
+config["intervals"].setdefault("num_gvcf_intervals", 50)
+config["intervals"].setdefault("db_scatter_factor", 0.15)
+
+config.setdefault("reads", {})
+config["reads"].setdefault("mark_duplicates", True)
+config["reads"].setdefault("sort", False)
+
+config.setdefault("remote_reads", {})
+config["remote_reads"].setdefault("enabled", False)
+config["remote_reads"].setdefault("prefix", "")
+
+config.setdefault("callable_sites", {})
+config["callable_sites"].setdefault("coverage", {})
+config["callable_sites"]["coverage"].setdefault("enabled", True)
+config["callable_sites"]["coverage"].setdefault("stdev", 2)
+config["callable_sites"]["coverage"].setdefault("merge_distance", 100)
+config["callable_sites"].setdefault("mappability", {})
+config["callable_sites"]["mappability"].setdefault("enabled", True)
+config["callable_sites"]["mappability"].setdefault("min_score", 1)
+config["callable_sites"]["mappability"].setdefault("kmer", 150)
+config["callable_sites"]["mappability"].setdefault("merge_distance", 100)
+
+config.setdefault("normalize_gvcfs", True)
 
 REF_NAME = config["reference"]["name"]
 REF_PATH = config["reference"].get("path")
@@ -130,6 +168,52 @@ samples = _parse_fastq_paths(samples)
 
 SAMPLE_IDS = samples["sample_id"].unique().tolist()
 
+
+# =============================================================================
+# Sample Type Infrastructure
+# =============================================================================
+def get_sample_input_type(sample_id: str) -> str:
+    """Get the input type for a sample (all rows must have same type)."""
+    return samples.loc[samples["sample_id"] == sample_id, "input_type"].iloc[0]
+
+
+def get_samples_by_type(input_type: str) -> list[str]:
+    """Get list of sample IDs with a specific input type."""
+    mask = samples["input_type"] == input_type
+    return samples.loc[mask, "sample_id"].unique().tolist()
+
+
+# Sample lists by input type for routing
+FASTQ_SAMPLES = get_samples_by_type("fastq")
+SRR_SAMPLES = get_samples_by_type("srr")
+BAM_SAMPLES = get_samples_by_type("bam")
+GVCF_SAMPLES = get_samples_by_type("gvcf")
+
+# Samples requiring alignment (fastq + srr)
+ALIGN_SAMPLES = FASTQ_SAMPLES + SRR_SAMPLES
+
+# Samples with BAM files (generated or provided, not GVCF-only)
+BAM_REQUIRED_SAMPLES = ALIGN_SAMPLES + BAM_SAMPLES
+
+
+def get_provided_bam(wildcards) -> dict[str, str]:
+    """Get user-provided BAM path for BAM input type samples."""
+    row = samples.loc[samples["sample_id"] == wildcards.sample].iloc[0]
+    if row["input_type"] != "bam":
+        raise ValueError(f"Sample {wildcards.sample} is not BAM input type")
+    bam_path = row["input"]
+    return {"bam": bam_path, "bai": f"{bam_path}.bai"}
+
+
+def get_provided_gvcf(wildcards) -> dict[str, str]:
+    """Get user-provided GVCF path for GVCF input type samples."""
+    row = samples.loc[samples["sample_id"] == wildcards.sample].iloc[0]
+    if row["input_type"] != "gvcf":
+        raise ValueError(f"Sample {wildcards.sample} is not GVCF input type")
+    gvcf_path = row["input"]
+    return {"gvcf": gvcf_path, "tbi": f"{gvcf_path}.tbi"}
+
+
 wildcard_constraints:
     sample="[A-Za-z0-9_-]+",
     unit="[0-9]+",
@@ -167,6 +251,33 @@ def get_ref_path():
         raise ValueError("No reference path or accession specified in config")
 
 
+# =============================================================================
+# Reference File Input Functions
+# =============================================================================
+def get_ref_bundle(wildcards=None) -> dict[str, str]:
+    """Get all reference files as a bundle for rule inputs.
+
+    Usage:
+        input:
+            unpack(get_ref_bundle),  # Unpacks to ref=, fai=, dictf=
+    """
+    return {
+        "ref": f"results/reference/{REF_FILE}",
+        "fai": f"results/reference/{REF_FILE}.fai",
+        "dictf": f"results/reference/{REF_NAME}.dict",
+    }
+
+
+def get_ref_with_bwa(wildcards=None) -> dict[str, str | list[str]]:
+    """Get reference files plus BWA indexes."""
+    bundle = get_ref_bundle()
+    bundle["bwa_idx"] = expand(
+        f"results/reference/{REF_FILE}.{{ext}}",
+        ext=["sa", "pac", "bwt", "ann", "amb"],
+    )
+    return bundle
+
+
 def get_reads(wildcards):
     """Get read files for a sample unit."""
     row = get_unit_row(wildcards.sample, int(wildcards.unit))
@@ -175,7 +286,7 @@ def get_reads(wildcards):
         r1 = row["_fq1"]
         r2 = row["_fq2"]
 
-        if config.get("remote_reads", False):
+        if config["remote_reads"]["enabled"]:
             return {"r1": storage(r1), "r2": storage(r2)}
 
         if not (os.path.exists(r1) and os.path.exists(r2)):
@@ -197,7 +308,7 @@ def get_reads(wildcards):
 
 def get_reads_fastp(wildcards):
     """Get reads for fastp, optionally sorted."""
-    if config.get("sort_reads", False):
+    if config["reads"]["sort"]:
         return {
             "r1": f"results/sorted_reads/{wildcards.sample}/{wildcards.unit}_1.fastq.gz",
             "r2": f"results/sorted_reads/{wildcards.sample}/{wildcards.unit}_2.fastq.gz",
@@ -240,8 +351,26 @@ def get_dedup_input(wildcards):
 
 
 def get_final_bam(wildcards):
-    """Get final BAM path for a sample."""
-    if config.get("mark_duplicates", True):
+    """Get final BAM path for a sample.
+
+    Routes based on input type:
+    - BAM input: returns symlinked BAM path in results/bams/
+    - fastq/srr: returns workflow-generated BAM
+
+    Note: This function should not be called for GVCF samples.
+    Use wildcard constraints to prevent GVCF samples from reaching rules that need BAMs.
+    """
+    input_type = get_sample_input_type(wildcards.sample)
+
+    if input_type == "bam":
+        # BAM samples use symlinked BAM in results/bams/
+        return {
+            "bam": f"results/bams/{wildcards.sample}.bam",
+            "bai": f"results/bams/{wildcards.sample}.bam.bai",
+        }
+
+    # fastq/srr samples use workflow-generated BAM
+    if config["reads"]["mark_duplicates"]:
         return {
             "bam": f"results/bams/{wildcards.sample}.bam",
             "bai": f"results/bams/{wildcards.sample}.bam.bai",
@@ -261,44 +390,33 @@ def get_mosdepth_summary_files():
     return expand("results/callable_sites/{sample}.mosdepth.summary.txt", sample=SAMPLE_IDS)
 
 
-def get_sumstats_input(wildcards):
-    aln = expand("results/summary_stats/{sample}_AlnSumMets.txt", sample=SAMPLE_IDS)
-    cov = expand("results/summary_stats/{sample}_coverage.txt", sample=SAMPLE_IDS)
-    fastp = expand("results/summary_stats/{sample}_fastp.out", sample=SAMPLE_IDS)
+def get_java_mem(wildcards, resources):
+    """Calculate Java heap size from resources.mem_mb with 10% overhead for JVM.
 
-    out = {
-        "alnSumMetsFiles": aln,
-        "fastpFiles": fastp,
-        "coverageFiles": cov,
-    }
+    Use this as a params function to automatically calculate the Java heap size
+    based on the mem_mb resource. This removes the need to manually specify
+    mem_mb_reduced in rules.
 
-    if config.get("sentieon", False):
-        out["insert_files"] = expand(
-            "results/summary_stats/{sample}_insert_metrics.txt", sample=SAMPLE_IDS
-        )
-        out["qc_files"] = expand(
-            "results/summary_stats/{sample}_qd_metrics.txt", sample=SAMPLE_IDS
-        )
-        out["mq_files"] = expand(
-            "results/summary_stats/{sample}_mq_metrics.txt", sample=SAMPLE_IDS
-        )
-        out["gc_files"] = expand(
-            "results/summary_stats/{sample}_gc_metrics.txt", sample=SAMPLE_IDS
-        )
-        out["gc_summary"] = expand(
-            "results/summary_stats/{sample}_gc_summary.txt", sample=SAMPLE_IDS
-        )
+    Args:
+        wildcards: Snakemake wildcards object (unused, required for params signature)
+        resources: Snakemake resources object
 
-    return out
+    Returns:
+        Java heap size in MB as integer (90% of mem_mb)
 
+    Example:
+        rule example:
+            resources:
+                mem_mb=8000,
+            params:
+                java_mem=get_java_mem,
+            shell:
+                "gatk Tool --java-options '-Xmx{params.java_mem}m' ..."
+    """
+    import math
 
-def collect_fastp_stats_input(wildcards):
-    units = get_sample_units(wildcards.sample)
-    return expand(
-        "results/summary_stats/{sample}/{unit}.fastp.out",
-        sample=wildcards.sample,
-        unit=units,
-    )
+    mem_mb = getattr(resources, "mem_mb", 4096)
+    return math.floor(mem_mb * 0.9)
 
 
 def setup_curlrc():
@@ -333,11 +451,11 @@ def cleanup_curlrc():
                 f.writelines(new_lines)
 
 
-def collectCovStats(covSumFiles):
+def collect_cov_stats(cov_sum_files):
     """Parse mosdepth coverage summary files."""
-    sampleCov = {}
+    sample_cov = {}
 
-    for fn in covSumFiles:
+    for fn in cov_sum_files:
         with open(fn, "r") as f:
             for line in f:
                 if "mean" in line:
@@ -346,176 +464,20 @@ def collectCovStats(covSumFiles):
                 chrom = fields[0]
                 cov = float(fields[3])
 
-                if chrom in sampleCov:
-                    sampleCov[chrom].append(cov)
+                if chrom in sample_cov:
+                    sample_cov[chrom].append(cov)
                 else:
-                    sampleCov[chrom] = [cov]
+                    sample_cov[chrom] = [cov]
 
-    covStats = {}
-    for chrom in sampleCov:
-        mean_cov = statistics.mean(sampleCov[chrom])
+    cov_stats = {}
+    for chrom in sample_cov:
+        mean_cov = statistics.mean(sample_cov[chrom])
         try:
-            std_cov = statistics.stdev(sampleCov[chrom])
+            std_cov = statistics.stdev(sample_cov[chrom])
         except statistics.StatisticsError:
             std_cov = "NA"
-        covStats[chrom] = {"mean": mean_cov, "stdev": std_cov}
+        cov_stats[chrom] = {"mean": mean_cov, "stdev": std_cov}
 
-    return covStats
-
-
-def collectFastpOutput(fastpFiles):
-    """Parse fastp JSON output files."""
-    FractionReadsPassFilter = defaultdict(float)
-    NumReadsPassFilter = defaultdict(int)
-
-    for fn in fastpFiles:
-        sample = os.path.basename(fn).replace("_fastp.out", "")
-
-        with open(fn, "r") as f:
-            data = json.load(f)
-
-        unfiltered = data["summary"]["before_filtering"]["total_reads"]
-        pass_filter = data["summary"]["after_filtering"]["total_reads"]
-        FractionReadsPassFilter[sample] = float(pass_filter / unfiltered) if unfiltered else 0
-        NumReadsPassFilter[sample] = pass_filter
-
-    return (FractionReadsPassFilter, NumReadsPassFilter)
+    return cov_stats
 
 
-def combine_fastp_files(fastpFiles, outputfile):
-    """Merge multiple fastp outputs into single summary."""
-    unfiltered = 0
-    pass_filter = 0
-
-    for fn in fastpFiles:
-        with open(fn, "r") as f:
-            data = json.load(f)
-        unfiltered += data["summary"]["before_filtering"]["total_reads"]
-        pass_filter += data["summary"]["after_filtering"]["total_reads"]
-
-    out = {
-        "summary": {
-            "before_filtering": {"total_reads": unfiltered},
-            "after_filtering": {"total_reads": pass_filter},
-        }
-    }
-
-    with open(outputfile[0], "w") as f:
-        json.dump(out, f)
-
-
-def collectAlnSumMets(alnSumMetsFiles):
-    """Parse alignment summary metrics files."""
-    aln_metrics = defaultdict(dict)
-
-    for fn in alnSumMetsFiles:
-        sample = os.path.basename(fn).replace("_AlnSumMets.txt", "")
-
-        with open(fn, "r") as f:
-            lines = f.readlines()
-
-        total_aligns = int(lines[0].split()[0])
-        num_dups = int(lines[4].split()[0])
-        percent_mapped = lines[7].split()[0].strip("%")
-        percent_proper_paired = lines[14].split()[0].strip("%")
-
-        aln_metrics[sample]["Total alignments"] = total_aligns
-        aln_metrics[sample]["Percent Mapped"] = percent_mapped
-        aln_metrics[sample]["Num Duplicates"] = num_dups
-        aln_metrics[sample]["Percent Properly Paired"] = percent_proper_paired
-
-    return aln_metrics
-
-
-def collectCoverageMetrics(coverageFiles):
-    """Parse samtools coverage output files."""
-    SeqDepths = defaultdict(float)
-    CoveredBases = defaultdict(float)
-
-    for fn in coverageFiles:
-        sample = os.path.basename(fn).replace("_coverage.txt", "")
-        numSites = []
-        covbases = 0
-        depths = []
-
-        with open(fn, "r") as f:
-            for line in f:
-                if not line.startswith("#rname"):
-                    fields = line.split()
-                    numSites.append(int(fields[2]) - int(fields[1]) + 1)
-                    depths.append(float(fields[6]))
-                    covbases += float(fields[4])
-
-        total = sum(numSites)
-        depthsMean = sum(d * n / total for d, n in zip(depths, numSites)) if total else 0
-        SeqDepths[sample] = depthsMean
-        CoveredBases[sample] = covbases
-
-    return (SeqDepths, CoveredBases)
-
-
-def collect_inserts(files):
-    """Parse insert size metrics files."""
-    med_inserts = defaultdict(float)
-    med_insert_std = defaultdict(float)
-
-    for file in files:
-        sample = os.path.basename(file).replace("_insert_metrics.txt", "")
-
-        with open(file, "r") as f:
-            for i, line in enumerate(f):
-                if i == 2:
-                    fields = line.strip().split()
-                    try:
-                        med_inserts[sample] = fields[0]
-                        med_insert_std[sample] = fields[1]
-                    except IndexError:
-                        continue
-
-    return med_inserts, med_insert_std
-
-
-def printBamSumStats(
-    depths,
-    covered_bases,
-    aln_metrics,
-    FractionReadsPassFilter,
-    NumReadsPassFilter,
-    out_file,
-    med_insert_sizes=None,
-    med_abs_insert_std=None,
-):
-    """Write final summary statistics TSV file."""
-    sample_list = list(depths.keys())
-
-    header = [
-        "Sample",
-        "Total_Reads",
-        "Percent_mapped",
-        "Num_duplicates",
-        "Percent_properly_paired",
-        "Fraction_reads_pass_filter",
-        "NumReadsPassingFilters",
-    ]
-
-    if med_insert_sizes is not None:
-        header.extend(["MedianInsertSize", "MedianAbsDev_InsertSize"])
-
-    with open(out_file, "w") as f:
-        print("\t".join(header), file=f)
-
-        for samp in sample_list:
-            row = [
-                samp,
-                str(aln_metrics[samp]["Total alignments"]),
-                str(aln_metrics[samp]["Percent Mapped"]),
-                str(aln_metrics[samp]["Num Duplicates"]),
-                str(aln_metrics[samp]["Percent Properly Paired"]),
-                str(FractionReadsPassFilter[samp]),
-                str(NumReadsPassFilter[samp]),
-            ]
-
-            if med_insert_sizes is not None:
-                row.extend([str(med_insert_sizes[samp]), str(med_abs_insert_std[samp])])
-
-            print("\t".join(row), file=f)

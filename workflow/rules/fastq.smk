@@ -28,7 +28,7 @@ rule fastq_download_srr:
         rm -rf {wildcards.srr}
         
         # Attempt to get SRA file from NCBI (prefetch) or ENA (wget)
-        prefetch --max-size 1T {wildcards.srr}
+        prefetch --max-size 1T {wildcards.srr} &> {log}
         prefetchExit=$?
         
         if [[ $prefetchExit -ne 0 ]]; then
@@ -36,10 +36,10 @@ rule fastq_download_srr:
                 | grep -Eo '"url": "[^"]*"' \
                 | grep -o '"[^"]*"$' \
                 | grep "fastq" \
-                | xargs curl --remote-name-all --output-dir {params.outdir}
+                | xargs curl --remote-name-all --output-dir {params.outdir} &>> {log}
         else
-            fasterq-dump {wildcards.srr} -O {params.outdir} -e {threads} -t {resources.tmpdir}
-            pigz -p {threads} {params.outdir}{wildcards.srr}*.fastq
+            fasterq-dump {wildcards.srr} -O {params.outdir} -e {threads} -t {resources.tmpdir} &>> {log}
+            pigz -p {threads} {params.outdir}{wildcards.srr}*.fastq &>> {log}
         fi
         
         rm -rf {wildcards.srr}
@@ -73,7 +73,7 @@ rule fastq_fastp:
     output:
         r1="results/filtered_fastqs/{sample}/{unit}_1.fastq.gz",
         r2="results/filtered_fastqs/{sample}/{unit}_2.fastq.gz",
-        json="results/summary_stats/{sample}/{unit}.fastp.out",
+        json="results/fastp/{sample}/{unit}.fastp.json",
     conda:
         "../envs/fastq2bam.yml"
     log:
@@ -90,3 +90,84 @@ rule fastq_fastp:
             -j {output.json} -h /dev/null \
             &> {log}
         """
+
+
+def _get_fastp_jsons(wildcards):
+    """Get all fastp JSON files for a sample's units."""
+    units = get_sample_units(wildcards.sample)
+    return expand(
+        "results/fastp/{sample}/{unit}.fastp.json",
+        sample=wildcards.sample,
+        unit=units,
+    )
+
+
+rule fastq_merge_fastp_stats:
+    """Merge fastp stats across all units for a sample."""
+    input:
+        _get_fastp_jsons,
+    output:
+        "results/fastp/{sample}.fastp.json",
+    run:
+        import json
+
+        total_before = 0
+        total_after = 0
+
+        for fn in input:
+            with open(fn) as f:
+                data = json.load(f)
+            total_before += data["summary"]["before_filtering"]["total_reads"]
+            total_after += data["summary"]["after_filtering"]["total_reads"]
+
+        merged = {
+            "summary": {
+                "before_filtering": {"total_reads": total_before},
+                "after_filtering": {"total_reads": total_after},
+            }
+        }
+
+        with open(output[0], "w") as f:
+            json.dump(merged, f)
+
+
+# =============================================================================
+# External Input Symlink Rules
+# For samples with pre-aligned BAMs or pre-computed GVCFs
+# =============================================================================
+rule link_provided_bam:
+    """Symlink user-provided BAM to results directory for BAM input type samples."""
+    wildcard_constraints:
+        sample="|".join(BAM_SAMPLES) if BAM_SAMPLES else "NOMATCH",
+    input:
+        unpack(get_provided_bam),
+    output:
+        bam="results/bams/{sample}.bam",
+        bai="results/bams/{sample}.bam.bai",
+    log:
+        "logs/link_provided_bam/{sample}.txt",
+    shell:
+        """
+        ln -sf $(realpath {input.bam}) {output.bam} 2> {log}
+        ln -sf $(realpath {input.bai}) {output.bai} 2>> {log}
+        """
+
+
+rule link_provided_gvcf:
+    """Symlink user-provided GVCF to results directory for GVCF input type samples."""
+    wildcard_constraints:
+        sample="|".join(GVCF_SAMPLES) if GVCF_SAMPLES else "NOMATCH",
+    input:
+        unpack(get_provided_gvcf),
+    output:
+        gvcf="results/gvcfs/{sample}.g.vcf.gz",
+        tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
+    log:
+        "logs/link_provided_gvcf/{sample}.txt",
+    shell:
+        """
+        ln -sf $(realpath {input.gvcf}) {output.gvcf} 2> {log}
+        ln -sf $(realpath {input.tbi}) {output.tbi} 2>> {log}
+        """
+
+

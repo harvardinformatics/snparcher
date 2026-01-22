@@ -32,14 +32,13 @@ if REF_ACCESSION:
             "benchmarks/reference_download.txt"
         shell:
             """
-            mkdir -p {params.outdir}
+            mkdir -p {params.outdir} 2> {log}
             datasets download genome accession {params.accession} \
                 --include genome \
-                --filename {params.dataset} \
-            && (7z x {params.dataset} -aoa -o{params.outdir} || unzip -o {params.dataset} -d {params.outdir}) \
-            && cat {params.outdir}/ncbi_dataset/data/{params.accession}/*.fna > {params.uncompressed} \
-            && bgzip -f {params.uncompressed} \
-            2> {log}
+                --filename {params.dataset} &>> {log}
+            (7z x {params.dataset} -aoa -o{params.outdir} || unzip -o {params.dataset} -d {params.outdir}) &>> {log}
+            cat {params.outdir}/ncbi_dataset/data/{params.accession}/*.fna > {params.uncompressed} 2>> {log}
+            bgzip -f {params.uncompressed} &>> {log}
             """
 
 
@@ -81,7 +80,7 @@ rule reference_index:
     threads: 4
     shell:
         """
-        bwa index {input.ref} 2> {log}
-        samtools faidx {input.ref} --output {output.fai} >> {log} 2>&1
-        samtools dict {input.ref} -o {output.dictf} >> {log} 2>&1
+        bwa index {input.ref} &> {log}
+        samtools faidx {input.ref} --output {output.fai} &>> {log}
+        samtools dict {input.ref} -o {output.dictf} &>> {log}
         """

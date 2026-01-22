@@ -44,8 +44,12 @@ docs = { features = ["docs"], solve-group = "default" }
 [tool.pixi.tasks]
 lint-snakemake = "snakemake --lint"
 test-dry-run = "snakemake -n --configfile .test/ci/config/config.yaml"
-test-simple = "snakemake --snakefile workflow/Snakefile --configfile .test/fastq-to-vcf/config/config.yaml --directory .test/fastq-to-vcf --cores 4 --use-conda --show-failed-logs vcf"
+test-simple = "snakemake --snakefile workflow/Snakefile --configfile .test/fastq-to-vcf/config/config.yaml --directory .test/fastq-to-vcf --cores 1 --use-conda --show-failed-logs vcf"
+clean-test-simple = "rm -r .test/fastq-to-vcf/.snakemake .test/fastq-to-vcf/results .test/fastq-to-vcf/logs"
 test = { depends-on = ["test-simple"] }
+
+[tool.pixi.target.osx-arm64.tasks]
+test-simple = "snakemake --snakefile workflow/Snakefile --configfile .test/fastq-to-vcf/config/config-osx-arm64.yaml --directory .test/fastq-to-vcf --cores 1 --use-conda --show-failed-logs vcf"
 
 # Tasks for dev environment (linting/formatting only)
 [tool.pixi.feature.dev.tasks]

@@ -1,42 +1,53 @@
 configfile: "config/config.yaml"
+
+
 include: "common.smk"
 
 
 samples = snparcher_utils.parse_sample_sheet(config)
-REFGENOME = samples['refGenome'].unique().tolist()
+REFGENOME = samples["refGenome"].unique().tolist()
+
 
 rule all:
     input:
-        expand("results/{refGenome}/QC/{prefix}_qc.html", refGenome=REFGENOME, prefix=config['final_prefix'])
+        expand(
+            "results/{refGenome}/QC/{prefix}_qc.html",
+            refGenome=REFGENOME,
+            prefix=config["final_prefix"],
+        ),
+
 
 rule check_fai:
     """
     checks fai file for numeric first column, then do not run plink and rest of workflow if they are all numeric
     """
     input:
-        vcf = "results/{refGenome}/{prefix}_raw.vcf.gz",
-        fai = "results/{refGenome}/data/genome/{refGenome}.fna.fai",
+        vcf="results/{refGenome}/{prefix}_raw.vcf.gz",
+        fai="results/{refGenome}/data/genome/{refGenome}.fna.fai",
     output:
-        faiResult = "results/{refGenome}/QC/{prefix}_fai_tmp.txt"
+        faiResult="results/{refGenome}/QC/{prefix}_fai_tmp.txt",
     run:
         check_contig_names(input.fai, output.faiResult)
 
+
 rule vcftools_individuals:
     input:
-        vcf = "results/{refGenome}/{prefix}_raw.vcf.gz"
+        vcf="results/{refGenome}/{prefix}_raw.vcf.gz",
     output:
-        depth = "results/{refGenome}/QC/{prefix}.idepth",
-        miss = "results/{refGenome}/QC/{prefix}.imiss",
-        samps = "results/{refGenome}/QC/{prefix}.samps.txt",
-        summ = "results/{refGenome}/QC/{prefix}.FILTER.summary",
-        het = "results/{refGenome}/QC/{prefix}.het"
+        depth="results/{refGenome}/QC/{prefix}.idepth",
+        miss="results/{refGenome}/QC/{prefix}.imiss",
+        samps="results/{refGenome}/QC/{prefix}.samps.txt",
+        summ="results/{refGenome}/QC/{prefix}.FILTER.summary",
+        het="results/{refGenome}/QC/{prefix}.het",
     conda:
         "envs/vcftools_individuals.yml"
     params:
-        prefix = lambda wc, input: os.path.join(input.vcf.rsplit("/", 1)[0], "QC", wc.prefix),
-        min_depth = config["min_depth"]
+        prefix=lambda wc, input: os.path.join(
+            input.vcf.rsplit("/", 1)[0], "QC", wc.prefix
+        ),
+        min_depth=config["min_depth"],
     log:
-        "logs/{refGenome}/QC/vcftools_individuals/{prefix}.txt"
+        "logs/{refGenome}/QC/vcftools_individuals/{prefix}.txt",
     shell:
         """
         vcftools --gzvcf {input.vcf} --FILTER-summary --out {params.prefix} &> {log}
@@ -46,25 +57,26 @@ rule vcftools_individuals:
         tail -n +2 {output.depth} | awk '$3>{params.min_depth} {{print $1}}'> {output.samps} 2>> {log}
         """
 
+
 rule subsample_snps:
     input:
-        vcf = "results/{refGenome}/{prefix}_raw.vcf.gz",
-        samps = "results/{refGenome}/QC/{prefix}.samps.txt",
-        fai = "results/{refGenome}/data/genome/{refGenome}.fna.fai",
-        sumstats = "results/{refGenome}/summary_stats/{prefix}_bam_sumstats.txt"
+        vcf="results/{refGenome}/{prefix}_raw.vcf.gz",
+        samps="results/{refGenome}/QC/{prefix}.samps.txt",
+        fai="results/{refGenome}/data/genome/{refGenome}.fna.fai",
+        sumstats="results/{refGenome}/summary_stats/{prefix}_bam_sumstats.txt",
     output:
-        filtered = temp("results/{refGenome}/QC/{prefix}_filtered.vcf.gz"),
-        filtered_idx = temp("results/{refGenome}/QC/{prefix}_filtered.vcf.gz.csi"),
-        pruned = "results/{refGenome}/QC/{prefix}.pruned.vcf.gz",
-        snpqc = "results/{refGenome}/QC/{prefix}_snpqc.txt",
-        fai = "results/{refGenome}/QC/{prefix}.fna.fai",
-        sumstats = "results/{refGenome}/QC/{prefix}_bam_sumstats.txt"
+        filtered=temp("results/{refGenome}/QC/{prefix}_filtered.vcf.gz"),
+        filtered_idx=temp("results/{refGenome}/QC/{prefix}_filtered.vcf.gz.csi"),
+        pruned="results/{refGenome}/QC/{prefix}.pruned.vcf.gz",
+        snpqc="results/{refGenome}/QC/{prefix}_snpqc.txt",
+        fai="results/{refGenome}/QC/{prefix}.fna.fai",
+        sumstats="results/{refGenome}/QC/{prefix}_bam_sumstats.txt",
     conda:
         "envs/subsample_snps.yml"
     params:
-        chr_ex = config["scaffolds_to_exclude"]
+        chr_ex=config["scaffolds_to_exclude"],
     log:
-        "logs/{refGenome}/QC/subsample_snps/{prefix}.txt"
+        "logs/{refGenome}/QC/subsample_snps/{prefix}.txt",
     shell:
         """
         ##first remove filtered sites and retain only biallelic SNPs
@@ -96,28 +108,29 @@ rule subsample_snps:
         cp {input.sumstats} {output.sumstats} &>> {log}
         """
 
+
 rule plink:
     """
     Call plink PCA.
     """
     input:
-        vcf = "results/{refGenome}/QC/{prefix}.pruned.vcf.gz",
-        faiResult = "results/{refGenome}/QC/{prefix}_fai_tmp.txt"        
+        vcf="results/{refGenome}/QC/{prefix}.pruned.vcf.gz",
+        faiResult="results/{refGenome}/QC/{prefix}_fai_tmp.txt",
     params:
-        prefix = lambda wc, input: input.vcf.replace(".pruned.vcf.gz", "")
-    output: 
-        bed = "results/{refGenome}/QC/{prefix}.bed",
-        bim = "results/{refGenome}/QC/{prefix}.bim",
-        fam = "results/{refGenome}/QC/{prefix}.fam",
-        eigenvec = "results/{refGenome}/QC/{prefix}.eigenvec",
-        eigenval = "results/{refGenome}/QC/{prefix}.eigenval",
-        dist = "results/{refGenome}/QC/{prefix}.dist",
-        distid = "results/{refGenome}/QC/{prefix}.dist.id",
-        king = "results/{refGenome}/QC/{prefix}.king"
+        prefix=lambda wc, input: input.vcf.replace(".pruned.vcf.gz", ""),
+    output:
+        bed="results/{refGenome}/QC/{prefix}.bed",
+        bim="results/{refGenome}/QC/{prefix}.bim",
+        fam="results/{refGenome}/QC/{prefix}.fam",
+        eigenvec="results/{refGenome}/QC/{prefix}.eigenvec",
+        eigenval="results/{refGenome}/QC/{prefix}.eigenval",
+        dist="results/{refGenome}/QC/{prefix}.dist",
+        distid="results/{refGenome}/QC/{prefix}.dist.id",
+        king="results/{refGenome}/QC/{prefix}.king",
     conda:
         "envs/plink.yml"
     log:
-        "logs/{refGenome}/QC/plink/{prefix}.txt"
+        "logs/{refGenome}/QC/plink/{prefix}.txt",
     shell:
         #plink 2 for king relatedness matrix (robust to structure) and plink 1.9 for distance matrix
         """
@@ -125,36 +138,38 @@ rule plink:
         plink --vcf {input.vcf} --out {params.prefix} --allow-extra-chr --autosome-num 95 --distance square --const-fid &>> {log}
         """
 
+
 rule setup_admixture:
     """
     admixture requires all chromosome names to be integers, this sets them to be 1:n
     """
     input:
-        bim = "results/{refGenome}/QC/{prefix}.bim",
-        fai = "results/{refGenome}/data/genome/{refGenome}.fna.fai",
+        bim="results/{refGenome}/QC/{prefix}.bim",
+        fai="results/{refGenome}/data/genome/{refGenome}.fna.fai",
     output:
-        bim = "results/{refGenome}/QC/{prefix}.bim_fixed",
-        bim_back = "results/{refGenome}/QC/{prefix}.bim.orig"
+        bim="results/{refGenome}/QC/{prefix}.bim_fixed",
+        bim_back="results/{refGenome}/QC/{prefix}.bim.orig",
     script:
         "scripts/contigs4admixture.py"
+
 
 rule admixture:
     """
     Call Admixture. First, make a bim file that has no charecters in the chromosomes
     """
     input:
-        bed = "results/{refGenome}/QC/{prefix}.bed",
-        bim = "results/{refGenome}/QC/{prefix}.bim",
-        fam = "results/{refGenome}/QC/{prefix}.fam",
-        bim_fixed = "results/{refGenome}/QC/{prefix}.bim_fixed",
-        bim_back = "results/{refGenome}/QC/{prefix}.bim.orig"
+        bed="results/{refGenome}/QC/{prefix}.bed",
+        bim="results/{refGenome}/QC/{prefix}.bim",
+        fam="results/{refGenome}/QC/{prefix}.fam",
+        bim_fixed="results/{refGenome}/QC/{prefix}.bim_fixed",
+        bim_back="results/{refGenome}/QC/{prefix}.bim.orig",
     output:
-        admix = "results/{refGenome}/QC/{prefix}.3.Q",
-        admix2 = "results/{refGenome}/QC/{prefix}.2.Q"
+        admix="results/{refGenome}/QC/{prefix}.3.Q",
+        admix2="results/{refGenome}/QC/{prefix}.2.Q",
     params:
-        outdir = lambda wc, input: input.bed.rsplit("/", 1)[0]
+        outdir=lambda wc, input: input.bed.rsplit("/", 1)[0],
     log:
-        "logs/{refGenome}/QC/admixture/{prefix}.txt"
+        "logs/{refGenome}/QC/admixture/{prefix}.txt",
     conda:
         "envs/admixture.yml"
     shell:
@@ -168,45 +183,49 @@ rule admixture:
         mv "{wildcards.prefix}".3.* {params.outdir} &>> {log}
         """
 
+
 rule generate_coords_file:
-    output: 
-        "results/{refGenome}/QC/{prefix}.coords.txt"
+    output:
+        "results/{refGenome}/QC/{prefix}.coords.txt",
     run:
-        out_df = samples.loc[(samples['refGenome'] == wildcards.refGenome)][["BioSample", "long", "lat"]]
+        out_df = samples.loc[(samples["refGenome"] == wildcards.refGenome)][
+            ["BioSample", "long", "lat"]
+        ]
         out_df.drop_duplicates("BioSample", inplace=True)
         out_df.dropna(subset=["long", "lat"], thresh=1, inplace=True)
         out_df.to_csv(output[0], index=False, sep="\t", header=False)
+
 
 rule qc_plots:
     """
     Call plotting script
     """
     input:
-        eigenvec = "results/{refGenome}/QC/{prefix}.eigenvec",
-        eigenval = "results/{refGenome}/QC/{prefix}.eigenval",
-        depth = "results/{refGenome}/QC/{prefix}.idepth",
-        dist = "results/{refGenome}/QC/{prefix}.dist",
-        distid = "results/{refGenome}/QC/{prefix}.dist.id",
-        king = "results/{refGenome}/QC/{prefix}.king",
-        miss = "results/{refGenome}/QC/{prefix}.imiss",
-        admix3 = "results/{refGenome}/QC/{prefix}.3.Q",
-        admix2 = "results/{refGenome}/QC/{prefix}.2.Q",
-        snpqc = "results/{refGenome}/QC/{prefix}_snpqc.txt",
-        faiResult = "results/{refGenome}/QC/{prefix}_fai_tmp.txt",
-        bed = "results/{refGenome}/QC/{prefix}.bed",
-        bim = "results/{refGenome}/QC/{prefix}.bim",
-        fam = "results/{refGenome}/QC/{prefix}.fam",
-        sumstats = "results/{refGenome}/QC/{prefix}_bam_sumstats.txt",
-        summ = "results/{refGenome}/QC/{prefix}.FILTER.summary",
-        het = "results/{refGenome}/QC/{prefix}.het",
-        fai = "results/{refGenome}/QC/{prefix}.fna.fai",
-        coords = get_coords_if_available
+        eigenvec="results/{refGenome}/QC/{prefix}.eigenvec",
+        eigenval="results/{refGenome}/QC/{prefix}.eigenval",
+        depth="results/{refGenome}/QC/{prefix}.idepth",
+        dist="results/{refGenome}/QC/{prefix}.dist",
+        distid="results/{refGenome}/QC/{prefix}.dist.id",
+        king="results/{refGenome}/QC/{prefix}.king",
+        miss="results/{refGenome}/QC/{prefix}.imiss",
+        admix3="results/{refGenome}/QC/{prefix}.3.Q",
+        admix2="results/{refGenome}/QC/{prefix}.2.Q",
+        snpqc="results/{refGenome}/QC/{prefix}_snpqc.txt",
+        faiResult="results/{refGenome}/QC/{prefix}_fai_tmp.txt",
+        bed="results/{refGenome}/QC/{prefix}.bed",
+        bim="results/{refGenome}/QC/{prefix}.bim",
+        fam="results/{refGenome}/QC/{prefix}.fam",
+        sumstats="results/{refGenome}/QC/{prefix}_bam_sumstats.txt",
+        summ="results/{refGenome}/QC/{prefix}.FILTER.summary",
+        het="results/{refGenome}/QC/{prefix}.het",
+        fai="results/{refGenome}/QC/{prefix}.fna.fai",
+        coords=get_coords_if_available,
     params:
-        prefix = lambda wc, input: input.het[:-4],
-        nClusters = config['nClusters'],
-        GMKey = config['GoogleAPIKey']
-    output: 
-        qcpdf = "results/{refGenome}/QC/{prefix}_qc.html"
+        prefix=lambda wc, input: input.het[:-4],
+        nClusters=config["nClusters"],
+        GMKey=config["GoogleAPIKey"],
+    output:
+        qcpdf="results/{refGenome}/QC/{prefix}_qc.html",
     conda:
         "envs/qc.yml"
     script:

@@ -5,19 +5,16 @@ Rules:
 - align_bwa_map: Map reads to reference with BWA-MEM
 - align_merge_bams: Merge multiple BAMs for same sample
 - align_dedup: Mark duplicates with sambamba
+- align_bam_stats: Compute BAM coverage and flagstat metrics
 """
 
 
 rule align_bwa_map:
     """Map paired-end reads to reference genome using BWA-MEM."""
     input:
-        ref=f"results/reference/{REF_FILE}",
+        unpack(get_ref_with_bwa),
         r1="results/filtered_fastqs/{sample}/{unit}_1.fastq.gz",
         r2="results/filtered_fastqs/{sample}/{unit}_2.fastq.gz",
-        indexes=expand(
-            f"results/reference/{REF_FILE}.{{ext}}",
-            ext=["sa", "pac", "bwt", "ann", "amb", "fai"],
-        ),
     output:
         bam=temp("results/bams/preMerge/{sample}/{unit}.bam"),
         bai=temp("results/bams/preMerge/{sample}/{unit}.bam.bai"),
@@ -33,8 +30,8 @@ rule align_bwa_map:
     shell:
         """
         bwa mem -M -t {threads} -R {params.rg} {input.ref} {input.r1} {input.r2} 2> {log} \
-            | samtools sort -o {output.bam} - \
-            && samtools index {output.bam} {output.bai}
+            | samtools sort -o {output.bam} - 2>> {log}
+        samtools index {output.bam} {output.bai} 2>> {log}
         """
 
 
@@ -54,8 +51,8 @@ rule align_merge_bams:
     threads: 4
     shell:
         """
-        samtools merge -@ {threads} {output.bam} {input} 2> {log} \
-            && samtools index {output.bam}
+        samtools merge -@ {threads} {output.bam} {input} 2> {log}
+        samtools index {output.bam} 2>> {log}
         """
 
 
@@ -76,4 +73,26 @@ rule align_dedup:
     shell:
         """
         sambamba markdup -t {threads} {input.bam} {output.bam} 2> {log}
+        """
+
+
+rule align_bam_stats:
+    """Compute BAM coverage and flagstat metrics."""
+    wildcard_constraints:
+        sample="|".join(BAM_REQUIRED_SAMPLES) if BAM_REQUIRED_SAMPLES else "NOMATCH",
+    input:
+        unpack(get_final_bam),
+    output:
+        coverage="results/bams/stats/{sample}.coverage.txt",
+        flagstat="results/bams/stats/{sample}.flagstat.tsv",
+    conda:
+        "../../envs/fastq2bam.yml"
+    log:
+        "logs/align_bam_stats/{sample}.txt"
+    benchmark:
+        "benchmarks/align_bam_stats/{sample}.txt"
+    shell:
+        """
+        samtools coverage --output {output.coverage} {input.bam} &> {log}
+        samtools flagstat -O tsv {input.bam} > {output.flagstat} 2>> {log}
         """

@@ -9,7 +9,7 @@ def _get_db_interval_count(wildcards=None):
     """Calculate number of GenomicsDB intervals based on sample count."""
     num_samples = len(SAMPLE_IDS)
     num_intervals = max(
-        int(config.get("db_scatter_factor", 0.15) * num_samples * config.get("num_gvcf_intervals", 50)),
+        int(config["intervals"]["db_scatter_factor"] * num_samples * config["intervals"]["num_gvcf_intervals"]),
         1,
     )
     return num_intervals
@@ -18,13 +18,12 @@ def _get_db_interval_count(wildcards=None):
 rule intervals_picard:
     """Generate interval list by splitting reference on N stretches."""
     input:
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
+        unpack(get_ref_bundle),
     output:
         intervals=temp("results/intervals/picard_interval_list.list"),
     params:
-        minNmer=int(config.get("minNmer", 500)),
+        min_nmer=int(config["intervals"]["min_nmer"]),
+        java_mem=get_java_mem,
     conda:
         "../../envs/bam2vcf.yml"
     log:
@@ -33,14 +32,13 @@ rule intervals_picard:
         "benchmarks/intervals_picard.txt"
     resources:
         mem_mb=8000,
-        mem_mb_reduced=7200,
     shell:
         """
         picard ScatterIntervalsByNs \
-            -Xmx{resources.mem_mb_reduced}m \
+            -Xmx{params.java_mem}m \
             REFERENCE={input.ref} \
             OUTPUT={output.intervals} \
-            MAX_TO_MERGE={params.minNmer} \
+            MAX_TO_MERGE={params.min_nmer} \
             OUTPUT_TYPE=ACGT \
             &> {log}
         """
@@ -68,15 +66,14 @@ checkpoint intervals_gvcf:
     Uses BALANCING_WITHOUT_INTERVAL_SUBDIVISION mode to keep intervals intact.
     """
     input:
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
+        unpack(get_ref_bundle),
         intervals="results/intervals/master_interval_list.list",
     output:
         fof="results/intervals/gvcf_intervals/intervals.txt",
         out_dir=directory("results/intervals/gvcf_intervals"),
     params:
-        max_intervals=config.get("num_gvcf_intervals", 50),
+        max_intervals=config["intervals"]["num_gvcf_intervals"],
+        java_mem=get_java_mem,
     conda:
         "../../envs/bam2vcf.yml"
     log:
@@ -85,11 +82,10 @@ checkpoint intervals_gvcf:
         "benchmarks/intervals_gvcf.txt"
     resources:
         mem_mb=8000,
-        mem_mb_reduced=7200,
     shell:
         """
         gatk SplitIntervals \
-            --java-options '-Xmx{resources.mem_mb_reduced}m -Xms{resources.mem_mb_reduced}m' \
+            --java-options "-Xmx{params.java_mem}m" \
             -L {input.intervals} \
             -O {output.out_dir} \
             -R {input.ref} \
@@ -97,7 +93,7 @@ checkpoint intervals_gvcf:
             -mode BALANCING_WITHOUT_INTERVAL_SUBDIVISION \
             --interval-merging-rule OVERLAPPING_ONLY \
             &> {log}
-        ls -l {output.out_dir}/*scattered.interval_list > {output.fof}
+        ls -l {output.out_dir}/*scattered.interval_list > {output.fof} 2>> {log}
         """
 
 
@@ -107,15 +103,14 @@ checkpoint intervals_db:
     Uses INTERVAL_SUBDIVISION mode and scales with sample count.
     """
     input:
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
+        unpack(get_ref_bundle),
         intervals="results/intervals/master_interval_list.list",
     output:
         fof="results/intervals/db_intervals/intervals.txt",
         out_dir=directory("results/intervals/db_intervals"),
     params:
         max_intervals=_get_db_interval_count,
+        java_mem=get_java_mem,
     conda:
         "../../envs/bam2vcf.yml"
     log:
@@ -124,11 +119,10 @@ checkpoint intervals_db:
         "benchmarks/intervals_db.txt"
     resources:
         mem_mb=8000,
-        mem_mb_reduced=7200,
     shell:
         """
         gatk SplitIntervals \
-            --java-options '-Xmx{resources.mem_mb_reduced}m -Xms{resources.mem_mb_reduced}m' \
+            --java-options "-Xmx{params.java_mem}m" \
             -L {input.intervals} \
             -O {output.out_dir} \
             -R {input.ref} \
@@ -136,5 +130,5 @@ checkpoint intervals_db:
             -mode INTERVAL_SUBDIVISION \
             --interval-merging-rule OVERLAPPING_ONLY \
             &> {log}
-        ls -l {output.out_dir}/*scattered.interval_list > {output.fof}
+        ls -l {output.out_dir}/*scattered.interval_list > {output.fof} 2>> {log}
         """

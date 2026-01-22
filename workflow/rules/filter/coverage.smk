@@ -15,6 +15,8 @@ Rules:
 
 rule filter_compute_d4:
     """Compute per-base coverage using mosdepth."""
+    wildcard_constraints:
+        sample="|".join(BAM_REQUIRED_SAMPLES) if BAM_REQUIRED_SAMPLES else "NOMATCH",
     input:
         unpack(get_final_bam),
     output:
@@ -35,18 +37,18 @@ rule filter_compute_d4:
     shell:
         """
         mosdepth --d4 -t {threads} {params.prefix} {input.bam} &> {log}
-        bgzip --index {params.d4}
+        bgzip --index {params.d4} &>> {log}
         """
 
 
 rule filter_collect_covstats:
     """Aggregate coverage statistics across all samples."""
     input:
-        covStatFiles=get_mosdepth_summary_files(),
+        cov_stat_files=get_mosdepth_summary_files(),
     output:
         "results/summary_stats/all_cov_sumstats.txt",
     run:
-        covStats = collectCovStats(input.covStatFiles)
+        covStats = collect_cov_stats(input.cov_stat_files)
         with open(output[0], "w") as f:
             print("chrom\tmean_cov\tstdev_cov", file=f)
             for chrom in covStats:
@@ -60,10 +62,7 @@ rule filter_create_thresholds:
     output:
         thresholds=f"results/callable_sites/{REF_NAME}_callable_sites_thresholds.tsv",
     params:
-        cov_threshold_stdev=config.get("cov_threshold_stdev", 2),
-        cov_threshold_lower=config.get("cov_threshold_lower", 3),
-        cov_threshold_upper=config.get("cov_threshold_upper", 0),
-        cov_threshold_rel=config.get("cov_threshold_rel", 2),
+        cov_threshold_stdev=config["callable_sites"]["coverage"]["stdev"],
     conda:
         "../../envs/cov_filter.yml"
     script:
@@ -106,14 +105,16 @@ rule filter_callable_bed:
         tmp_cov=temp(f"results/callable_sites/{REF_NAME}_temp_cov.bed"),
     conda:
         "../../envs/cov_filter.yml"
+    log:
+        "logs/filter_callable_bed.txt"
     benchmark:
         "benchmarks/filter_callable_bed.txt"
     params:
-        merge=config.get("cov_merge", 100),
+        merge=config["callable_sites"]["coverage"]["merge_distance"],
     shell:
         """
-        bedtools merge -d {params.merge} -i {input.cov} > {output.tmp_cov}
-        bedtools intersect -a {output.tmp_cov} -b {input.map} \
-            | bedtools sort -i - \
-            | bedtools merge -i - > {output.callable_sites}
+        bedtools merge -d {params.merge} -i {input.cov} > {output.tmp_cov} 2> {log}
+        bedtools intersect -a {output.tmp_cov} -b {input.map} 2>> {log} \
+            | bedtools sort -i - 2>> {log} \
+            | bedtools merge -i - > {output.callable_sites} 2>> {log}
         """

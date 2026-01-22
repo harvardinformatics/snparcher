@@ -18,17 +18,17 @@ def _sentieon_gvcf_args(wildcards):
 
 rule call_sentieon_haplotyper:
     """Generate GVCF for a single sample using Sentieon Haplotyper."""
+    wildcard_constraints:
+        sample="|".join(BAM_REQUIRED_SAMPLES) if BAM_REQUIRED_SAMPLES else "NOMATCH",
     input:
         unpack(get_final_bam),
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
+        unpack(get_ref_bundle),
     output:
         gvcf="results/gvcfs/{sample}.g.vcf.gz",
         tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
     params:
-        lic=config.get("sentieon_lic", ""),
-        ploidy=config.get("ploidy", 2),
+        lic=config["variant_calling"]["sentieon"]["license"],
+        ploidy=config["variant_calling"]["gatk"]["ploidy"],
     conda:
         "../../envs/sentieon.yml"
     log:
@@ -53,15 +53,13 @@ rule call_sentieon_haplotyper:
 rule call_sentieon_gvcftyper:
     input:
         unpack(_sentieon_gvcf_inputs),
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
+        unpack(get_ref_bundle),
     output:
         vcf=temp("results/vcfs/raw.vcf.gz"),
         tbi=temp("results/vcfs/raw.vcf.gz.tbi"),
     params:
         glist=_sentieon_gvcf_args,
-        lic=config.get("sentieon_lic", ""),
+        lic=config["variant_calling"]["sentieon"]["license"],
     conda:
         "../../envs/sentieon.yml"
     log:
@@ -81,11 +79,9 @@ rule call_sentieon_gvcftyper:
 rule call_sentieon_filter:
     """Apply GATK recommended hard filters to VCF using parallel filtering."""
     input:
+        unpack(get_ref_bundle),
         vcf="results/vcfs/raw.vcf.gz",
         tbi="results/vcfs/raw.vcf.gz.tbi",
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
     output:
         vcf=f"results/{REF_NAME}_raw.vcf.gz",
         tbi=f"results/{REF_NAME}_raw.vcf.gz.tbi",

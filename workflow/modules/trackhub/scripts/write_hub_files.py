@@ -177,9 +177,7 @@ def main():
         print(snp_depth_txt.format(data_url=depth_file), file=out)
 
         for file in file_types:
-            print(
-                window_parent_txt.format(track_type=file, color=COLORS[file]), file=out
-            )
+            print(window_parent_txt.format(track_type=file, color=COLORS[file]), file=out)
             for window in trackhub_windows:
                 track_name = f"{file}_{human_format(window)}_bp_bins"
                 label = f"{file}_{human_format(window)}_bp bins"

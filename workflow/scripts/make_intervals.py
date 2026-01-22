@@ -8,17 +8,18 @@ Writes intervals groups to individual files for use by HaplotypeCaller
 """
 
 
-def make_intervals(
-    in_file: str, num_intervals: int, output_dir: str, int_output_file: str
-) -> None:
-
+def make_intervals(in_file: str, num_intervals: int, output_dir: str, int_output_file: str) -> None:
     intervals = []
 
     with open(in_file, "r") as f:
         for line in f:
             if not line.startswith("@"):
                 line = line.strip().split()
-                chrom, start, end, = (
+                (
+                    chrom,
+                    start,
+                    end,
+                ) = (
                     line[0],
                     int(line[1]),
                     int(line[2]),

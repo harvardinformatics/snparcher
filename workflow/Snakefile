@@ -17,15 +17,15 @@ include: "rules/reference.smk"
 include: "rules/fastq.smk"
 include: "rules/stats/sumstats.smk"
 
-if config.get("sentieon", False):
+if config["variant_calling"]["tool"] == "sentieon":
     include: "rules/align/sentieon.smk"
 else:
     include: "rules/align/bwa.smk"
 
-if config.get("sentieon", False):
+if config["variant_calling"]["tool"] == "sentieon":
     include: "rules/call/sentieon.smk"
 else:
-    if config.get("intervals", False):
+    if config["intervals"]["enabled"]:
         include: "rules/call/intervals.smk"
         include: "rules/call/gatk_intervals.smk"
     else:
@@ -33,41 +33,35 @@ else:
 
 include: "rules/filter/mappability.smk"
 
-if config.get("cov_filter", True):
+if config["callable_sites"]["coverage"]["enabled"]:
     include: "rules/filter/coverage.smk"
 
-# TODO: Update modules for v2 sample sheet format
-# module qc:
-#     snakefile:
-#         "modules/qc/Snakefile"
-#     config:
-#         config
-#
-# use rule * from qc as qc_*
-#
-# module mk:
-#     snakefile:
-#         "modules/mk/Snakefile"
-#     config:
-#         config
-#
-# use rule * from mk as mk_*
-#
-# module postprocess:
-#     snakefile:
-#         "modules/postprocess/Snakefile"
-#     config:
-#         config
-#
-# use rule * from postprocess as postprocess_*
-#
-# module trackhub:
-#     snakefile:
-#         "modules/trackhub/Snakefile"
-#     config:
-#         config
-#
-# use rule * from trackhub as trackhub_*
+
+if config.get("modules", {}).get("qc", {}).get("enabled", False):
+    module qc:
+        snakefile:
+            "modules/qc/Snakefile"
+        config:
+            config
+
+if config.get("modules", {}).get("postprocess", {}).get("enabled", False):
+    module postprocess:
+        snakefile:
+            "modules/postprocess/Snakefile"
+        config:
+            config
+
+if config.get("modules", {}).get("trackhub", {}).get("enabled", False):
+    if not config.get("modules", {}).get("postprocess", {}).get("enabled", False):
+        raise WorkflowError(
+            "trackhub module requires postprocess module to be enabled. "
+            "Enable modules.postprocess.enabled or disable modules.trackhub.enabled."
+        )
+    module trackhub:
+        snakefile:
+            "modules/trackhub/Snakefile"
+        config:
+            config
 
 
 def get_output():

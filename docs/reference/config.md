@@ -6,7 +6,7 @@ snpArcher is configured via `config/config.yaml`. This page documents all availa
 
 ### samples
 
-Path to the sample sheet CSV file.
+Path to sample sheet CSV file.
 
 ```yaml
 samples: "config/samples.csv"
@@ -35,7 +35,7 @@ reference:
 When providing a local reference via `path`:
 
 - **Bgzip-compressed FASTA** (`.fna.gz`, `.fa.gz`) is **required**
-- The file is **symlinked** to the results directory (no copying)
+- The file is **symlinked** to results directory (no copying)
 - Regular gzip is **not supported** and will cause indexing to fail
 
 If your reference is uncompressed or gzip-compressed, convert it to bgzip format:
@@ -52,157 +52,302 @@ bgzip genome.fna               # Recompress with bgzip
 Bgzip (block gzip) allows random access, which is required by `samtools faidx` and 
 other indexing tools. The `bgzip` command is part of [htslib](http://www.htslib.org/).
 
-When using an NCBI `accession`, snpArcher downloads and bgzip-compresses the 
+When using an NCBI `accession`, snpArcher downloads and bgzip-compresses 
 reference automatically.
 
-## Variant Calling Options
+## Variant Calling
 
-### intervals
+### variant_calling.tool
+
+Variant calling tool to use: `"gatk"` or `"sentieon"`.
+
+```yaml
+variant_calling:
+  tool: "gatk"      # or "sentieon"
+```
+
+### variant_calling.gatk
+
+GATK variant calling parameters.
+
+```yaml
+variant_calling:
+  gatk:
+    min_pruning: 1              # HaplotypeCaller --min-pruning (default: 1)
+    min_dangling: 1             # HaplotypeCaller --min-dangling-branch-length (default: 1)
+    het_prior: 0.005            # Prior probability of heterozygous site (default: 0.005)
+    ploidy: 2                    # Ploidy for variant calling (default: 2)
+```
+
+**Coverage tuning:** Use low-coverage settings for <10x, high-coverage for >10x.
+
+- **Low coverage (<10x):** `min_pruning: 1`, `min_dangling: 1`
+- **High coverage (>10x):** `min_pruning: 2`, `min_dangling: 4`
+
+### variant_calling.sentieon
+
+Sentieon variant calling parameters.
+
+```yaml
+variant_calling:
+  sentieon:
+    license: "/path/to/sentieon/license"    # Path to Sentieon license file
+```
+
+## Intervals
+
+### intervals.enabled
 
 Use interval-based approach for variant calling. Recommended for most use cases.
 
 ```yaml
-intervals: true  # default: true
-```
-
-### sentieon
-
-Use Sentieon tools instead of GATK. Requires valid license.
-
-```yaml
-sentieon: false      # default: false
-sentieon_lic: ""     # Path to Sentieon license file
-```
-
-### ploidy
-
-Ploidy for variant calling.
-
-```yaml
-ploidy: 2  # default: 2
+intervals:
+  enabled: true  # default: true
 ```
 
 ### Interval Options
 
-Only applicable when `intervals: true`.
+Only applicable when `intervals.enabled: true`.
 
 ```yaml
-minNmer: 500              # Minimum N-mer for splitting (default: 500, min: 50)
-num_gvcf_intervals: 50    # Maximum GVCF intervals (default: 50)
-db_scatter_factor: 0.15   # GenomicsDB scatter factor (default: 0.15)
+intervals:
+  min_nmer: 500              # Minimum N-mer for splitting (default: 500, min: 50)
+  num_gvcf_intervals: 50    # Maximum GVCF intervals to create (default: 50)
+  db_scatter_factor: 0.15   # GenomicsDB scatter factor (default: 0.15)
 ```
 
-### HaplotypeCaller Options
+## Read Processing
 
-Tuning for coverage depth. Use low-coverage settings for <10x, high-coverage for >10x.
-
-```yaml
-# Low coverage (<10x) - default
-minP: 1  # --min-pruning
-minD: 1  # --min-dangling-branch-length
-
-# High coverage (>10x)
-# minP: 2
-# minD: 4
-
-het_prior: 0.005  # Prior probability of heterozygous site
-```
-
-## Read Processing Options
-
-### mark_duplicates
+### reads.mark_duplicates
 
 Mark optical duplicates before variant calling.
 
 ```yaml
-mark_duplicates: true  # default: true
+reads:
+  mark_duplicates: true  # default: true
 ```
 
-### sort_reads
+### reads.sort
 
 Sort reads by name before adapter trimming.
 
 ```yaml
-sort_reads: false  # default: false
+reads:
+  sort: false  # default: false
 ```
 
-## Callable Sites Options
+## Remote Reads
 
-### Mappability
+### remote_reads.enabled
+
+Enable cloud execution with reads in remote storage.
 
 ```yaml
-mappability_min: 1      # Minimum mappability score (default: 1)
-mappability_k: 150      # K-mer size for mappability (default: 150)
-mappability_merge: 100  # Merge regions within this distance (default: 100)
+remote_reads:
+  enabled: false  # default: false
 ```
 
-### Coverage Filtering
+### remote_reads.prefix
+
+Remote storage prefix for reads.
+
+```yaml
+remote_reads:
+  prefix: "gs://my-bucket/"  # Remote storage prefix
+```
+
+## Callable Sites
+
+### callable_sites.coverage.enabled
 
 Enable coverage-based filtering of callable sites.
 
 ```yaml
-cov_filter: true  # default: true
-cov_merge: 100    # Merge regions within this distance (default: 100)
+callable_sites:
+  coverage:
+    enabled: true  # default: true
 ```
 
-**Coverage threshold options** (use only one approach):
+### callable_sites.coverage.stdev
 
-Option 1 - Absolute thresholds:
-```yaml
-cov_threshold_lower: 1
-cov_threshold_upper: 10000
-```
-
-Option 2 - Standard deviations (assumes Poisson distribution):
-```yaml
-cov_threshold_stdev: 2  # Remove regions outside X standard deviations
-```
-
-Option 3 - Relative scaling:
-```yaml
-cov_threshold_rel: 2  # Remove regions outside (mean/X) to (mean*X)
-```
-
-## QC Options
+Filter regions outside mean ± N standard deviations (assumes Poisson distribution).
 
 ```yaml
-nClusters: 3       # Number of clusters for PCA (default: 3)
-min_depth: 2       # Minimum average depth for QC inclusion (default: 2)
-GoogleAPIKey: ""   # Google Maps API key for geographic plots (optional)
+callable_sites:
+  coverage:
+    stdev: 2  # Filter mean ± 2 standard deviations (default: 2)
 ```
 
-## Filtering Options
+### callable_sites.coverage.merge_distance
 
-Applied during postprocessing to create "clean" VCF.
+Merge passing coverage regions separated by this many bp into a single region.
 
 ```yaml
-contig_size: 10000           # Exclude SNPs on contigs smaller than this (default: 10000)
-maf: 0.01                    # Minimum minor allele frequency (default: 0.01)
-missingness: 0.75            # Maximum missingness (default: 0.75)
-scaffolds_to_exclude: "mtDNA,Y"  # Comma-separated scaffolds to exclude
+callable_sites:
+  coverage:
+    merge_distance: 100  # default: 100
 ```
 
-## Output Options
+### callable_sites.mappability.enabled
 
-### generate_trackhub
+Enable mappability-based filtering.
+
+```yaml
+callable_sites:
+  mappability:
+    enabled: true  # default: true
+```
+
+### callable_sites.mappability.min_score
+
+Minimum mappability score for callable sites.
+
+```yaml
+callable_sites:
+  mappability:
+    min_score: 1  # default: 1
+```
+
+### callable_sites.mappability.kmer
+
+K-mer size for mappability calculation.
+
+```yaml
+callable_sites:
+  mappability:
+    kmer: 150  # default: 150
+```
+
+### callable_sites.mappability.merge_distance
+
+Merge passing mappability regions separated by this many bp into a single region.
+
+```yaml
+callable_sites:
+  mappability:
+    merge_distance: 100  # default: 100
+```
+
+## Modules
+
+### modules.qc.enabled
+
+Enable quality control module.
+
+```yaml
+modules:
+  qc:
+    enabled: false  # default: false
+```
+
+### modules.qc.clusters
+
+Number of clusters for PCA analysis.
+
+```yaml
+modules:
+  qc:
+    clusters: 3  # default: 3
+```
+
+### modules.qc.min_depth
+
+Minimum average depth for QC inclusion.
+
+```yaml
+modules:
+  qc:
+    min_depth: 2  # default: 2
+```
+
+### modules.qc.google_api_key
+
+Google Maps API key for geographic plots (optional).
+
+```yaml
+modules:
+  qc:
+    google_api_key: ""  # Optional
+```
+
+### modules.postprocess.enabled
+
+Enable postprocessing module for clean VCF generation.
+
+```yaml
+modules:
+  postprocess:
+    enabled: false  # default: false
+```
+
+### modules.postprocess.filtering
+
+VCF filtering parameters for clean VCF generation.
+
+```yaml
+modules:
+  postprocess:
+    filtering:
+      contig_size: 10000           # Exclude SNPs on contigs smaller than this (default: 10000)
+      maf: 0.01                    # Minimum minor allele frequency (default: 0.01)
+      missingness: 0.75            # Maximum missingness threshold (default: 0.75)
+      exclude_scaffolds: "mtDNA,Y"  # Comma-separated scaffolds to exclude (default: "mtDNA,Y")
+```
+
+### modules.trackhub.enabled
 
 Generate UCSC Genome Browser trackhub with population genomic statistics.
 
-```yaml
-generate_trackhub: true   # default: true
-trackhub_email: ""        # Required if trackhub enabled
-```
-
-## Advanced Options
-
-### Remote Reads
-
-For cloud execution with reads in remote storage.
+**Important:** trackhub module requires `modules.postprocess.enabled: true`.
 
 ```yaml
-remote_reads: false       # default: false
-remote_reads_prefix: ""   # Remote storage prefix
+modules:
+  trackhub:
+    enabled: false  # default: false
 ```
+
+### modules.trackhub.email
+
+Email address for trackhub (required by UCSC if enabled).
+
+```yaml
+modules:
+  trackhub:
+    email: "email@example.com"  # Required if trackhub enabled
+```
+
+## Migration Guide
+
+If you have a v1 config file, here's how to migrate to v2:
+
+| Old Config | New Config |
+|-------------|-------------|
+| `sentieon: True` | `variant_calling: {tool: "sentieon"}` |
+| `sentieon_lic: "/path/to/license"` | `variant_calling: {sentieon: {license: "/path/to/license"}}` |
+| `minP: 1` | `variant_calling: {gatk: {min_pruning: 1}}` |
+| `minD: 1` | `variant_calling: {gatk: {min_dangling: 1}}` |
+| `het_prior: 0.005` | `variant_calling: {gatk: {het_prior: 0.005}}` |
+| `ploidy: 2` | `variant_calling: {gatk: {ploidy: 2}}` |
+| `intervals: True` | `intervals: {enabled: true}` |
+| `minNmer: 500` | `intervals: {min_nmer: 500}` |
+| `num_gvcf_intervals: 50` | `intervals: {num_gvcf_intervals: 50}` |
+| `db_scatter_factor: 0.15` | `intervals: {db_scatter_factor: 0.15}` |
+| `cov_filter: True` | `callable_sites: {coverage: {enabled: true}}` |
+| `cov_threshold_stdev: 2` | `callable_sites: {coverage: {stdev: 2}}` |
+| `cov_merge: 100` | `callable_sites: {coverage: {merge_distance: 100}}` |
+| `mappability_min: 1` | `callable_sites: {mappability: {min_score: 1}}` |
+| `mappability_k: 150` | `callable_sites: {mappability: {kmer: 150}}` |
+| `mappability_merge: 100` | `callable_sites: {mappability: {merge_distance: 100}}` |
+| `sort_reads: False` | `reads: {sort: false}` |
+| `mark_duplicates: True` | `reads: {mark_duplicates: true}` |
+| `nClusters: 3` | `modules: {qc: {clusters: 3}}` |
+| `min_depth: 2` | `modules: {qc: {min_depth: 2}}` |
+| `GoogleAPIKey: ""` | `modules: {qc: {google_api_key: ""}}` |
+
+**Removed options (simplified coverage filtering):**
+- `cov_threshold_lower` - Use `callable_sites.coverage.stdev` instead
+- `cov_threshold_upper` - Use `callable_sites.coverage.stdev` instead
+- `cov_threshold_rel` - Use `callable_sites.coverage.stdev` instead
 
 ## Example Configuration
 
@@ -214,29 +359,44 @@ reference:
   path: "/data/reference/genome.fna.gz"  # Must be bgzip-compressed
 
 # Variant calling
-intervals: true
-sentieon: false
-ploidy: 2
+variant_calling:
+  tool: "gatk"
+  gatk:
+    min_pruning: 1
+    min_dangling: 1
+    het_prior: 0.005
+    ploidy: 2
+
+# Intervals
+intervals:
+  enabled: true
+  min_nmer: 500
+  num_gvcf_intervals: 50
+  db_scatter_factor: 0.15
 
 # Read processing
-mark_duplicates: true
-sort_reads: false
+reads:
+  mark_duplicates: true
+  sort: false
 
 # Callable sites
-cov_filter: true
-mappability_min: 1
-cov_threshold_lower: 1
-cov_threshold_upper: 10000
+callable_sites:
+  coverage:
+    enabled: true
+    stdev: 2
+    merge_distance: 100
+  mappability:
+    enabled: true
+    min_score: 1
+    kmer: 150
+    merge_distance: 100
 
-# QC
-nClusters: 3
-min_depth: 2
-
-# Filtering
-contig_size: 10000
-maf: 0.01
-missingness: 0.75
-
-# Output
-generate_trackhub: false
+# Modules
+modules:
+  qc:
+    enabled: false
+  postprocess:
+    enabled: false
+    trackhub:
+    enabled: false
 ```

@@ -17,18 +17,19 @@ localrules:
 
 rule call_haplotypecaller:
     """Generate GVCF for a single sample using GATK HaplotypeCaller."""
+    wildcard_constraints:
+        sample="|".join(BAM_REQUIRED_SAMPLES) if BAM_REQUIRED_SAMPLES else "NOMATCH",
     input:
         unpack(get_final_bam),
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
+        unpack(get_ref_bundle),
     output:
         gvcf="results/gvcfs/{sample}.g.vcf.gz",
         tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
     params:
-        minPrun=config.get("minP", 1),
-        minDang=config.get("minD", 1),
-        ploidy=config.get("ploidy", 2),
+        min_prun=config["variant_calling"]["gatk"]["min_pruning"],
+        min_dang=config["variant_calling"]["gatk"]["min_dangling"],
+        ploidy=config["variant_calling"]["gatk"]["ploidy"],
+        java_mem=get_java_mem,
     conda:
         "../../envs/bam2vcf.yml"
     log:
@@ -38,18 +39,17 @@ rule call_haplotypecaller:
     threads: 4
     resources:
         mem_mb=8000,
-        mem_mb_reduced=7200,
     shell:
         """
         gatk HaplotypeCaller \
-            --java-options "-Xmx{resources.mem_mb_reduced}m" \
+            --java-options "-Xmx{params.java_mem}m" \
             -R {input.ref} \
             -I {input.bam} \
             -O {output.gvcf} \
             -ploidy {params.ploidy} \
             --emit-ref-confidence GVCF \
-            --min-pruning {params.minPrun} \
-            --min-dangling-branch-length {params.minDang} \
+            --min-pruning {params.min_prun} \
+            --min-dangling-branch-length {params.min_dang} \
             &> {log}
         """
 
@@ -69,7 +69,7 @@ rule call_create_db_mapfile:
 rule call_prepare_db_intervals:
     """Create interval list for GenomicsDBImport from reference FAI."""
     input:
-        fai=f"results/reference/{REF_FILE}.fai",
+        unpack(get_ref_bundle),
     output:
         intervals="results/genomics_db/db_intervals.list",
     run:
@@ -90,6 +90,8 @@ rule call_genomicsdb_import:
     output:
         db=temp(directory("results/genomics_db/DB")),
         tar=temp("results/genomics_db/DB.tar"),
+    params:
+        java_mem=get_java_mem,
     conda:
         "../../envs/bam2vcf.yml"
     log:
@@ -99,12 +101,11 @@ rule call_genomicsdb_import:
     threads: 4
     resources:
         mem_mb=16000,
-        mem_mb_reduced=14400,
     shell:
         """
         export TILEDB_DISABLE_FILE_LOCKING=1
         gatk GenomicsDBImport \
-            --java-options '-Xmx{resources.mem_mb_reduced}m -Xms{resources.mem_mb_reduced}m' \
+            --java-options "-Xmx{params.java_mem}m" \
             --genomicsdb-shared-posixfs-optimizations true \
             --batch-size 25 \
             --genomicsdb-workspace-path {output.db} \
@@ -113,23 +114,22 @@ rule call_genomicsdb_import:
             --tmp-dir {resources.tmpdir} \
             --sample-name-map {input.db_mapfile} &> {log}
         
-        tar -cf {output.tar} {output.db}
+        tar -cf {output.tar} {output.db} &>> {log}
         """
 
 
 rule call_genotype_gvcfs:
     """Joint genotyping using GenomicsDB."""
     input:
+        unpack(get_ref_bundle),
         db="results/genomics_db/DB.tar",
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
     output:
         vcf=temp("results/vcfs/raw.vcf.gz"),
         vcfidx=temp("results/vcfs/raw.vcf.gz.tbi"),
     params:
-        het=config.get("het_prior", 0.005),
+        het=config["variant_calling"]["gatk"]["het_prior"],
         db=lambda wc, input: input.db[:-4],
+        java_mem=get_java_mem,
     conda:
         "../../envs/bam2vcf.yml"
     log:
@@ -139,29 +139,26 @@ rule call_genotype_gvcfs:
     threads: 4
     resources:
         mem_mb=16000,
-        mem_mb_reduced=14400,
     shell:
         """
-        tar -xf {input.db}
+        tar -xf {input.db} &> {log}
         gatk GenotypeGVCFs \
-            --java-options '-Xmx{resources.mem_mb_reduced}m -Xms{resources.mem_mb_reduced}m' \
+            --java-options "-Xmx{params.java_mem}m" \
             -R {input.ref} \
             --heterozygosity {params.het} \
             --genomicsdb-shared-posixfs-optimizations true \
             -V gendb://{params.db} \
             -O {output.vcf} \
-            --tmp-dir {resources.tmpdir} &> {log}
+            --tmp-dir {resources.tmpdir} &>> {log}
         """
 
 
 rule call_filter_vcf:
     """Apply GATK recommended hard filters to VCF."""
     input:
+        unpack(get_ref_bundle),
         vcf="results/vcfs/raw.vcf.gz",
         vcfidx="results/vcfs/raw.vcf.gz.tbi",
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
     output:
         vcf=temp("results/vcfs/filtered.vcf.gz"),
         vcfidx=temp("results/vcfs/filtered.vcf.gz.tbi"),

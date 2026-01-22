@@ -7,13 +7,13 @@ Requires interval rules from call/intervals.smk.
 
 
 def _get_all_gvcfs_for_db(wildcards=None):
-    if config.get("normalize_gvcfs", True):
+    if config["normalize_gvcfs"]:
         return expand("results/gvcfs_norm/{sample}.g.vcf.gz", sample=SAMPLE_IDS)
     return expand("results/gvcfs/{sample}.g.vcf.gz", sample=SAMPLE_IDS)
 
 
 def _get_all_gvcf_indices_for_db(wildcards=None):
-    if config.get("normalize_gvcfs", True):
+    if config["normalize_gvcfs"]:
         return expand("results/gvcfs_norm/{sample}.g.vcf.gz.tbi", sample=SAMPLE_IDS)
     return expand("results/gvcfs/{sample}.g.vcf.gz.tbi", sample=SAMPLE_IDS)
 
@@ -56,19 +56,20 @@ localrules:
 
 rule call_haplotypecaller_interval:
     """Generate GVCF for a single sample and interval using GATK HaplotypeCaller."""
+    wildcard_constraints:
+        sample="|".join(BAM_REQUIRED_SAMPLES) if BAM_REQUIRED_SAMPLES else "NOMATCH",
     input:
         unpack(get_final_bam),
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
+        unpack(get_ref_bundle),
         interval="results/intervals/gvcf_intervals/{l}-scattered.interval_list",
     output:
         gvcf="results/interval_gvcfs/{sample}/{l}.raw.g.vcf.gz",
         tbi="results/interval_gvcfs/{sample}/{l}.raw.g.vcf.gz.tbi",
     params:
-        minPrun=config.get("minP", 1),
-        minDang=config.get("minD", 1),
-        ploidy=config.get("ploidy", 2),
+        min_prun=config["variant_calling"]["gatk"]["min_pruning"],
+        min_dang=config["variant_calling"]["gatk"]["min_dangling"],
+        ploidy=config["variant_calling"]["gatk"]["ploidy"],
+        java_mem=get_java_mem,
     conda:
         "../../envs/bam2vcf.yml"
     log:
@@ -78,24 +79,25 @@ rule call_haplotypecaller_interval:
     threads: 4
     resources:
         mem_mb=8000,
-        mem_mb_reduced=7200,
     shell:
         """
         gatk HaplotypeCaller \
-            --java-options "-Xmx{resources.mem_mb_reduced}m" \
+            --java-options "-Xmx{params.java_mem}m" \
             -R {input.ref} \
             -I {input.bam} \
             -O {output.gvcf} \
             -L {input.interval} \
             -ploidy {params.ploidy} \
             --emit-ref-confidence GVCF \
-            --min-pruning {params.minPrun} \
-            --min-dangling-branch-length {params.minDang} \
+            --min-pruning {params.min_prun} \
+            --min-dangling-branch-length {params.min_dang} \
             &> {log}
         """
 
 
 rule call_concat_gvcfs:
+    wildcard_constraints:
+        sample="|".join(BAM_REQUIRED_SAMPLES) if BAM_REQUIRED_SAMPLES else "NOMATCH",
     input:
         gvcfs=_get_interval_gvcfs,
         tbis=_get_interval_gvcfs_idx,
@@ -157,6 +159,8 @@ rule call_genomicsdb_import_interval:
     output:
         db=temp(directory("results/genomics_db/DB_L{l}")),
         tar=temp("results/genomics_db/DB_L{l}.tar"),
+    params:
+        java_mem=get_java_mem,
     conda:
         "../../envs/bam2vcf.yml"
     log:
@@ -166,12 +170,11 @@ rule call_genomicsdb_import_interval:
     threads: 4
     resources:
         mem_mb=16000,
-        mem_mb_reduced=14400,
     shell:
         """
         export TILEDB_DISABLE_FILE_LOCKING=1
         gatk GenomicsDBImport \
-            --java-options '-Xmx{resources.mem_mb_reduced}m -Xms{resources.mem_mb_reduced}m' \
+            --java-options "-Xmx{params.java_mem}m" \
             --genomicsdb-shared-posixfs-optimizations true \
             --batch-size 25 \
             --genomicsdb-workspace-path {output.db} \
@@ -180,23 +183,22 @@ rule call_genomicsdb_import_interval:
             --tmp-dir {resources.tmpdir} \
             --sample-name-map {input.db_mapfile} &> {log}
         
-        tar -cf {output.tar} {output.db}
+        tar -cf {output.tar} {output.db} &>> {log}
         """
 
 
 rule call_genotype_gvcfs_interval:
     """Joint genotyping from GenomicsDB for a single interval."""
     input:
+        unpack(get_ref_bundle),
         db="results/genomics_db/DB_L{l}.tar",
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
     output:
         vcf=temp("results/vcfs/intervals/L{l}.vcf.gz"),
         vcfidx=temp("results/vcfs/intervals/L{l}.vcf.gz.tbi"),
     params:
-        het=config.get("het_prior", 0.005),
+        het=config["variant_calling"]["gatk"]["het_prior"],
         db=lambda wc, input: input.db[:-4],
+        java_mem=get_java_mem,
     conda:
         "../../envs/bam2vcf.yml"
     log:
@@ -206,29 +208,26 @@ rule call_genotype_gvcfs_interval:
     threads: 4
     resources:
         mem_mb=16000,
-        mem_mb_reduced=14400,
     shell:
         """
-        tar -xf {input.db}
+        tar -xf {input.db} &> {log}
         gatk GenotypeGVCFs \
-            --java-options '-Xmx{resources.mem_mb_reduced}m -Xms{resources.mem_mb_reduced}m' \
+            --java-options "-Xmx{params.java_mem}m" \
             -R {input.ref} \
             --heterozygosity {params.het} \
             --genomicsdb-shared-posixfs-optimizations true \
             -V gendb://{params.db} \
             -O {output.vcf} \
-            --tmp-dir {resources.tmpdir} &> {log}
+            --tmp-dir {resources.tmpdir} &>> {log}
         """
 
 
 rule call_filter_vcf_interval:
     """Apply GATK recommended hard filters to interval VCF."""
     input:
+        unpack(get_ref_bundle),
         vcf="results/vcfs/intervals/L{l}.vcf.gz",
         vcfidx="results/vcfs/intervals/L{l}.vcf.gz.tbi",
-        ref=f"results/reference/{REF_FILE}",
-        fai=f"results/reference/{REF_FILE}.fai",
-        dictf=f"results/reference/{REF_NAME}.dict",
     output:
         vcf=temp("results/vcfs/intervals/filtered_L{l}.vcf.gz"),
         vcfidx=temp("results/vcfs/intervals/filtered_L{l}.vcf.gz.tbi"),

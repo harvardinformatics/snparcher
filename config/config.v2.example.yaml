@@ -1,10 +1,10 @@
-# snpArcher v2 test configuration - CI
+# snpArcher v2 Configuration Example
 
 samples: "config/samples.csv"
 
 reference:
-  name: "yeast_test"
-  accession: "GCF_000146045.2"
+  name: "my_organism"
+  path: "/data/reference/genome.fna.gz"  # Must be bgzip-compressed
 
 variant_calling:
   tool: "gatk"
@@ -46,5 +46,10 @@ modules:
     google_api_key: ""
   postprocess:
     enabled: false
+    filtering:
+      contig_size: 10000
+      maf: 0.01
+      missingness: 0.75
+      exclude_scaffolds: "mtDNA,Y"
   trackhub:
     enabled: false
