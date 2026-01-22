@@ -19,9 +19,14 @@
 - [x] Run full integration test locally (ARM) - verified working
 - [x] Set up pixi-based CI with platform-specific tasks
 - [x] Update GitHub Actions workflow to use pixi
+- [x] Reorganize config file into logical nested sections
+- [x] Update config.schema.json to match new config structure
+- [x] Update all rules to use new config paths
+- [x] Simplify coverage filtering to mean ± N stdev
+- [x] Create module config system with main config override pattern
+- [x] Fix coverage filtering coupling: add wildcard constraints to prevent BAM generation for GVCF samples
 
 ## High Priority
-
 - [ ] Remove old v1 rule files after confirming v2 CI passes:
   - `workflow/rules/fastq2bam.smk`
   - `workflow/rules/bam2vcf_gatk.smk`
@@ -33,58 +38,21 @@
   - `workflow/rules/mappability.smk`
 - [ ] Remove `workflow/snparcher_utils/` after refactor complete
 - [ ] Replace custom helper functions with Snakemake semantic helpers where possible
-- [ ] Add Snakemake wrappers where available (see Conda Environment Versions below)
-
-## Conda Environment Versions
-
-**Current state:** Conda env files (`workflow/envs/*.yml`) use unpinned versions (`>=`)
-to support ARM (osx-arm64) testing. This is not ideal for reproducibility.
-
-**Why this matters:**
-- Pinned versions ensure reproducible builds across platforms and time
-- Unpinned versions may resolve differently on different platforms/dates
-- ARM builds often lack older package versions available on x86_64
-
-**Solution: Migrate to Snakemake Wrappers**
-[Snakemake wrappers](https://snakemake-wrappers.readthedocs.io/) bundle tool + conda env
-together, with versions managed upstream. Benefits:
-- Wrapper maintainers handle version compatibility
-- Automatically tested across platforms
-- Reduces maintenance burden for snpArcher
-
-**Rules to migrate:**
-- [ ] `align_bwa_map` -> `bio/bwa/mem` wrapper
-- [ ] `fastq_fastp` -> `bio/fastp` wrapper
-- [ ] `call_haplotypecaller_*` -> `bio/gatk/haplotypecaller` wrapper
-- [ ] `reference_index` (bwa index) -> `bio/bwa/index` wrapper
-- [ ] `reference_index` (samtools faidx) -> `bio/samtools/faidx` wrapper
-
-## Temp Directory Handling
-
-**Current state:** Removed custom `bigtmp` config and `get_big_temp()` function.
-Rules now use Snakemake's default `resources.tmpdir`.
-
-**Future:** When [snakemake/snakemake#3820](https://github.com/snakemake/snakemake/pull/3820)
-is merged, consider using the new `choose_tmp()` ioutils function for HPC environments
-with heterogeneous temp storage (e.g., some nodes have fast NVMe, others only NFS).
-
-Example usage (once available):
-```yaml
-default-resources:
-  tmpdir: "choose_tmp(['/fast_nvme', '/scratch'])"
-```
 
 ## Design Issues to Address
 
-- [ ] **Sumstats coupling** - stats rules force BAM generation even when starting from GVCF
-  - Consider: separate target rule, conditional on input_type, or config flag to skip
-  - Current design prevents efficient "GVCF-only" entry point
+- [ ] **Coverage filtering coupling** - cov_filter requires BAM generation for ALL samples
+  - When `cov_filter: true`, `filter_compute_d4` calls `get_final_bam` for ALL samples
+  - `get_final_bam` has no wildcard constraints to prevent GVCF samples
+  - Current design prevents efficient "GVCF-only" entry point when coverage filtering is enabled
+  - Fix: Add wildcard constraints to `filter_compute_d4` and `align_bam_stats` rules
 - [ ] **Module compatibility** - qc/postprocess/mk/trackhub modules need updates for v2
   - Currently disabled in main Snakefile
   - Need to update module common.smk files for v2 sample sheet format
 
 ## Deferred / To Discuss
 
+- [ ] Snakemake wrappers migration - decided to skip for now
 - [ ] Reference genome caching system (`ref_cache_dir`, registry abstraction)
 - [ ] SRA RunSelector integration / helper script for sample sheet generation
 - [ ] Postprocessing sample sheet design (include/exclude, MK ingroup/outgroup)
@@ -94,6 +62,9 @@ default-resources:
 
 ## Documentation
 
+- [ ] Update docs/reference/config.md for new nested structure
+- [ ] Add config migration guide (old flat -> new nested)
+- [ ] Add module configuration guide
 - [ ] Tutorial: First variant calling run
 - [ ] How-to: Create sample sheet
 - [ ] How-to: Run on SLURM cluster
@@ -121,6 +92,8 @@ Created during refactor:
 
 - `.test/fastq-to-vcf/config/config.yaml` - v2 format config
 - `.test/fastq-to-vcf/config/samples.csv` - v2 format sample sheet
+- `.test/gvcf-to-vcf/config/config.yaml` - GVCF input test
+- `.test/ci/config/config.yaml` - CI test config (old v1 format)
 
 ## CI Configuration
 
