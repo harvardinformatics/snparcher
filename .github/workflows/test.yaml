@@ -6,14 +6,14 @@ on:
       - "**/Snakefile"
       - "**/*.smk"
       - "**/*.py"
-      - "workflow/envs/*.yml"
+      - "workflow/envs/*.yaml"
       - ".github/workflows/*"
   pull_request:
     paths:
       - "**/Snakefile"
       - "**/*.smk"
       - "**/*.py"
-      - "workflow/envs/*.yml"
+      - "workflow/envs/*.yaml"
       - ".github/workflows/*"
 
 jobs:
@@ -25,9 +25,10 @@ jobs:
 
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
-          cache: false
+          cache: true
+          environments: dev-tools
 
       - name: Run test
         env:
           TMPDIR: ${{ runner.temp }}
-        run: pixi run test
+        run: pixi run -e dev-tools pytest -v tests/tests.py --no-conda

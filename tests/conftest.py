@@ -1,4 +1,5 @@
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,15 @@ import pytest
 WORKFLOW_DIR = Path(__file__).parent.parent / "workflow"
 CONDA_PREFIX = Path(__file__).parent / ".conda-envs"
 TEST_DATA_DIR = Path(__file__).parent / "data"
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--no-conda",
+        action="store_true",
+        default=False,
+        help="Run without --use-conda (use system/pixi environment)",
+    )
 
 
 class SnakemakeRunner:
@@ -17,21 +27,13 @@ class SnakemakeRunner:
         self.use_conda = use_conda
         self.conda_prefix = CONDA_PREFIX
 
+        # Symlink test data into workdir
         test_data_link = self.workdir / "tests" / "data"
         test_data_link.parent.mkdir(parents=True, exist_ok=True)
         if not test_data_link.exists():
             test_data_link.symlink_to(TEST_DATA_DIR)
 
     def run(self, target, configfile, samples=None, extra_args=None):
-        """
-        Run snakemake with given target and config file.
-
-        Args:
-            target: Rule name or output file(s)
-            configfile: Path to config YAML
-            samples: Optional path to samples CSV (overrides config)
-            extra_args: Additional snakemake arguments
-        """
         if isinstance(target, str):
             targets = [target]
         else:
@@ -39,7 +41,6 @@ class SnakemakeRunner:
 
         cmd = [
             "snakemake",
-            "--show-failed-logs",
             "-s",
             str(self.snakefile),
             "--configfile",
@@ -94,5 +95,6 @@ def temp_workdir(tmp_path):
 
 
 @pytest.fixture
-def runner(temp_workdir):
-    return SnakemakeRunner(temp_workdir)
+def runner(temp_workdir, request):
+    no_conda = request.config.getoption("--no-conda")
+    return SnakemakeRunner(temp_workdir, use_conda=not no_conda)

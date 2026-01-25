@@ -1,8 +1,8 @@
 .conda-envs
 tests/.conda-envs
-tests
+
 .DS_Store
-pixi.lock
+
 pixi.toml
 data_preparation/
 .snakemake*
