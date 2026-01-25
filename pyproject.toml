@@ -41,6 +41,8 @@ mkdocs-material = "*"
 default = { features = [], solve-group = "default" }
 dev = { features = ["dev"], solve-group = "default" }
 docs = { features = ["docs"], solve-group = "default" }
+tools = { features = ["tools"], solve-group = "tools" }
+dev-tools = { features = ["dev", "tools"], solve-group = "tools" }
 
 # Tasks for default environment (workflow operations)
 [tool.pixi.tasks]
@@ -56,6 +58,24 @@ test = "pytest -v tests/tests.py"
 [tool.pixi.feature.docs.tasks]
 docs-serve = "mkdocs serve"
 docs-build = "mkdocs build"
+
+[tool.pixi.feature.tools.dependencies]
+samtools = "*"
+bwa = "*"
+ncbi-datasets-cli = "*"
+htslib = "*"
+gatk4 = "*"
+picard = "*"
+bcftools = "*"
+fastp = "*"
+sra-tools = "*"
+unzip = "*"
+curl = "*"
+ffq = "*"
+sambamba = "*"
+mosdepth = "*"
+genmap = "*"
+bedtools = "*"
 
 # ============ RUFF CONFIGURATION ============
 
