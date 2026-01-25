@@ -1,7 +1,0 @@
-channels:
-  - conda-forge
-  - bioconda
-  - defaults
-dependencies:
-  - sambamba==1.0.1
-  - python==3.11.4
