@@ -1,7 +1,0 @@
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - bedtools>=2.30
-  - mosdepth>=0.3
-  - d4tools>=0.3
