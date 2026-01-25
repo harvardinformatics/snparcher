@@ -25,9 +25,9 @@ jobs:
 
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
-          cache: false
+          cache: true
 
       - name: Run test
         env:
           TMPDIR: ${{ runner.temp }}
-        run: pixi run test-simple
+        run: pixi run test
