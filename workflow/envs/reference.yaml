@@ -1,0 +1,9 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - samtools>=1.14
+  - bwa>=0.7.17
+  - ncbi-datasets-cli>=17.1
+  - curl>=7.73
+  - unzip=6.0

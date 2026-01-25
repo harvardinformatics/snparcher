@@ -1,43 +1,17 @@
+# new gatk intervals
 localrules: create_db_mapfile
-
-def get_java_mem(wildcards, resources):
-    """Generate Java options string with heap size from resources.mem_mb.
-
-    Calculates Java heap size (90% of mem_mb) to leave room for JVM overhead.
-
-    Args:
-        wildcards: Snakemake wildcards object (unused, required for params signature)
-        resources: Snakemake resources object
-
-    Returns:
-        Java options string, e.g. "-Xmx7200m"
-
-    Example:
-        rule example:
-            resources:
-                mem_mb=8000,
-            params:
-                java_mem=get_java_mem,
-            shell:
-                "gatk Tool --java-options {params.java_mem} ..."
-    """
-    import math
-
-    mem_mb = getattr(resources, "mem_mb")
-    heap_mb = math.floor(mem_mb * 0.9)
-    return f"-Xmx{heap_mb}m"
-
 
 def haplotype_caller_input(wildcards):
     input_type = samples_df.loc[wildcards.sample, "input_type"]
-    ref_files = REF_FILES
-    if input_type == "bam":
-        bam = samples_df.loc[wildcards.sample, "input"]
-    else:  # fastq, srr
-        bam = f"results/mapping/{wildcards.sample}.bam"
+    
+    if input_type == "gvcf":
+        raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotype_caller")
+    
+    bam = get_final_bam(wildcards.sample)
     return {
         "bam": bam,
         "bai": bam + ".bai",
+        "interval": f"results/intervals/gvcf/{wildcards.interval}-scattered.interval_list",
         **REF_FILES,
     }
 
@@ -84,20 +58,9 @@ def get_interval_vcfs(wc):
 
 
 def get_gvcfs_for_db(wc):
-    """Get all sample gVCFs for genomics DB import."""
-    gvcfs = []
-    tbis = []
-    for sample in samples_df.index:
-        input_type = samples_df.loc[sample, "input_type"]
-        if input_type == "gvcf":
-            gvcf = samples_df.loc[sample, "input"]
-        else:
-            gvcf = f"results/gvcfs/{sample}.g.vcf.gz"
-        gvcfs.append(gvcf)
-        tbis.append(gvcf + ".tbi")
     return {
-        "gvcfs": gvcfs,
-        "tbis": tbis,
+        "gvcfs": [get_final_gvcf(s) for s in SAMPLES_ALL],
+        "tbis": [get_final_gvcf(s) + ".tbi" for s in SAMPLES_ALL],
         "interval": f"results/intervals/db/{wc.interval}-scattered.interval_list",
         "db_mapfile": "results/genomics_db/mapfile.txt",
     }
@@ -109,10 +72,12 @@ rule gatk_haplotypecaller_interval:
         vcf=temp("results/interval_gvcfs/{sample}/{interval}.g.vcf.gz"),
         tbi=temp("results/interval_gvcfs/{sample}/{interval}.g.vcf.gz.tbi"),
     params:
-        java_mem=lambda wc, res: get_java_mem,
+        java_mem=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
         ploidy=config["variant_calling"]["ploidy"],
         min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
         min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
+    resources:
+        mem_mb=4096,
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -175,7 +140,9 @@ rule gatk_genomics_db_import:
         db=temp(directory("results/gatk_genomics_db/L{interval}")),
         tar="results/gatk_genomics_db/L{interval}.tar",
     params:
-        java_mem=get_java_mem,
+        java_mem=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
+    resources:
+        mem_mb=4096,
     conda:
         "../envs/gatk.yaml"
     benchmark:
