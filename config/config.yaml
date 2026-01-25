@@ -1,97 +1,54 @@
-##############################
-# Variables you need to change
-##############################
-#v1 config
-samples: "config/samples.csv" # path to the sample metadata CSV
-final_prefix: "" # prefix for final output files
-intervals: True #Set to True if you want to perform variant calling using interval approach.
-sentieon: False #set to True if you want to use sentieon, False if you want GATK
-sentieon_lic: "" #set to path of sentieon license
-remote_reads: False # Set True if reads are in a location seperate from --default-remote-prefix.
-remote_reads_prefix: "" # set to google bucket prefix where reads live. FOR SNAKEMAKE 7.X.X ONLY.
-bigtmp: "" #Set to a path with lots of free space to use for commands that require large amounts of temp space; defaults to system tmpdir if empty
-cov_filter: True #set to True if you want to include coverage thresholds in the callable sites bed file (default uses mappability only)
-generate_trackhub: True #Set to true if you want to generate a Genome Browser Trackhub. Dependent on postprocessing module.
-trackhub_email: ""
-mark_duplicates: True
-sort_reads: False
-##############################
-# Variables you *might* need to change
-##############################
+# snpArcher v2 Configuration Example
 
-# Set reference genome here if you would like to you use the same reference genome for all samples in sample sheet. See docs for more info.
-# refGenome:
-# refPath:
+samples: "config/samples.csv"
 
-# Interval approach options, only applicable if intervals is True
-minNmer: 500 # the minimum Nmer used to split up the genome; e.g. a value of 200 means only Nmers 200 or greater are used to define the boundaries of intervals. The minimum is 50.
-num_gvcf_intervals: 50 # The maximum number of intervals to create for GVCF generation. Note: the actual number of intervals may be less than the specified value if the reference genome has very few gaps.
-db_scatter_factor: 0.15 # Scatter factor for calculating number of intervals to create for genomics db generation. (scatter_factor * num_samples * num_gvcf_intervals) gives us number of db intervals to create. Reccomend <1
-ploidy: 2 # Ploidy for HaplotypeCaller and Sentieon Haplotyper
-## Coverage options ##
-## default pipeline is optimized for low coverage data - if using high coverage data (> 10x), uncomment high coverage options and comment out low coverage options
+reference:
+  name: "my_organism"
+  source: "/data/reference/genome.fna.gz"  # Can be a refseq/genbank accession, url, or path
 
-# low coverage options (< 10x)
-minP: 1
-minD: 1
+variant_calling:
+  expected_coverage: "low"  # low | high | auto (future)
+  tool: "gatk" # gatk | sentieon
+  ploidy: 2
+  gatk:
+    het_prior: 0.005
 
-# high coverage options (> 10x)
-#minP: 2
-#minD: 4
-
-het_prior: 0.005 #prior probabilty of heterozygous site; changes likelihood of a site being called non-ref, but not genotype likelihoods
-
-## callable sites bed file options ##
-mappability_min: 1 #regions of the genome with mappability less than this will be removed from callable sites bed file
-mappability_k: 150 #the kmer used to compute mappability with genmap; you should not need to change this except in special cases
-
-#this ignores small regions of abberatant coverage/mappability as often these are just below the threshold
-#to do strict filtering, set to 0
-
-mappability_merge: 100 #merge passing mappability regions separated by this or fewer bp into a single region
-cov_merge: 100 #merge passing coverage regions separate by this or fewer bp into a single region
-
-## QC options ##
-nClusters: 3
-GoogleAPIKey:
-min_depth: 2
-
-## Filtering options ##
-
-contig_size: 10000 # snps on contigs this size or smaller will be filtered from the final clean vcfs. Set to 0 to disable.
-maf: 0.01 #snps with MAF below this value will be filtered from the final clean vcfs. Set to 0 to disable.
-missingness: 0.75 #snps with missingness greater than this value will be filtered from the final clean vcfs. Set to 1 to disable.
-scaffolds_to_exclude: "mtDNA,Y" #comma separated, no spaces list of scaffolds to exclude from final clean vcfs. Set to blank to disable.
-
-########################################
-## coverage thresholds ##
-########################################
-
-## If cov_filter is True, use these parameters to control how coverage filtering is done
-## Three options are provided for coverage-based filtering. The default option is to just filter
-## regions of the genome with mean coverage below a minimal threshold (default = 1), with a very large upper limit
-## To use this option, set the variables below to the lower absolute mean coverage limit and upper absolute mean coverage limit, 
-## and make sure all other coverage variables are empty
-
-cov_threshold_lower: 1
-cov_threshold_upper: 10000
- 
-## Alternatively, filtering can be done based on standard deviations 
-## (assumes a Poisson distribution, so stdev_cov equals the square root of the mean coverage),
-## where regions of the genome with mean coverage < X standard deviations or > X standard deviations are removed.
-## To use this option, set the variables below to the desired X
-## and make sure all other coverage variables are empty
-
-cov_threshold_stdev: 
-
-## Finally, filtering can be done based on absolute scaling of the mean, 
-## where regions of the genome with mean coverage < (global mean coverge / X) or > (global mean coverge * X) are removed.
-## To use this option, set the variable below to the desired X
-## and make sure all other coverage variables are empty
-
-cov_threshold_rel: 
+intervals:
+  enabled: true
+  min_nmer: 500
+  num_gvcf_intervals: 50
+  db_scatter_factor: 0.15
 
 
+callable_sites:
+  generate_bed_file: True
+  coverage:
+    enabled: true
+    stdev: 2
+    merge_distance: 100
+  mappability:
+    enabled: true
+    min_score: 1
+    kmer: 150
+    merge_distance: 100
 
+sentieon:
+  enabled: false
+  license: ""
 
-
+modules:
+  qc:
+    enabled: false
+    clusters: 3
+    min_depth: 2
+    google_api_key: ""
+  postprocess:
+    enabled: false
+    filtering:
+      contig_size: 10000
+      maf: 0.01
+      missingness: 0.75
+      exclude_scaffolds: "mtDNA,Y"
+  trackhub:
+    enabled: false
+    email: "example@email.com"

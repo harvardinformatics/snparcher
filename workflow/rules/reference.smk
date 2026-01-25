@@ -1,64 +1,93 @@
-ruleorder: download_reference > index_reference
-localrules: download_reference
+def get_reference_type():
+    """Determine reference source type."""
+    source = config["reference"]["source"]
+    if source.startswith(("http://", "https://", "ftp://")):
+        return "url"
+    elif Path(source).exists() or source.startswith("/"):
+        return "local"
+    else:
+        return "accession"
 
-# This does not work with SLURM as of 4/3/24. See here for more info:https://github.com/snakemake/snakemake-executor-plugin-slurm/issues/60
-# rule copy_reference:
-#     """Copies user-specified reference genome path to results dir to maintain refGenome wildcard"""
-#     input:
-#         ref = get_ref
-#     output:
-#         ref = "results/{refGenome}/data/genome/{refGenome}.fna"
-#     log:
-#         "logs/{refGenome}/copy_ref/log.txt"
-#     shell:
-#         #probably don't need to unzip but might as well.
-#         """
-#         gunzip -c {input.ref} 2> {log} > {output.ref} || cp {input.ref} {output.ref} &> {log}
-#         """
 
-rule download_reference:
-    input:
-        ref = get_ref
-    output:
-        ref = "results/{refGenome}/data/genome/{refGenome}.fna"
-    params:
-        dataset = "results/{refGenome}/data/genome/{refGenome}_dataset.zip",
-        outdir = "results/{refGenome}/data/genome/{refGenome}"
-    conda:
-        "../envs/fastq2bam.yml"
-    log:
-        "logs/{refGenome}/download_ref/log.txt"
-    benchmark:
-        "benchmarks/{refGenome}/download_ref/benchmark.txt"
-    shell:
-        """
-        if [ -z "{input.ref}" ]  # check if this is empty
-        then
-            mkdir -p {params.outdir}
-            datasets download genome accession {wildcards.refGenome} --include genome --filename {params.dataset} \
-            && (7z x {params.dataset} -aoa -o{params.outdir} || unzip -o {params.dataset} -d {params.outdir}) \
-            && cat {params.outdir}/ncbi_dataset/data/{wildcards.refGenome}/*.fna > {output.ref}
-        else
-            gunzip -c {input.ref} 2> {log} > {output.ref} || cp {input.ref} {output.ref} &> {log}
-        fi
-        """
+REF_TYPE = get_reference_type()
+
+
+if REF_TYPE == "local":
+
+    rule prepare_reference:
+        output:
+            ref="results/reference/{name}.fa.gz",
+        params:
+            source=config["reference"]["source"],
+        conda:
+            "../envs/reference.yaml"
+        log:
+            "logs/prepare_reference/{name}.txt"
+        shell:
+            """
+            if [[ "{params.source}" == *.gz ]]; then
+                gunzip -c "{params.source}" 2> {log} | bgzip -c > {output.ref} 2>> {log}
+            else
+                bgzip -c "{params.source}" > {output.ref} 2> {log}
+            fi
+            """
+
+
+elif REF_TYPE == "url":
+
+    rule prepare_reference:
+        output:
+            ref="results/reference/{name}.fa.gz",
+        params:
+            source=config["reference"]["source"],
+        conda:
+            "../envs/reference.yaml"
+        log:
+            "logs/prepare_reference/{name}.txt"
+        shell:
+            """
+            curl -fSL "{params.source}" 2> {log} | gunzip -c 2>> {log} | bgzip -c > {output.ref} 2>> {log}
+            """
+
+
+else:  # accession
+
+    rule prepare_reference:
+        output:
+            ref="results/reference/{name}.fa.gz",
+        params:
+            source=config["reference"]["source"],
+        conda:
+            "../envs/reference.yaml"
+        log:
+            "logs/prepare_reference/{name}.txt"
+        shell:
+            """
+            TMPDIR=$(mktemp -d)
+            datasets download genome accession "{params.source}" \
+                --include genome \
+                --filename "$TMPDIR/dataset.zip" &> {log}
+            unzip -o "$TMPDIR/dataset.zip" -d "$TMPDIR" >> {log} 2>&1
+            cat "$TMPDIR"/ncbi_dataset/data/{params.source}/*.fna | bgzip -c > {output.ref} 2>> {log}
+            rm -rf "$TMPDIR"
+            """
+
 
 rule index_reference:
     input:
-        ref = "results/{refGenome}/data/genome/{refGenome}.fna"
+        ref="results/reference/{name}.fa.gz",
     output:
-        indexes = expand("results/{{refGenome}}/data/genome/{{refGenome}}.fna.{ext}", ext=["sa", "pac", "bwt", "ann", "amb"]),
-        fai = "results/{refGenome}/data/genome/{refGenome}.fna.fai",
-        dictf = "results/{refGenome}/data/genome/{refGenome}.dict"
+        gzi="results/reference/{name}.fa.gz.gzi",
+        fai="results/reference/{name}.fa.gz.fai",
+        dict="results/reference/{name}.dict",
+        bwa_idx=multiext("results/reference/{name}.fa.gz", ".sa", ".pac", ".bwt", ".ann", ".amb"),
     conda:
-        "../envs/fastq2bam.yml"
+        "../envs/reference.yaml"
     log:
-        "logs/{refGenome}/index_ref/log.txt"
-    benchmark:
-        "benchmarks/{refGenome}/index_ref/benchmark.txt"
+        "logs/index_reference/{name}.txt"
     shell:
         """
-        bwa index {input.ref} 2> {log}
-        samtools faidx {input.ref} --output {output.fai} >> {log}
-        samtools dict {input.ref} -o {output.dictf} >> {log} 2>&1
+        samtools faidx {input.ref} 2> {log}
+        samtools dict {input.ref} -o {output.dict} >> {log} 2>&1
+        bwa index {input.ref} >> {log} 2>&1
         """

@@ -7,6 +7,16 @@ Major goals of version 2 redesign are to:
 - faciliate future moves to a cli and to add more options for each step
 
 ## Sample Sheet
+decided 1/22/26:
+- snparcher sample sheet:
+	- require 3 fields:
+		- sample_id
+		- input_type: controlled
+		- input: accession
+	- optional (columns):
+		- library_id=sample_id
+		- only need library_id when you make 3 libraries from 1 sample
+		- mark_duplicates=True/False (default True)
 
 The sample sheet currently controls too many things, including workflow behavior. 
 
