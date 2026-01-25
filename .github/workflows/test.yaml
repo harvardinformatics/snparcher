@@ -17,15 +17,15 @@ on:
       - ".github/workflows/*"
 
 jobs:
-  test-fastq-to-vcf:
-    name: Test fastq-to-vcf pipeline
+  tests:
+    name: tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
-          cache: true
+          cache: false
 
       - name: Run test
         env:
