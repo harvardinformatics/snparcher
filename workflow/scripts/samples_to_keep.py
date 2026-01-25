@@ -13,4 +13,3 @@ with open(infile, "r") as f:
 
 for s in samps:
     print(s)
-        

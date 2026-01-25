@@ -30,6 +30,8 @@ conda = "*"
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
 snakefmt = "*"
+pytest="*"
+pytest-dependency = ">=0.5.1,<0.6"
 
 [tool.pixi.feature.docs.dependencies]
 mkdocs = "*"
@@ -43,19 +45,12 @@ docs = { features = ["docs"], solve-group = "default" }
 # Tasks for default environment (workflow operations)
 [tool.pixi.tasks]
 lint-snakemake = "snakemake --lint"
-test-dry-run = "snakemake -n --configfile .test/ci/config/config.yaml"
-test-simple = "snakemake --snakefile workflow/Snakefile --configfile .test/fastq-to-vcf/config/config.yaml --directory .test/fastq-to-vcf --cores 1 --use-conda --show-failed-logs vcf"
-clean-test-simple = "rm -r .test/fastq-to-vcf/.snakemake .test/fastq-to-vcf/results .test/fastq-to-vcf/logs"
-test = { depends-on = ["test-simple"] }
 
-[tool.pixi.target.osx-arm64.tasks]
-test-simple = "snakemake --snakefile workflow/Snakefile --configfile .test/fastq-to-vcf/config/config-osx-arm64.yaml --directory .test/fastq-to-vcf --cores 1 --use-conda --show-failed-logs vcf"
-
-# Tasks for dev environment (linting/formatting only)
 [tool.pixi.feature.dev.tasks]
 lint = "ruff check workflow/"
 format = "ruff format workflow/ && snakefmt workflow/"
 check = { depends-on = ["lint", "lint-snakemake"] }
+test = "pytest -v tests/test.py"
 
 # Tasks for docs environment
 [tool.pixi.feature.docs.tasks]
