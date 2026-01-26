@@ -79,6 +79,9 @@ mosdepth = "==0.3.3"
 genmap = "*"
 bedtools = "*"
 
+[tool.pixi.feature.tools.target.linux-64.dependencies]
+clam = ">=1.1.0"
+
 # ============ RUFF CONFIGURATION ============
 
 [tool.ruff]
