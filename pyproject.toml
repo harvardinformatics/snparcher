@@ -75,7 +75,7 @@ unzip = "*"
 curl = "*"
 ffq = "*"
 sambamba = "*"
-mosdepth = ">=0.3.12"
+mosdepth = "==0.3.3"
 genmap = "*"
 bedtools = "*"
 
