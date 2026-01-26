@@ -24,9 +24,10 @@ def get_config_file():
     return CONFIGS_DIR / "local_genome.yaml"
 
 @pytest.mark.dry_run
-def test_setup_dry_run():
+def test_setup_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
-        smk = SnakemakeRunner(Path(tmpdir))
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
 
         result = smk.dry_run(
             target="setup",
@@ -48,9 +49,10 @@ def test_setup_dry_run():
 
 
 @pytest.mark.dry_run
-def test_full_pipeline_dry_run():
+def test_full_pipeline_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
-        smk = SnakemakeRunner(Path(tmpdir))
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
 
         result = smk.dry_run(
             target="all",
@@ -61,9 +63,10 @@ def test_full_pipeline_dry_run():
 
 
 @pytest.mark.full_run
-def test_setup():
+def test_setup(request):
+    no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
-        smk = SnakemakeRunner(Path(tmpdir))
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
 
         result = smk.run(
             target="setup",
@@ -81,9 +84,10 @@ def test_setup():
 
 
 @pytest.mark.full_run
-def test_full_pipeline():
+def test_full_pipeline(request):
+    no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
-        smk = SnakemakeRunner(Path(tmpdir))
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
 
         result = smk.run(
             target="all",
@@ -99,9 +103,10 @@ def test_full_pipeline():
 
 
 @pytest.mark.full_run
-def test_incremental():
+def test_incremental(request):
+    no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
-        smk = SnakemakeRunner(Path(tmpdir))
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
 
         # Run setup
         result = smk.run(
