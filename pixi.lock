@@ -1229,7 +1229,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/markupsafe-3.0.3-py313h3dea7bd_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/menuinst-2.4.2-py313h78bf25f_0.conda
-      - conda: https://conda.anaconda.org/bioconda/linux-64/mosdepth-0.3.12-h0ec343a_0.conda
+      - conda: https://conda.anaconda.org/bioconda/linux-64/mosdepth-0.3.3-hd299d5a_3.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/linux-64/msgpack-python-1.1.2-py313h7037e92_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mypy_extensions-1.1.0-pyha770c72_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/nbformat-5.10.4-pyhd8ed1ab_1.conda
@@ -1534,7 +1534,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/markupsafe-3.0.3-py313h0f4d31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/menuinst-2.4.2-py313habf4b1d_0.conda
-      - conda: https://conda.anaconda.org/bioconda/osx-64/mosdepth-0.3.12-h4556f9c_0.conda
+      - conda: https://conda.anaconda.org/bioconda/osx-64/mosdepth-0.3.3-h212548b_3.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpc-1.3.1-h9d8efa1_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpfr-4.2.1-haed47dc_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/msgpack-python-1.1.2-py313h5eff275_1.conda
@@ -1823,7 +1823,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-4.0.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/markupsafe-3.0.3-py312h5748b74_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
-      - conda: https://conda.anaconda.org/bioconda/osx-arm64/mosdepth-0.3.12-h9125d35_0.conda
+      - conda: https://conda.anaconda.org/bioconda/noarch/mosdepth-0.3.3-hdfd78af_1.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpc-1.3.1-h8f1351a_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpfr-4.2.1-hb693164_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mypy_extensions-1.1.0-pyha770c72_0.conda
@@ -2684,7 +2684,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/markupsafe-3.0.3-py313h3dea7bd_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/menuinst-2.4.2-py313h78bf25f_0.conda
-      - conda: https://conda.anaconda.org/bioconda/linux-64/mosdepth-0.3.12-h0ec343a_0.conda
+      - conda: https://conda.anaconda.org/bioconda/linux-64/mosdepth-0.3.3-hd299d5a_3.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/linux-64/msgpack-python-1.1.2-py313h7037e92_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/nbformat-5.10.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ncbi-datasets-cli-18.15.0-ha770c72_0.conda
@@ -2983,7 +2983,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/markupsafe-3.0.3-py313h0f4d31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/menuinst-2.4.2-py313habf4b1d_0.conda
-      - conda: https://conda.anaconda.org/bioconda/osx-64/mosdepth-0.3.12-h4556f9c_0.conda
+      - conda: https://conda.anaconda.org/bioconda/osx-64/mosdepth-0.3.3-h212548b_3.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpc-1.3.1-h9d8efa1_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/mpfr-4.2.1-haed47dc_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/msgpack-python-1.1.2-py313h5eff275_1.conda
@@ -3266,7 +3266,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-4.0.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/markupsafe-3.0.3-py312h5748b74_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
-      - conda: https://conda.anaconda.org/bioconda/osx-arm64/mosdepth-0.3.12-h9125d35_0.conda
+      - conda: https://conda.anaconda.org/bioconda/noarch/mosdepth-0.3.3-hdfd78af_1.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpc-1.3.1-h8f1351a_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpfr-4.2.1-hb693164_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/nbformat-5.10.4-pyhd8ed1ab_1.conda
@@ -8766,46 +8766,29 @@ packages:
   license_family: MIT
   size: 16122
   timestamp: 1734641109286
-- conda: https://conda.anaconda.org/bioconda/linux-64/mosdepth-0.3.12-h0ec343a_0.conda
-  sha256: 1355dca8afcaf8f20203101ef2a0b1d3af71c3dd827680a2b4c81147f0c01993
-  md5: 0a2f1f6bc9a81982adf081d711a6b07d
+- conda: https://conda.anaconda.org/bioconda/linux-64/mosdepth-0.3.3-hd299d5a_3.tar.bz2
+  sha256: e6f901a14061af30249d9850df416987a2d3fe9490eafa657b2df3004e9f5813
+  md5: 11e1a3be734d2f423bb05cda7e760d7a
   depends:
-  - bzip2 >=1.0.8,<2.0a0
-  - htslib >=1.22.1,<1.23.0a0
-  - libdeflate >=1.22,<1.23.0a0
-  - libgcc >=13
-  - liblzma >=5.8.1,<6.0a0
-  - libzlib >=1.3.1,<2.0a0
+  - htslib >=1.17,<1.24.0a0
+  - libgcc-ng >=12
   license: MIT
-  license_family: MIT
-  size: 209037
-  timestamp: 1762403085115
-- conda: https://conda.anaconda.org/bioconda/osx-64/mosdepth-0.3.12-h4556f9c_0.conda
-  sha256: 7cb86b72c82a324d3c515d3325f9b787f61ce690bc3cb14642135ac3326b4608
-  md5: 86095640cffdbdf6442be083ebe40f73
+  size: 3597263
+  timestamp: 1684453703174
+- conda: https://conda.anaconda.org/bioconda/noarch/mosdepth-0.3.3-hdfd78af_1.tar.bz2
+  sha256: 8b4bc5078fae3c32d893c1e127d07eb843c364517e0478d1120c0dfd8434978a
+  md5: 6fcc7a54febd1c118808b3c90c774871
+  license: MIT
+  size: 3593818
+  timestamp: 1643807051762
+- conda: https://conda.anaconda.org/bioconda/osx-64/mosdepth-0.3.3-h212548b_3.tar.bz2
+  sha256: eb35b148d24cec6c6ebf0be5af4cd1b9dae293209e0072b3bfa31c00eb78a7f2
+  md5: c573978d5bd620ee9474bac802827bb0
   depends:
-  - bzip2 >=1.0.8,<2.0a0
-  - htslib >=1.22.1,<1.23.0a0
-  - libdeflate >=1.22,<1.23.0a0
-  - liblzma >=5.8.1,<6.0a0
-  - libzlib >=1.3.1,<2.0a0
+  - htslib >=1.17,<1.24.0a0
   license: MIT
-  license_family: MIT
-  size: 167275
-  timestamp: 1762404004900
-- conda: https://conda.anaconda.org/bioconda/osx-arm64/mosdepth-0.3.12-h9125d35_0.conda
-  sha256: 4d73e570c8367f81ad91b86c175285b254c6c170d8f4358c3ae7c382a28f9f1e
-  md5: e7852a49ad703e8eb0d74759455e0dc0
-  depends:
-  - bzip2 >=1.0.8,<2.0a0
-  - htslib >=1.22.1,<1.23.0a0
-  - libdeflate >=1.22,<1.23.0a0
-  - liblzma >=5.8.1,<6.0a0
-  - libzlib >=1.3.1,<2.0a0
-  license: MIT
-  license_family: MIT
-  size: 170611
-  timestamp: 1762402602260
+  size: 196808
+  timestamp: 1684468996551
 - conda: https://conda.anaconda.org/conda-forge/osx-64/mpc-1.3.1-h9d8efa1_1.conda
   sha256: dcf91571da6c2f0db96d43a1b639047def05a0e1b6436d42c9129ab14af47b10
   md5: 0520855aaae268ea413d6bc913f1384c
