@@ -1,3 +1,3 @@
-sample_id,input_type,input,library_id
-SAMN12676327,fastq,tests/data/local_fastq/my_sample1_1.fastq.gz;tests/data/local_fastq/my_sample1_2.fastq.gz,
-SAMN12676342,fastq,tests/data/local_fastq/my_sample2_1.fastq.gz;tests/data/local_fastq/my_sample2_2.fastq.gz,
+sample_id,input_type,input,library_id,mark_duplicates
+sample1,fastq,tests/data/fastq/sample1_1.fastq.gz;tests/data/fastq/sample1_2.fastq.gz,,true
+sample2,fastq,tests/data/fastq/sample2_1.fastq.gz;tests/data/fastq/sample2_2.fastq.gz,,true
