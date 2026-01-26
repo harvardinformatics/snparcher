@@ -6,3 +6,4 @@ dependencies:
   - pigz>=2.6
   - curl>=7.73
   - ffq >=0.3.1
+  - jq

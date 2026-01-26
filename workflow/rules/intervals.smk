@@ -62,7 +62,7 @@ checkpoint create_gvcf_intervals:
             --subdivision-mode BALANCING_WITHOUT_INTERVAL_SUBDIVISION \
             --interval-merging-rule OVERLAPPING_ONLY \
             &> {log}
-        ls {output.out_dir}/*-scattered.interval_list > {output.fof}
+        ls -1 {output.out_dir}/*-scattered.interval_list > {output.fof}
         """
 
 
@@ -95,5 +95,5 @@ checkpoint create_db_intervals:
             --subdivision-mode INTERVAL_SUBDIVISION \
             --interval-merging-rule OVERLAPPING_ONLY \
             &> {log}
-        ls {output.out_dir}/*-scattered.interval_list > {output.fof}
+        ls -1 {output.out_dir}/*-scattered.interval_list > {output.fof}
         """

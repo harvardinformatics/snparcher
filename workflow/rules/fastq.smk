@@ -49,7 +49,7 @@ rule download_sra:
         else
             echo "Prefetch failed, trying ENA via ffq..." >> {log}
             ffq --ftp {wildcards.accession} 2>> {log} \
-                | grep -oP '"url":\s*"\K[^"]+' \
+                | jq -r '.[].url' \
                 | xargs -I {{}} curl -fSL -o {params.outdir}/$(basename {{}}) {{}} 2>> {log}
         fi
         

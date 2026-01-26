@@ -1,5 +1,6 @@
+# tests/conftest.py
+
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,25 @@ def pytest_addoption(parser):
         default=False,
         help="Run without --use-conda (use system/pixi environment)",
     )
+    parser.addoption(
+        "--dry-run-only",
+        action="store_true",
+        default=False,
+        help="Only run dry-run tests",
+    )
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "dry_run: mark test as dry-run only")
+    config.addinivalue_line("markers", "full_run: mark test as requiring full execution")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--dry-run-only"):
+        skip_full = pytest.mark.skip(reason="--dry-run-only specified")
+        for item in items:
+            if "full_run" in [m.name for m in item.iter_markers()]:
+                item.add_marker(skip_full)
 
 
 class SnakemakeRunner:

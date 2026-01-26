@@ -19,13 +19,18 @@ else:
     else:
         include: "rules/variant_calling/gatk.smk"
 
+print(f"SAMPLES_ALL: {SAMPLES_ALL}")
+print(f"samples_df index: {samples_df.index.tolist()}")
+for s in SAMPLES_ALL:
+    print(f"get_final_gvcf({s}): {get_final_gvcf(s)}")
+
 rule all:
     """Default target: full pipeline."""
     input:
-        "results/vcfs/filtered.vcf.gz",
+        "results/vcfs/raw.vcf.gz",
         "results/qc_metrics/qc_report.tsv",
-        "results/callable_sites/callable_loci.zarr",
-        "results/callable_sites/mappability.bed",
+        "results/callable_sites/callable_loci.zarr" if config["callable_sites"]["coverage"]["enabled"] else [],
+        "results/callable_sites/mappability.bed" if config["callable_sites"]["mappability"]["enabled"] else [],
 
 
 rule setup:
