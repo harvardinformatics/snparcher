@@ -53,10 +53,6 @@ USE_SENTIEON = config["sentieon"]["enabled"]
 samples_df = pd.read_csv(config["samples"])
 validate(samples_df, Path(workflow.basedir, "schemas/samples.schema.yaml"))
 
-print(f"After validate - samples_df:\n{samples_df}")
-print(f"columns: {samples_df.columns.tolist()}")
-print(f"input_type column: {samples_df['input_type'].tolist()}")
-
 samples_df["library_id"] = samples_df["library_id"].fillna(samples_df["sample_id"])
 if "mark_duplicates" not in samples_df.columns:
     samples_df["mark_duplicates"] = True
@@ -133,11 +129,9 @@ def get_final_bam(sample):
 def get_final_gvcf(sample):
     """Get final gVCF path for a sample."""
     input_type = samples_df.loc[sample, "input_type"]
-    print(f"  inside get_final_gvcf: sample={sample}, input_type={input_type}, type={type(input_type)}")
 
     if input_type == "gvcf":
         return samples_df.loc[sample, "input"]
 
     result = f"results/gvcfs/{sample}.g.vcf.gz"
-    print(f"  returning: {result}")
     return result
