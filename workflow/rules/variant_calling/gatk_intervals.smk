@@ -1,4 +1,3 @@
-# new gatk intervals
 localrules: create_db_mapfile
 
 def haplotype_caller_input(wildcards):
@@ -17,50 +16,89 @@ def haplotype_caller_input(wildcards):
 
 
 def get_interval_gvcfs(wc):
-    """Get interval list numbers from checkpoint output."""
-    checkpoint_output = checkpoints.create_gvcf_intervals.get(**wc).output[0]
-    with checkpoint_output.open() as f:
-        lines = [l.strip() for l in f.readlines()]
+    """Get interval gVCF files for a sample."""
+    intervals_file = "results/intervals/gvcf/intervals.txt"
+    
+    if exists(intervals_file):
+        # Read directly from file if it exists
+        with open(intervals_file) as f:
+            lines = [l.strip() for l in f.readlines()]
+    else:
+        # Fall back to checkpoint mechanism to trigger creation
+        checkpoint_output = checkpoints.create_gvcf_intervals.get(**wc).output[0]
+        with open(checkpoint_output) as f:
+            lines = [l.strip() for l in f.readlines()]
+    
     list_files = [os.path.basename(x) for x in lines]
     intervals = [f.replace("-scattered.interval_list", "") for f in list_files]
+    return expand(
+        "results/interval_gvcfs/{sample}/{interval}.g.vcf.gz",
+        sample=wc.sample,
+        interval=intervals,
+    )
 
-    return {
-        "gvcfs": expand(
-            "results/interval_gvcfs/{sample}/{interval}.g.vcf.gz",
-            sample=wc.sample,
-            interval=intervals,
-        ),
-        "tbis": expand(
-            "results/interval_gvcfs/{sample}/{interval}.g.vcf.gz.tbi",
-            sample=wc.sample,
-            interval=intervals,
-        ),
-    }
+
+def get_interval_gvcf_tbis(wc):
+    """Get interval gVCF index files for a sample."""
+    intervals_file = "results/intervals/gvcf/intervals.txt"
+    
+    if exists(intervals_file):
+        with open(intervals_file) as f:
+            lines = [l.strip() for l in f.readlines()]
+    else:
+        checkpoint_output = checkpoints.create_gvcf_intervals.get(**wc).output[0]
+        with open(checkpoint_output) as f:
+            lines = [l.strip() for l in f.readlines()]
+    
+    list_files = [os.path.basename(x) for x in lines]
+    intervals = [f.replace("-scattered.interval_list", "") for f in list_files]
+    return expand(
+        "results/interval_gvcfs/{sample}/{interval}.g.vcf.gz.tbi",
+        sample=wc.sample,
+        interval=intervals,
+    )
+
+
+def get_db_intervals(wc):
+    """Get DB interval IDs from checkpoint output."""
+    intervals_file = "results/intervals/db/intervals.txt"
+    
+    if exists(intervals_file):
+        with open(intervals_file) as f:
+            lines = [l.strip() for l in f.readlines()]
+    else:
+        checkpoint_output = checkpoints.create_db_intervals.get(**wc).output[0]
+        with open(checkpoint_output) as f:
+            lines = [l.strip() for l in f.readlines()]
+    
+    list_files = [os.path.basename(x) for x in lines]
+    return [f.replace("-scattered.interval_list", "") for f in list_files]
+
 
 def get_interval_vcfs(wc):
-    """Get interval VCF list numbers from checkpoint output."""
-    checkpoint_output = checkpoints.create_db_intervals.get(**wc).output[0]
-    with checkpoint_output.open() as f:
-        lines = [l.strip() for l in f.readlines()]
-    list_files = [os.path.basename(x) for x in lines]
-    intervals = [f.replace("-scattered.interval_list", "") for f in list_files]
+    """Get filtered interval VCF files."""
+    intervals = get_db_intervals(wc)
+    return expand(
+        "results/vcfs/intervals/filtered_{interval}.vcf.gz",
+        interval=intervals,
+    )
 
-    return {
-        "vcfs": expand(
-            "results/vcfs/intervals/filters_applied_{interval}.vcf.gz",
-            interval=intervals,
-        ),
-        "tbis": expand(
-            "results/vcfs/intervals/filters_applied_{interval}.vcf.gz.tbi",
-            interval=intervals,
-        ),
-    }
+
+def get_interval_vcf_tbis(wc):
+    """Get filtered interval VCF index files."""
+    intervals = get_db_intervals(wc)
+    return expand(
+        "results/vcfs/intervals/filtered_{interval}.vcf.gz.tbi",
+        interval=intervals,
+    )
 
 
 def get_gvcfs_for_db(wc):
+    gvcfs = [get_final_gvcf(s) for s in SAMPLES_ALL]
+    print(f"get_gvcfs_for_db: gvcfs={gvcfs}")
     return {
-        "gvcfs": [get_final_gvcf(s) for s in SAMPLES_ALL],
-        "tbis": [get_final_gvcf(s) + ".tbi" for s in SAMPLES_ALL],
+        "gvcfs": gvcfs,
+        "tbis": [g + ".tbi" for g in gvcfs],
         "interval": f"results/intervals/db/{wc.interval}-scattered.interval_list",
         "db_mapfile": "results/genomics_db/mapfile.txt",
     }
@@ -69,7 +107,7 @@ rule gatk_haplotypecaller_interval:
     input:
         unpack(haplotype_caller_input),
     output:
-        vcf=temp("results/interval_gvcfs/{sample}/{interval}.g.vcf.gz"),
+        gvcf=temp("results/interval_gvcfs/{sample}/{interval}.g.vcf.gz"),
         tbi=temp("results/interval_gvcfs/{sample}/{interval}.g.vcf.gz.tbi"),
     params:
         java_mem=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
@@ -100,12 +138,13 @@ rule gatk_haplotypecaller_interval:
 
 rule concat_interval_gvcfs:
     input:
-        unpack(get_interval_gvcfs)
+        gvcfs=get_interval_gvcfs,
+        tbis=get_interval_gvcf_tbis,
     output:
         gvcf="results/gvcfs/{sample}.g.vcf.gz",
         tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
     conda:
-        "../envs/bcftools.yaml"
+        "../../envs/bcftools.yaml"
     benchmark:
         "benchmarks/concat_interval_gvcfs/{sample}.txt"
     log:
@@ -119,11 +158,7 @@ rule concat_interval_gvcfs:
 
 rule create_db_mapfile:
     input:
-        gvcfs=lambda wc: [
-            samples_df.loc[s, "input"] if samples_df.loc[s, "input_type"] == "gvcf"
-            else f"results/gvcfs_norm/{s}.g.vcf.gz"
-            for s in samples_df.index
-        ],
+        gvcfs=[get_final_gvcf(s) for s in SAMPLES_ALL],
     output:
         mapfile="results/genomics_db/mapfile.txt",
     run:
@@ -144,7 +179,7 @@ rule gatk_genomics_db_import:
     resources:
         mem_mb=4096,
     conda:
-        "../envs/gatk.yaml"
+        "../../envs/gatk.yaml"
     benchmark:
         "benchmarks/gatk_genomics_db_import/{interval}.txt"
     log:
@@ -165,16 +200,49 @@ rule gatk_genomics_db_import:
         tar -cf {output.tar} {output.db} &>> {log}
         """
 
+rule gatk_genotype_gvcfs:
+    input:
+        db="results/gatk_genomics_db/L{interval}.tar",
+        **REF_FILES,
+    output:
+        vcf=temp("results/vcfs/intervals/L{interval}.vcf.gz"),
+        tbi=temp("results/vcfs/intervals/L{interval}.vcf.gz.tbi"),
+    params:
+        java_opts=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
+        het_prior=config["variant_calling"]["gatk"]["het_prior"],
+        db=subpath(input.db, strip_suffix=".tar"),
+    resources:
+        mem_mb=4096,
+    conda:
+        "../../envs/gatk.yaml"
+    benchmark:
+        "benchmarks/gatk_genotype_gvcfs/{interval}.txt"
+    log:
+        "logs/gatk_genotype_gvcfs/{interval}.txt"
+    shell:
+        """
+        tar -xf {input.db}
+        gatk GenotypeGVCFs \
+            --java-options '{params.java_opts}' \
+            -R {input.ref} \
+            --heterozygosity {params.het_prior} \
+            --genomicsdb-shared-posixfs-optimizations true \
+            -V gendb://{params.db} \
+            -O {output.vcf} \
+            --tmp-dir {resources.tmpdir} \
+            &> {log}
+        """
+
 rule gatk_variant_filtration:
     input:
-        unpack(REF_FILES),
         vcf="results/vcfs/intervals/L{interval}.vcf.gz",
         tbi="results/vcfs/intervals/L{interval}.vcf.gz.tbi",
+        **REF_FILES,
     output:
-        vcf=temp("results/vcfs/intervals/filters_applied_{interval}.vcf.gz"),
-        tbi=temp("results/vcfs/intervals/filters_applied_{interval}.vcf.gz.tbi"),
+        vcf=temp("results/vcfs/intervals/filtered_{interval}.vcf.gz"),
+        tbi=temp("results/vcfs/intervals/filtered_{interval}.vcf.gz.tbi"),
     conda:
-        "../envs/gatk.yaml"
+        "../../envs/gatk.yaml"
     benchmark:
         "benchmarks/gatk_variant_filtration/{interval}.txt"
     log:
@@ -201,12 +269,13 @@ rule gatk_variant_filtration:
 
 rule concat_interval_vcfs:
     input:
-        unpack(get_interval_vcfs),
+        vcfs=get_interval_vcfs,
+        tbis=get_interval_vcf_tbis,
     output:
         vcf="results/vcfs/raw.vcf.gz",
         tbi="results/vcfs/raw.vcf.gz.tbi",
     conda:
-        "../envs/bcftools.yaml"
+        "../../envs/bcftools.yaml"
     benchmark:
         "benchmarks/concat_interval_vcfs/benchmark.txt"
     log:

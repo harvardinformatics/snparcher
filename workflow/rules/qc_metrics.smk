@@ -109,24 +109,24 @@ rule combine_qc_metrics:
         # Load fastp stats
         fastp_stats = {}
         for fn in input.fastp:
+            sample = os.path.basename(fn).replace(".json", "")
             with open(fn) as f:
-                data = json.load(f)
-            fastp_stats[data["sample"]] = data
+                fastp_stats[sample] = json.load(f)
         
         # Load bam stats
         bam_stats = {}
         for fn in input.bam:
+            sample = os.path.basename(fn).replace(".json", "")
             with open(fn) as f:
-                data = json.load(f)
-            bam_stats[data["sample"]] = data
+                bam_stats[sample] = json.load(f)
         
         # Load sentieon stats if available
         sentieon_stats = {}
         if hasattr(input, "sentieon"):
             for fn in input.sentieon:
+                sample = os.path.basename(fn).replace(".json", "")
                 with open(fn) as f:
-                    data = json.load(f)
-                sentieon_stats[data["sample"]] = data
+                    sentieon_stats[sample] = json.load(f)
         
         # Build header
         header = [
@@ -154,10 +154,11 @@ rule combine_qc_metrics:
                 
                 # Fastp stats (may not exist for bam input type)
                 if sample in fastp_stats:
+                    fs = fastp_stats[sample]
                     row.extend([
-                        str(fastp_stats[sample]["reads_before_filtering"]),
-                        str(fastp_stats[sample]["reads_after_filtering"]),
-                        f"{fastp_stats[sample]['fraction_passed']:.4f}",
+                        str(fs["summary"]["before_filtering"]["total_reads"]),
+                        str(fs["summary"]["after_filtering"]["total_reads"]),
+                        f"{fs['summary']['after_filtering']['total_reads'] / fs['summary']['before_filtering']['total_reads']:.4f}",
                     ])
                 else:
                     row.extend(["NA", "NA", "NA"])

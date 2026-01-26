@@ -137,7 +137,7 @@ else:
             rg=get_read_group,
         threads: 8
         conda:
-            "../envs/bwa.yaml"
+            "../envs/samtools.yaml"
         benchmark:
             "benchmarks/bwa_mem/{sample}/{library}.txt"
         log:

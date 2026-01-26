@@ -8,7 +8,7 @@ reference:
 
 variant_calling:
   expected_coverage: "low"  # low | high | auto (future)
-  tool: "gatk" # gatk | sentieon
+  tool: "gatk" # gatk 
   ploidy: 2
   gatk:
     het_prior: 0.005

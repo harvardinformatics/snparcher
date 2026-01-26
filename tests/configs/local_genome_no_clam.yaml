@@ -6,7 +6,7 @@ reference:
 
 variant_calling:
   expected_coverage: "low" # low | high | auto (future)
-  tool: "gatk" 
+  tool: "gatk"
   ploidy: 2
   gatk:
     het_prior: 0.005
@@ -20,7 +20,7 @@ intervals:
 callable_sites:
   generate_bed_file: false
   coverage:
-    enabled: true
+    enabled: false
     stdev: 2
     merge_distance: 100
   mappability:

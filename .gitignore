@@ -2,7 +2,7 @@
 tests/.conda-envs
 
 .DS_Store
-
+scratch
 pixi.toml
 data_preparation/
 .snakemake*

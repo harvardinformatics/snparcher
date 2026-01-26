@@ -53,6 +53,8 @@ lint = "ruff check workflow/"
 format = "ruff format workflow/ && snakefmt workflow/"
 check = { depends-on = ["lint", "lint-snakemake"] }
 test = "pytest -v tests/tests.py"
+test-dry-run = "pytest -v tests/tests.py --dry-run-only"
+dry-run = "snakemake -s workflow/Snakefile --configfile tests/configs/local_genome.yaml --config samples=tests/sample_sheets/local_fastqs_no_dedup.csv -n -p all"
 
 # Tasks for docs environment
 [tool.pixi.feature.docs.tasks]
