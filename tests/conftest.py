@@ -61,6 +61,7 @@ class SnakemakeRunner:
 
         cmd = [
             "snakemake",
+            "--show-failed-logs",
             "-s",
             str(self.snakefile),
             "--configfile",
