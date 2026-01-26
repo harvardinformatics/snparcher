@@ -19,10 +19,6 @@ else:
     else:
         include: "rules/variant_calling/gatk.smk"
 
-print(f"SAMPLES_ALL: {SAMPLES_ALL}")
-print(f"samples_df index: {samples_df.index.tolist()}")
-for s in SAMPLES_ALL:
-    print(f"get_final_gvcf({s}): {get_final_gvcf(s)}")
 
 rule all:
     """Default target: full pipeline."""

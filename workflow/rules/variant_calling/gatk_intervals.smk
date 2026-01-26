@@ -21,6 +21,9 @@ def get_interval_gvcfs(wc):
     
     if exists(intervals_file):
         # Read directly from file if it exists
+        # We do this because checkpoint.get() doesn't seem to pick up the checkpoint output if it was created in previous run
+        # I.e if user does setup target rule, then rule all, the workflow fails 
+        # Related GH issue: https://github.com/snakemake/snakemake/issues/3879
         with open(intervals_file) as f:
             lines = [l.strip() for l in f.readlines()]
     else:
@@ -95,7 +98,6 @@ def get_interval_vcf_tbis(wc):
 
 def get_gvcfs_for_db(wc):
     gvcfs = [get_final_gvcf(s) for s in SAMPLES_ALL]
-    print(f"get_gvcfs_for_db: gvcfs={gvcfs}")
     return {
         "gvcfs": gvcfs,
         "tbis": [g + ".tbi" for g in gvcfs],
