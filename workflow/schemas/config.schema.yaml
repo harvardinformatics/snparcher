@@ -1,0 +1,100 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+description: snpArcher configuration schema
+
+properties:
+  samples:
+    type: string
+    description: Path to samples CSV file
+    default: "config/samples.csv"
+
+  reference:
+    type: object
+    properties:
+      name:
+        type: string
+        description: Reference genome name (used for output filenames)
+      source:
+        type: string
+        description: Path, URL, or NCBI accession for reference genome
+    required:
+      - name
+      - source
+
+  sentieon:
+    type: object
+    default: {}
+    properties:
+      enabled:
+        type: boolean
+        default: false
+      license:
+        type: string
+        default: ""
+
+  variant_calling:
+    type: object
+    default: {}
+    properties:
+      expected_coverage:
+        type: string
+        enum: ["low", "high"]
+        default: "low"
+      ploidy:
+        type: integer
+        minimum: 1
+        default: 2
+      gatk:
+        type: object
+        default: {}
+        properties:
+          het_prior:
+            type: number
+            minimum: 0
+            maximum: 1
+            default: 0.005
+
+  intervals:
+    type: object
+    default: {}
+    properties:
+      enabled:
+        type: boolean
+        default: true
+      min_nmer:
+        type: integer
+        minimum: 1
+        default: 500
+      num_gvcf_intervals:
+        type: integer
+        minimum: 1
+        default: 50
+      db_scatter_factor:
+        type: number
+        minimum: 0
+        default: 0.15
+
+  callable_sites:
+    type: object
+    default: {}
+    properties:
+      mappability:
+        type: object
+        default: {}
+        properties:
+          kmer:
+            type: integer
+            minimum: 1
+            default: 150
+          min_score:
+            type: number
+            minimum: 0
+            maximum: 1
+            default: 1
+          merge_distance:
+            type: integer
+            minimum: 0
+            default: 100
+
+required:
+  - samples
+  - reference

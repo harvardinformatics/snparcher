@@ -1,0 +1,23 @@
+# snpArcher v2 test configuration - BAM input
+
+samples: "config/samples.csv"
+final_prefix: "ecoli_test"
+
+reference:
+  name: "ecoli_test"
+  path: "data/local_genome/local_genome.fna.gz"
+
+intervals: true
+sentieon: false
+cov_filter: false
+mark_duplicates: false
+
+# Interval options
+minNmer: 500
+num_gvcf_intervals: 2
+db_scatter_factor: 0.15
+ploidy: 1
+
+# Coverage options (low coverage)
+minP: 1
+minD: 1

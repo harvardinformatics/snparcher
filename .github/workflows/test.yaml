@@ -1,0 +1,34 @@
+name: Tests
+
+on:
+  push:
+    paths:
+      - "**/Snakefile"
+      - "**/*.smk"
+      - "**/*.py"
+      - "workflow/envs/*.yaml"
+      - ".github/workflows/*"
+  pull_request:
+    paths:
+      - "**/Snakefile"
+      - "**/*.smk"
+      - "**/*.py"
+      - "workflow/envs/*.yaml"
+      - ".github/workflows/*"
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.9.3
+        with:
+          cache: true
+          environments: dev-tools
+
+      - name: Run test
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: pixi run -e dev-tools pytest -v tests/tests.py --no-conda

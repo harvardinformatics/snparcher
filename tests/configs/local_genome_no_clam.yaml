@@ -1,0 +1,51 @@
+samples: "samples.csv"
+
+reference:
+  name: "test_genome"
+  source: "tests/data/reference/test_genome.fa.gz" # Can be a refseq/genbank accession, url, or path
+
+variant_calling:
+  expected_coverage: "low" # low | high | auto (future)
+  tool: "gatk"
+  ploidy: 2
+  gatk:
+    het_prior: 0.005
+
+intervals:
+  enabled: true
+  min_nmer: 500
+  num_gvcf_intervals: 50
+  db_scatter_factor: 0.15
+
+callable_sites:
+  generate_bed_file: false
+  coverage:
+    enabled: false
+    stdev: 2
+    merge_distance: 100
+  mappability:
+    enabled: true
+    min_score: 1
+    kmer: 150
+    merge_distance: 100
+
+sentieon:
+  enabled: false
+  license: ""
+
+modules:
+  qc:
+    enabled: false
+    clusters: 3
+    min_depth: 2
+    google_api_key: ""
+  postprocess:
+    enabled: false
+    filtering:
+      contig_size: 10000
+      maf: 0.01
+      missingness: 0.75
+      exclude_scaffolds: "mtDNA,Y"
+  trackhub:
+    enabled: false
+    email: "example@email.com"

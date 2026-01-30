@@ -1,0 +1,3 @@
+BioSample,LibraryName,Run,Organism,BioProject,fq1,fq2
+SAMN12676327,EK7.12,SRR10058855,Escherichia coli,PRJNA563564,data/local_fastq/my_sample1_1.fastq.gz,data/local_fastq/my_sample1_2.fastq.gz
+SAMN12676342,EK7.30,SRR10058838,Escherichia coli,PRJNA563564,data/local_fastq/my_sample2_1.fastq.gz,data/local_fastq/my_sample2_2.fastq.gz

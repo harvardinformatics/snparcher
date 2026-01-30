@@ -1,64 +1,84 @@
-from snakemake.utils import min_version
-min_version("7.0")
+from pathlib import Path
+import os
 
 configfile: "config/config.yaml"
+
 include: "rules/common.smk"
-include: "rules/sumstats.smk"
-include: "rules/fastq.smk"
 include: "rules/reference.smk"
-include: "rules/mappability.smk"
+include: "rules/intervals.smk"
+include: "rules/fastq.smk"
+include: "rules/mapping.smk"
+include: "rules/qc_metrics.smk"
+include: "rules/callable_sites.smk"
 
-setup_curlrc()
-onerror: cleanup_curlrc()
-onsuccess: cleanup_curlrc()
-
-
-if config['sentieon']:
-    include: "rules/sentieon.smk"
+if USE_SENTIEON:
+    include: "rules/variant_calling/sentieon.smk"
 else:
-    include: "rules/fastq2bam.smk"
-    if config['intervals']:
-        include: "rules/bam2vcf_gatk_intervals.smk"
-        include: "rules/intervals.smk"
+    if config["intervals"]["enabled"]:
+        include: "rules/variant_calling/gatk_intervals.smk"
     else:
-        include: "rules/bam2vcf_gatk.smk"
+        include: "rules/variant_calling/gatk.smk"
 
-if config['cov_filter']:
-    include: "rules/cov_filter.smk"
-
-module qc:
-    snakefile:
-        "modules/qc/Snakefile"
-    config:
-        config
-
-use rule * from qc as qc_*
-
-module mk:
-    snakefile:
-        "modules/mk/Snakefile"
-    config:
-        config
-
-use rule * from mk as mk_*
-
-module postprocess:
-    snakefile:
-        "modules/postprocess/Snakefile"
-    config:
-        config
-
-use rule * from postprocess as postprocess_*
-
-module trackhub:
-    snakefile:
-        "modules/trackhub/Snakefile"
-    config:
-        config
-
-use rule * from trackhub as trackhub_*
 
 rule all:
+    """Default target: full pipeline."""
     input:
-        get_output()
-    default_target: True
+        "results/vcfs/raw.vcf.gz",
+        "results/qc_metrics/qc_report.tsv",
+        "results/callable_sites/callable_loci.zarr" if config["callable_sites"]["coverage"]["enabled"] else [],
+        "results/callable_sites/mappability.bed" if config["callable_sites"]["mappability"]["enabled"] else [],
+
+
+rule setup:
+    """
+    Prepare reference, indices, and intervals.
+    Resolves checkpoints so subsequent runs can build the full DAG.
+    """
+    input:
+        REF_FILES["ref"],
+        REF_FILES["ref_fai"],
+        REF_FILES["ref_dict"],
+        REF_BWA_IDX,
+        "results/intervals/gvcf/intervals.txt" if config["intervals"]["enabled"] else [],
+        "results/intervals/db/intervals.txt" if config["intervals"]["enabled"] else []
+
+rule download_reads:
+    """Download fastqs for all SRA samples."""
+    input:
+        [
+            f"results/fastqs/{sample}/{lib}/{samples_df[samples_df['library_id'] == lib].iloc[0]['input']}_{read}.fastq.gz"
+            for sample in SAMPLES_SRR
+            for lib in get_sample_libraries(sample)
+            for read in [1, 2]
+        ] if SAMPLES_SRR else [],
+
+
+rule map_samples:
+    """Align all samples that need alignment."""
+    input:
+        [get_final_bam(s) for s in SAMPLES_NEED_ALIGNMENT],
+
+
+rule call_variants:
+    """Run variant calling through to filtered VCF."""
+    input:
+        "results/vcfs/filtered.vcf.gz",
+
+
+rule qc_report:
+    """Generate QC metrics report."""
+    input:
+        "results/qc_metrics/qc_report.tsv",
+
+
+rule callable_sites:
+    """Generate callable sites from coverage and mappability."""
+    input:
+        "results/callable_sites/callable_loci.zarr",
+        "results/callable_sites/mappability.bed",
+
+
+rule gvcfs:
+    """Generate normalized gVCFs for all samples."""
+    input:
+        expand("results/gvcfs_norm/{sample}.g.vcf.gz", sample=SAMPLES_ALL),
