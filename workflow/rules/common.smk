@@ -11,10 +11,11 @@ from collections import defaultdict
 import pandas as pd
 import snparcher_utils
 from yaml import safe_load
-from pkg_resources import parse_version
 
-# Can't be less than 7 cuz of min version in snakefile
-SNAKEMAKE_VERSION = 8 if parse_version(snakemake.__version__) >= parse_version("8.0.0") else 7
+# Can't be less than 7 cuz of min version in snakefile.
+# Avoid pkg_resources/setuptools dependency by checking the major version directly.
+SNAKEMAKE_MAJOR = int(str(snakemake.__version__).split(".", 1)[0])
+SNAKEMAKE_VERSION = 8 if SNAKEMAKE_MAJOR >= 8 else 7
 logger.warning(f"snpArcher: Using Snakemake {snakemake.__version__}")
 if SNAKEMAKE_VERSION >= 8:
     DEFAULT_STORAGE_PREFIX = StorageSettings.default_storage_prefix if StorageSettings.default_storage_prefix is not None else ""
