@@ -69,7 +69,11 @@ rule clam_loci:
         "benchmarks/{refGenome}/covbed/{prefix}_benchmark.txt"
     shell:
         """
-        clam loci -t {threads} --bed --thresholds-file {input.thresholds} -o {params.outdir} {input.d4} 2> {log}
+        BED_FLAG=""
+        if clam loci --help 2>&1 | grep -q -- '--bed'; then
+            BED_FLAG="--bed"
+        fi
+        clam loci -t {threads} $BED_FLAG --thresholds-file {input.thresholds} -o {params.outdir} {input.d4} 2> {log}
         bedtk merge {output.bed} > {output.tmp_bed} 2>> {log}
         cp {output.tmp_bed} {output.bed} 2>> {log}
         """
