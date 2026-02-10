@@ -5,6 +5,7 @@ import random
 import string
 import statistics
 import json
+import re
 from pathlib import Path
 from collections import defaultdict
 
@@ -13,8 +14,12 @@ import snparcher_utils
 from yaml import safe_load
 
 # Can't be less than 7 cuz of min version in snakefile.
-# Avoid pkg_resources/setuptools dependency by checking the major version directly.
-SNAKEMAKE_MAJOR = int(str(snakemake.__version__).split(".", 1)[0])
+# Avoid pkg_resources/setuptools dependency by extracting the major version.
+_snakemake_version = str(snakemake.__version__)
+_snakemake_major_match = re.search(r"\d+", _snakemake_version)
+if _snakemake_major_match is None:
+    raise RuntimeError(f"Unable to parse snakemake version: {_snakemake_version}")
+SNAKEMAKE_MAJOR = int(_snakemake_major_match.group(0))
 SNAKEMAKE_VERSION = 8 if SNAKEMAKE_MAJOR >= 8 else 7
 logger.warning(f"snpArcher: Using Snakemake {snakemake.__version__}")
 if SNAKEMAKE_VERSION >= 8:
