@@ -1,7 +1,6 @@
 channels:
   - conda-forge
   - bioconda
-  - defaults
 dependencies:
   - gatk4==4.1.8.0
   - freebayes==1.3.2
