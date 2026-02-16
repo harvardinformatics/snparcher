@@ -76,7 +76,7 @@ rule gatk_genomics_db_import:
     params:
         java_opts=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
     resources:
-        tmpdir=config.get("tmpdir", "/tmp"),
+        tmpdir=config["tmpdir"],
     conda:
         "../envs/gatk.yaml"
     benchmark:
@@ -112,7 +112,7 @@ rule gatk_genotype_gvcfs:
         het_prior=config["variant_calling"]["gatk"]["het_prior"],
         db=lambda wc, input: subpath(input.db, strip_suffix=".tar"),
     resources:
-        tmpdir=config.get("tmpdir", "/tmp"),
+        tmpdir=config["tmpdir"],
     conda:
         "../envs/gatk.yaml"
     benchmark:

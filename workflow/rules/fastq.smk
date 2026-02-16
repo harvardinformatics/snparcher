@@ -25,7 +25,7 @@ rule download_sra:
     params:
         outdir="results/fastqs/{sample}/{library}",
     resources:
-        tmpdir=config.get("tmpdir", "/tmp"),
+        tmpdir=config["tmpdir"],
     threads: 4
     conda:
         "../envs/sra.yaml"
