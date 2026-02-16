@@ -1,5 +1,6 @@
 # tests/conftest.py
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -79,6 +80,11 @@ class SnakemakeRunner:
 
         if self.use_conda:
             cmd.extend(["--use-conda", "--conda-prefix", str(self.conda_prefix)])
+
+        # Optional shell override for test runs (e.g. /bin/zsh).
+        shell_exec = os.environ.get("SNPARCHER_TEST_SHELL_EXECUTABLE")
+        if shell_exec:
+            cmd.extend(["--default-resources", f"shell_exec={shell_exec}"])
 
         if extra_args:
             cmd.extend(extra_args)
