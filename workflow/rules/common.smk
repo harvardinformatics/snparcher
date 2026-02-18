@@ -150,15 +150,16 @@ for sample_id, group in samples_df.groupby("sample_id"):
         raise ValueError(
             f"Sample '{sample_id}' has mixed mark_duplicates values: {mark_dups}"
         )
+    
+    if input_types and input_types[0] in {"bam", "gvcf"} and len(group) > 1:
+        raise ValueError(
+            f"Sample '{sample_id}' has input_type '{input_types[0]}' but multiple rows. "
+            "Only one row is supported for bam/gvcf inputs."
+        )
 
-    if len(group) > 1:
-        library_ids = group["library_id"].tolist()
-        if len(library_ids) != len(set(library_ids)):
-            raise ValueError(
-                f"Sample '{sample_id}' has duplicate library_id values: {library_ids}"
-            )
-
-samples_df = samples_df.set_index("sample_id", drop=False)
+samples_df["input_unit"] = (
+    samples_df.groupby(["sample_id", "library_id"]).cumcount().add(1).map(lambda x: f"u{x}")
+)
 
 
 # --- Reference paths ---
@@ -199,23 +200,66 @@ SAMPLES_WITH_FASTQ = samples_df[
 
 def sample_has_multiple_libraries(sample):
     """Check if sample has multiple libraries."""
-    return len(samples_df[samples_df["sample_id"] == sample]) > 1
+    sample_rows = samples_df[samples_df["sample_id"] == sample]
+    return sample_rows["library_id"].nunique() > 1
 
 
 def get_sample_libraries(sample):
     """Get all library IDs for a sample."""
-    return samples_df[samples_df["sample_id"] == sample]["library_id"].tolist()
+    sample_rows = samples_df[samples_df["sample_id"] == sample]
+    return sample_rows["library_id"].drop_duplicates().tolist()
+
+
+def get_sample_rows(sample):
+    """Get all rows for a sample."""
+    sample_rows = samples_df[samples_df["sample_id"] == sample]
+    if sample_rows.empty:
+        raise ValueError(f"Sample '{sample}' not found in sample sheet")
+    return sample_rows
+
+
+def get_sample_scalar(sample, column):
+    """Get a scalar metadata value that must be constant within a sample."""
+    sample_rows = get_sample_rows(sample)
+    values = sample_rows[column].dropna().unique().tolist()
+    if len(values) != 1:
+        raise ValueError(
+            f"Sample '{sample}' has non-unique values for '{column}': {values}"
+        )
+    return values[0]
+
+
+def get_sample_input_type(sample):
+    """Get sample input_type."""
+    return get_sample_scalar(sample, "input_type")
+
+
+def get_sample_mark_duplicates(sample):
+    """Get sample mark_duplicates flag."""
+    return bool(get_sample_scalar(sample, "mark_duplicates"))
+
+
+def get_sample_inputs(sample):
+    """Get sample rows as records."""
+    return get_sample_rows(sample).to_dict("records")
+
+
+def get_sample_srr_records(sample):
+    """Get SRR input records for a sample."""
+    rows = get_sample_rows(sample)
+    rows = rows[rows["input_type"] == "srr"]
+    return rows[["sample_id", "library_id", "input_unit", "input"]].to_dict("records")
 
 
 def get_final_bam(sample):
     """Get final BAM path for a sample."""
-    sample_rows = samples_df[samples_df["sample_id"] == sample]
-    input_type = sample_rows["input_type"].iloc[0]
+    sample_rows = get_sample_rows(sample)
+    input_type = get_sample_input_type(sample)
 
     if input_type == "bam":
         return sample_rows["input"].iloc[0]
 
-    mark_dups = sample_rows["mark_duplicates"].iloc[0]
+    mark_dups = get_sample_mark_duplicates(sample)
 
     if mark_dups:
         return f"results/bams/markdup/{sample}.bam"

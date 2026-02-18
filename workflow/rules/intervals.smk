@@ -1,6 +1,6 @@
 def get_db_interval_count(wildcards):
     """Calculate number of DB intervals based on sample count and config."""
-    num_samples = len(samples_df)
+    num_samples = len(SAMPLES_ALL)
     scatter_factor = config["intervals"]["db_scatter_factor"]
     num_gvcf_intervals = config["intervals"]["num_gvcf_intervals"]
     return max(int(scatter_factor * num_samples * num_gvcf_intervals), 1)
