@@ -80,4 +80,4 @@ v2 uses nested config keys. Core keys are:
 
 - v2 no longer expects per-sample reference columns in the manifest.
 - Optional metadata columns from v1 (for example `lat`, `long`, `SampleType`) are not part of the v2 core manifest contract.
-- If a sample appears in multiple rows, `library_id` values must be unique within that sample.
+- If a sample appears in multiple rows, `library_id` identifies the library and may repeat across rows for the same library (for example, multiple lanes/runs); it only needs to differ when a sample truly has multiple distinct libraries.
