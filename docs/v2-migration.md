@@ -60,7 +60,7 @@ v2 uses nested config keys. Core keys are:
 - `variant_calling.*`
 - `intervals.*`
 - `callable_sites.*`
-- `sentieon.*`
+- `modules.*`
 
 ### Common legacy -> v2 config mapping
 
@@ -68,8 +68,8 @@ v2 uses nested config keys. Core keys are:
 | --- | --- | --- |
 | `refGenome` | `reference.name` | Required in v2. |
 | `refPath` | `reference.source` | Can be local path, URL, or accession. |
-| `sentieon` | `sentieon.enabled` | Boolean. |
-| `sentieon_lic` | `sentieon.license` | String path or license value. |
+| `sentieon` | `variant_calling.tool` | Set to `sentieon` (else `gatk`). |
+| `sentieon_lic` | `variant_calling.sentieon.license` | String path or license value. |
 | `minNmer` | `intervals.min_nmer` | Integer. |
 | `cov_filter` | `callable_sites.coverage.enabled` | Boolean. |
 | `mappability_k` | `callable_sites.mappability.kmer` | Integer. |

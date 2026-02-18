@@ -27,18 +27,6 @@ properties:
       - name
       - source
 
-  sentieon:
-    type: object
-    additionalProperties: false
-    default: {}
-    properties:
-      enabled:
-        type: boolean
-        default: false
-      license:
-        type: string
-        default: ""
-
   variant_calling:
     type: object
     additionalProperties: false
@@ -66,6 +54,14 @@ properties:
             minimum: 0
             maximum: 1
             default: 0.005
+      sentieon:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          license:
+            type: string
+            default: ""
 
   intervals:
     type: object

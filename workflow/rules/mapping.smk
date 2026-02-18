@@ -46,7 +46,7 @@ if USE_SENTIEON:
             bai=temp("results/bams/raw/{sample}/{library}.bam.bai"),
         params:
             rg=get_read_group,
-            lic=config["sentieon"]["license"],
+            lic=config["variant_calling"]["sentieon"]["license"],
         threads: 8
         conda:
             "../envs/sentieon.yaml"
@@ -72,7 +72,7 @@ if USE_SENTIEON:
             score=temp("results/bams/markdup/{sample}_score.txt"),
             metrics=temp("results/bams/markdup/{sample}_metrics.txt"),
         params:
-            lic=config["sentieon"]["license"],
+            lic=config["variant_calling"]["sentieon"]["license"],
         threads: 4
         conda:
             "../envs/sentieon.yaml"
@@ -103,7 +103,7 @@ if USE_SENTIEON:
             gc_summary="results/qc_metrics/sentieon/{sample}_gc_summary.txt",
             mq="results/qc_metrics/sentieon/{sample}_mq_metrics.txt",
         params:
-            lic=config["sentieon"]["license"],
+            lic=config["variant_calling"]["sentieon"]["license"],
         threads: 4
         conda:
             "../envs/sentieon.yaml"

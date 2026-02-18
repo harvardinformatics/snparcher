@@ -70,23 +70,21 @@ Now that we've created our sample sheet, we need to edit the config file we copi
 In our example we are using all of the default options. This will configure snpArcher to perform variant calling using GATK with the scatter-by-intervals approach. Also, we have set our reference genome name and path since we want to use the same genome for all samples in our sample sheet.
 
 ```
-samples: "config/samples.csv" # path to the sample metadata CSV
-final_prefix: "" # prefix for final output files
-intervals: True #Set to True if you want to perform variant calling using interval approach.
-sentieon: False #set to True if you want to use sentieon, False if you want GATK
-sentieon_lic: "" #set to path of sentieon license
-remote_reads: False # Set True if reads are in a location seperate from --default-remote-prefix.
-bigtmp: "" #Set to a path with lots of free space to use for commands that require large amounts of temp space; defaults to system tmpdir if empty
-cov_filter: True #set to True if you want to include coverage thresholds in the callable sites bed file (default uses mappability only)
-generate_trackhub: True #Set to true if you want to generate a Genome Browser Trackhub. Dependent on postprocessing module.
-trackhub_email: "hi@email.com"
-##############################
-# Variables you *might* need to change
-##############################
+samples: "config/samples.csv"
+tmpdir: "" # Optional. Leave empty to use the system temp directory.
 
-# Set reference genome here if you would like to you use the same reference genome for all samples in sample sheet. See docs for more info.
-refGenome: "bird_genome" # Name for reference genome
-refPath: "/storage/data/bird.fa.gz"
+reference:
+  name: "bird_genome"
+  source: "/storage/data/bird.fa.gz"
+
+variant_calling:
+  tool: "gatk" # "gatk" or "sentieon"
+  expected_coverage: "low"
+  ploidy: 2
+  gatk:
+    het_prior: 0.005
+  sentieon:
+    license: ""
 ```
 
 ## Profile setup
