@@ -60,6 +60,9 @@ class SnakemakeRunner:
         else:
             targets = list(target)
 
+        runtime_cache = self.workdir / ".snakemake-runtime-cache"
+        runtime_cache.mkdir(parents=True, exist_ok=True)
+
         cmd = [
             "snakemake",
             "--show-failed-logs",
@@ -71,6 +74,8 @@ class SnakemakeRunner:
             "1",
             "--directory",
             str(self.workdir),
+            "--runtime-source-cache-path",
+            str(runtime_cache),
             "-p",
             *targets,
         ]
@@ -89,7 +94,9 @@ class SnakemakeRunner:
         if extra_args:
             cmd.extend(extra_args)
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        env = os.environ.copy()
+        env.setdefault("XDG_CACHE_HOME", str(self.workdir / ".cache"))
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         return SnakemakeResult(result, self.workdir)
 
     def dry_run(self, target, configfile, samples=None):
