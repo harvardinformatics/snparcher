@@ -94,7 +94,7 @@ For example, consider we have 2 samples: `A` and `B`. `Sample A` was sequenced 3
 
 ## Configuring snpArcher
 
-Workflow variables such as tool settings and workflow options are set in `config/config.yaml`. Resource settings such as threads and memory are controlled per tool in the `profiles/default/config.yaml`.
+Workflow variables such as tool settings and workflow options are set in `config/config.yaml`. Resource settings such as threads and memory are controlled per tool in the `workflow-profiles/default/config.yaml`.
 
 ### Core configuration
 The following options in `config/config.yaml` must be set before running snpArcher:
