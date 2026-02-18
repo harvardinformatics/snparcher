@@ -1,5 +1,5 @@
 def sentieon_haplotyper_input(wildcards):
-    input_type = samples_df.loc[wildcards.sample, "input_type"]
+    input_type = get_sample_input_type(wildcards.sample)
     
     if input_type == "gvcf":
         raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotyper")
