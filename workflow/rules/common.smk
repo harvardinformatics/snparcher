@@ -263,17 +263,14 @@ def get_final_bam(sample):
 
     if mark_dups:
         return f"results/bams/markdup/{sample}.bam"
-    elif sample_has_multiple_libraries(sample):
-        return f"results/bams/merged/{sample}.bam"
     else:
-        lib = get_sample_libraries(sample)[0]
-        return f"results/bams/raw/{sample}/{lib}.bam"
+        return f"results/bams/merged/{sample}.bam"
 
 
 def get_final_gvcf(sample):
     """Get final gVCF path for a sample."""
-    sample_rows = samples_df[samples_df["sample_id"] == sample]
-    input_type = sample_rows["input_type"].iloc[0]
+    sample_rows = get_sample_rows(sample)
+    input_type = get_sample_input_type(sample)
 
     if input_type == "gvcf":
         return sample_rows["input"].iloc[0]

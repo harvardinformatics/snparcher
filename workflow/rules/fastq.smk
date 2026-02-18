@@ -1,15 +1,31 @@
 def fastp_input(wildcards):
     """Get input fastqs for filtering."""
-    sample_rows = samples_df[samples_df["sample_id"] == wildcards.sample]
-    row = sample_rows[sample_rows["library_id"] == wildcards.library].iloc[0]
+    sample_rows = get_sample_rows(wildcards.sample)
+    row = sample_rows[
+        (sample_rows["library_id"] == wildcards.library)
+        & (sample_rows["input_unit"] == wildcards.input_unit)
+    ]
+    if len(row) != 1:
+        raise ValueError(
+            f"Expected one row for sample={wildcards.sample}, "
+            f"library={wildcards.library}, input_unit={wildcards.input_unit}; "
+            f"found {len(row)}."
+        )
+    row = row.iloc[0]
     
     input_type = row["input_type"]
     
     if input_type == "srr":
         accession = row["input"]
         return {
-            "r1": f"results/fastqs/{wildcards.sample}/{wildcards.library}/{accession}_1.fastq.gz",
-            "r2": f"results/fastqs/{wildcards.sample}/{wildcards.library}/{accession}_2.fastq.gz",
+            "r1": (
+                f"results/fastqs/{wildcards.sample}/{wildcards.library}/"
+                f"{wildcards.input_unit}/{accession}_1.fastq.gz"
+            ),
+            "r2": (
+                f"results/fastqs/{wildcards.sample}/{wildcards.library}/"
+                f"{wildcards.input_unit}/{accession}_2.fastq.gz"
+            ),
         }
     elif input_type == "fastq":
         r1, r2 = row["input"].split(";")
@@ -20,17 +36,17 @@ def fastp_input(wildcards):
 
 rule download_sra:
     output:
-        r1=temp("results/fastqs/{sample}/{library}/{accession}_1.fastq.gz"),
-        r2=temp("results/fastqs/{sample}/{library}/{accession}_2.fastq.gz"),
+        r1=temp("results/fastqs/{sample}/{library}/{input_unit}/{accession}_1.fastq.gz"),
+        r2=temp("results/fastqs/{sample}/{library}/{input_unit}/{accession}_2.fastq.gz"),
     params:
-        outdir="results/fastqs/{sample}/{library}",
+        outdir="results/fastqs/{sample}/{library}/{input_unit}",
     threads: 4
     conda:
         "../envs/sra.yaml"
     benchmark:
-        "benchmarks/download_sra/{sample}/{library}/{accession}.txt"
+        "benchmarks/download_sra/{sample}/{library}/{input_unit}/{accession}.txt"
     log:
-        "logs/download_sra/{sample}/{library}/{accession}.txt"
+        "logs/download_sra/{sample}/{library}/{input_unit}/{accession}.txt"
     shell:
         """
         rm -rf {wildcards.accession}
@@ -59,16 +75,16 @@ rule fastp:
     input:
         unpack(fastp_input),
     output:
-        r1="results/filtered_fastqs/{sample}/{library}_1.fastq.gz",
-        r2="results/filtered_fastqs/{sample}/{library}_2.fastq.gz",
-        json="results/fastp/{sample}/{library}.json",
+        r1="results/filtered_fastqs/{sample}/{library}/{input_unit}_1.fastq.gz",
+        r2="results/filtered_fastqs/{sample}/{library}/{input_unit}_2.fastq.gz",
+        json="results/fastp/{sample}/{library}/{input_unit}.json",
     threads: 4
     conda:
         "../envs/fastp.yaml"
     benchmark:
-        "benchmarks/fastp/{sample}/{library}.txt"
+        "benchmarks/fastp/{sample}/{library}/{input_unit}.txt"
     log:
-        "logs/fastp/{sample}/{library}.txt"
+        "logs/fastp/{sample}/{library}/{input_unit}.txt"
     shell:
         """
         fastp \
@@ -84,10 +100,13 @@ rule fastp:
         """
 
 def collect_fastp_input(wildcards):
-    """Get all fastp JSON files for a sample (one per library)."""
-    libraries = get_sample_libraries(wildcards.sample)
+    """Get all fastp JSON files for a sample (one per row/input unit)."""
+    records = get_sample_inputs(wildcards.sample)
     return {
-        "jsons": [f"results/fastp/{wildcards.sample}/{lib}.json" for lib in libraries],
+        "jsons": [
+            f"results/fastp/{wildcards.sample}/{record['library_id']}/{record['input_unit']}.json"
+            for record in records
+        ],
     }
 
 
