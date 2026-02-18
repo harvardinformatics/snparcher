@@ -4,6 +4,7 @@ use-conda: True
 default-resources:
   mem_mb: attempt * 16000
   mem_mb_reduced: (attempt * 16000) * 0.9 # Mem allocated to java for GATK rules (tries to prevent OOM errors)
+  tmpdir: system_tmpdir # Replace with an absolute path to force a custom temp directory for the whole run.
   # Uncomment and edit following options for slurm execution:
   # slurm_partition: ""
   # slurm_account: # Same as sbatch -A. Not all clusters use this.

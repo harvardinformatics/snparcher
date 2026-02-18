@@ -1,7 +1,6 @@
 # snpArcher v2 Configuration Example
 
 samples: "config/samples.csv"
-tmpdir: "" # optional; defaults to the system temp directory when empty
 
 reference:
   name: "my_organism"

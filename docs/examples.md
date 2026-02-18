@@ -71,7 +71,6 @@ In our example we are using all of the default options. This will configure snpA
 
 ```
 samples: "config/samples.csv"
-tmpdir: "" # Optional. Leave empty to use the system temp directory.
 
 reference:
   name: "bird_genome"

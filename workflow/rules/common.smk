@@ -1,5 +1,4 @@
 import os
-import tempfile
 from pathlib import Path
 import pandas as pd
 from snakemake.utils import validate
@@ -18,7 +17,6 @@ def set_defaults(cfg, defaults):
 
 DEFAULTS = {
     "samples": "config/samples.csv",
-    "tmpdir": tempfile.gettempdir(),
     "variant_calling": {
         "expected_coverage": "low",
         "tool": "gatk",
@@ -75,9 +73,6 @@ DEFAULTS = {
 
 set_defaults(config, DEFAULTS)
 validate(config, Path(workflow.basedir, "schemas/config.schema.yaml"))
-if not config["tmpdir"]:
-    config["tmpdir"] = tempfile.gettempdir()
-os.makedirs(config["tmpdir"], exist_ok=True)
 
 USE_SENTIEON = config["variant_calling"]["tool"] == "sentieon"
 

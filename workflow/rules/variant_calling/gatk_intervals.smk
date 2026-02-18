@@ -145,8 +145,6 @@ rule concat_interval_gvcfs:
     output:
         gvcf="results/gvcfs/{sample}.g.vcf.gz",
         tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
-    resources:
-        tmpdir=config["tmpdir"],
     conda:
         "../../envs/bcftools.yaml"
     benchmark:
@@ -182,7 +180,6 @@ rule gatk_genomics_db_import:
         java_mem=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
     resources:
         mem_mb=4096,
-        tmpdir=config["tmpdir"],
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -218,7 +215,6 @@ rule gatk_genotype_gvcfs:
         db=subpath(input.db, strip_suffix=".tar"),
     resources:
         mem_mb=4096,
-        tmpdir=config["tmpdir"],
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -280,8 +276,6 @@ rule concat_interval_vcfs:
     output:
         vcf="results/vcfs/raw.vcf.gz",
         tbi="results/vcfs/raw.vcf.gz.tbi",
-    resources:
-        tmpdir=config["tmpdir"],
     conda:
         "../../envs/bcftools.yaml"
     benchmark:

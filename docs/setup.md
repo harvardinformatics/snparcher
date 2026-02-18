@@ -102,7 +102,6 @@ The following options in `config/config.yaml` must be set before running snpArch
 | Option | Description | Type | Required | Default |
 | ---- | -------------| ------ |------ | ------ |
 | `samples` | Path to CSV sample sheet.| `str` | `True` | `None` |
-| `tmpdir` | Optional temporary directory. Leave empty to use system temp dir. | `str` | `False` | system temp dir |
 | `reference.name` | Reference genome name used for output filenames. | `str` | `True` | `None` |
 | `reference.source` | Reference source (local path, URL, or accession). | `str` | `True` | `None` |
 | `variant_calling.tool` | Variant caller implementation to run. | `str` | `True` | `gatk` |
@@ -147,6 +146,8 @@ Compute resources (threads, memory, etc.) as well as Snakemake arguments are set
 
 In the profile you can set resources to be applied to all rules via the `default-resources` key. You can override this default per-rule by uncommenting that rule under the `set-threads` and/or `set-resources` key.
 
+To configure temporary file location for the entire workflow, set `default-resources.tmpdir` in the workflow profile.
+
 ```{note}
 We recommend you use `--workflow-profile` to set resources for the workflow run. To set Snakemake options such as executor, retries, etc, use `--profile`. Read [here](https://snakemake.readthedocs.io/en/stable/executing/cli.html#profiles) for more info.
 ```
@@ -165,7 +166,6 @@ Other resources, such as `slurm_partition`, `runtime`, etc. can also be set here
 ```{note}
 Snakemake allows you to dynamically assign resources. We use the `attempt` keyword to specify memory. For example. `attempt * 2000` will provide 2GB on the first attempt of the rule, if the rule fails (out of memory) then on the second attempt it will be provided 4GB. This behavior requires the `-T/--retries` Snakemake option.
 ```
-
 
 
 

@@ -9,10 +9,6 @@ properties:
     description: Path to samples CSV file
     default: "config/samples.csv"
 
-  tmpdir:
-    type: string
-    description: Temporary directory for tools that require large scratch space
-
   reference:
     type: object
     additionalProperties: false
