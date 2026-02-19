@@ -1,5 +1,7 @@
 $schema: "https://json-schema.org/draft/2020-12/schema"
 description: snpArcher configuration schema
+type: object
+additionalProperties: false
 
 properties:
   samples:
@@ -9,6 +11,7 @@ properties:
 
   reference:
     type: object
+    additionalProperties: false
     properties:
       name:
         type: string
@@ -20,31 +23,26 @@ properties:
       - name
       - source
 
-  sentieon:
-    type: object
-    default: {}
-    properties:
-      enabled:
-        type: boolean
-        default: false
-      license:
-        type: string
-        default: ""
-
   variant_calling:
     type: object
+    additionalProperties: false
     default: {}
     properties:
       expected_coverage:
         type: string
         enum: ["low", "high"]
         default: "low"
+      tool:
+        type: string
+        enum: ["gatk", "sentieon"]
+        default: "gatk"
       ploidy:
         type: integer
         minimum: 1
         default: 2
       gatk:
         type: object
+        additionalProperties: false
         default: {}
         properties:
           het_prior:
@@ -52,9 +50,18 @@ properties:
             minimum: 0
             maximum: 1
             default: 0.005
+      sentieon:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          license:
+            type: string
+            default: ""
 
   intervals:
     type: object
+    additionalProperties: false
     default: {}
     properties:
       enabled:
@@ -75,12 +82,36 @@ properties:
 
   callable_sites:
     type: object
+    additionalProperties: false
     default: {}
     properties:
-      mappability:
+      generate_bed_file:
+        type: boolean
+        default: true
+      coverage:
         type: object
+        additionalProperties: false
         default: {}
         properties:
+          enabled:
+            type: boolean
+            default: true
+          stdev:
+            type: number
+            minimum: 0
+            default: 2
+          merge_distance:
+            type: integer
+            minimum: 0
+            default: 100
+      mappability:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: true
           kmer:
             type: integer
             minimum: 1
@@ -94,6 +125,72 @@ properties:
             type: integer
             minimum: 0
             default: 100
+
+  modules:
+    type: object
+    additionalProperties: false
+    default: {}
+    properties:
+      qc:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          clusters:
+            type: integer
+            minimum: 1
+            default: 3
+          min_depth:
+            type: number
+            minimum: 0
+            default: 2
+          google_api_key:
+            type: string
+            default: ""
+      postprocess:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          filtering:
+            type: object
+            additionalProperties: false
+            default: {}
+            properties:
+              contig_size:
+                type: integer
+                minimum: 0
+                default: 10000
+              maf:
+                type: number
+                minimum: 0
+                maximum: 1
+                default: 0.01
+              missingness:
+                type: number
+                minimum: 0
+                maximum: 1
+                default: 0.75
+              exclude_scaffolds:
+                type: string
+                default: "mtDNA,Y"
+      trackhub:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          email:
+            type: string
+            default: "example@email.com"
 
 required:
   - samples

@@ -46,9 +46,9 @@ rule download_reads:
     """Download fastqs for all SRA samples."""
     input:
         [
-            f"results/fastqs/{sample}/{lib}/{samples_df[samples_df['library_id'] == lib].iloc[0]['input']}_{read}.fastq.gz"
+            f"results/fastqs/{record['sample_id']}/{record['library_id']}/{record['input_unit']}/{record['input']}_{read}.fastq.gz"
             for sample in SAMPLES_SRR
-            for lib in get_sample_libraries(sample)
+            for record in get_sample_srr_records(sample)
             for read in [1, 2]
         ] if SAMPLES_SRR else [],
 

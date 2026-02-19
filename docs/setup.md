@@ -94,7 +94,7 @@ For example, consider we have 2 samples: `A` and `B`. `Sample A` was sequenced 3
 
 ## Configuring snpArcher
 
-Workflow variables such as output file prefix, tool settings, and other options are set in `config/config.yaml`. Resource settings such as threads and memory are controlled per tool in the `profiles/default/config.yaml`.
+Workflow variables such as tool settings and workflow options are set in `config/config.yaml`. Resource settings such as threads and memory are controlled per tool in the `workflow-profiles/default/config.yaml`.
 
 ### Core configuration
 The following options in `config/config.yaml` must be set before running snpArcher:
@@ -102,19 +102,12 @@ The following options in `config/config.yaml` must be set before running snpArch
 | Option | Description | Type | Required | Default |
 | ---- | -------------| ------ |------ | ------ |
 | `samples` | Path to CSV sample sheet.| `str` | `True` | `None` |
-| `final_prefix` | Prefix to name final output files with (e.g. VCF) | `str` | `True` | `None` |
-| `intervals` |  Use SplitByN interval approach for GATK variant calling | `bool` | `True` | `True` |
-| `sentieon` | Use Sentieon tools instead of GATK for variant calling | `bool` | `True` | `False` |
-| `sentieon_lic` | If using Sentieon tools, provide license here | `str` | `True` if `sentieon==True`| `None` |
-| `remote_reads` | Use remote storage provider for reads. | `bool` | `False` | `False`|
-| `bigtmp` | Set a directory for TMP. Default is $TMPDIR env var | `str` | `False` | `None` |
-| `cov_filter` | Use coverage thresholds for filtering callable sites | `bool`| `True` | `True` |
-| `generate_trackhub` | Generate population genomics stats trackhub | `bool`| `True` | `True` |
-| `trackhub_email` | Trackhubs require an email address | `str` | `True` if `generate_trackhub==True` | `None` |
-| `refGenome` | Reference genome name or accession | `str` | `True` if not provided in sample sheet |  `None` |
-| `refPath` | Path to reference genome if not using NCBI genome accession | `str` | `False` | `None` |
-| `mark_duplicates` | Mark optical duplicates before variant calling. | `str` | `True` | `True` |
-| `sort_reads` | Sort reads by read name before running adapter trimming. | `str` | `True` | `False` |
+| `reference.name` | Reference genome name used for output filenames. | `str` | `True` | `None` |
+| `reference.source` | Reference source (local path, URL, or accession). | `str` | `True` | `None` |
+| `variant_calling.tool` | Variant caller implementation to run. | `str` | `True` | `gatk` |
+| `variant_calling.sentieon.license` | Sentieon license value/path (used when tool is `sentieon`). | `str` | `False` | `""` |
+| `intervals.enabled` | Use split-by-intervals calling workflow. | `bool` | `False` | `True` |
+| `callable_sites.coverage.enabled` | Enable coverage-based callable region filtering. | `bool` | `False` | `True` |
 
 ### Other options
 The following options can be adjusted based on your needs and your dataset.
@@ -122,46 +115,28 @@ The following options can be adjusted based on your needs and your dataset.
 #### Variant Calling Options
 | Option | Description | Type |
 | ---- | -------------| ------ |
-|`minNmer`| The minimum span of Ns to split reference genome at for interval generation | `int`|
-|`num_gvcf_intervals` | The maximum number of GVCF intervals to create. Actual number of intervals may be less if reference genome is highly contiguous. | `int`|
-|`db_scatter_factor` | Used to calculate number of DB intervals to create. `num_db_intervals = (scatter_factor * num_samples * num_gvcf_intervals)`. Recommend <1 | `float`|
-| `minP` | Controls `--min-pruning` in GATK HaplotypeCaller. Recommend 1 for low coverage (<10x), 2 for high coverage (>10x) | `int` |
-| `minD` | Controls `--min-dangling-branch-length` in GATK HaplotypeCaller. Recommend 1 for low coverage (<10x), 4 for high coverage (>10x) | `int` |
-| `ploidy` | Ploidy for variant calling step. | `int` |
+|`intervals.min_nmer`| Minimum span of Ns used to split reference for interval generation. | `int`|
+|`intervals.num_gvcf_intervals` | Maximum number of GVCF intervals to create. | `int`|
+|`intervals.db_scatter_factor` | Used to calculate number of DB intervals (`num_db_intervals = scatter_factor * num_samples * num_gvcf_intervals`). | `float`|
+| `variant_calling.expected_coverage` | Coverage profile used to set caller tuning (`low` or `high`). | `str` |
+| `variant_calling.ploidy` | Ploidy for variant calling step. | `int` |
+| `variant_calling.gatk.het_prior` | Heterozygosity prior passed to GATK GenotypeGVCFs. | `float` |
 
 #### Callable Sites Options
 | Option | Description | Type |
 | ---- | -------------| ------ |
-|`mappability_min`| Genomic regions with mappability score less than this will be removed from callable sites. | `int`|
-|`mappability_k`| Kmer size to compute mappability. | `int`|
-|`mappability_merge`| Merge passing mappability regions separated by this or fewer basepairs into a signle region | `int`|
-|`cov_merge`| Merge passing coverage regions separated by this or fewer basepairs into a signle region | `int`|
+|`callable_sites.mappability.min_score`| Remove regions with mappability score lower than this threshold. | `float`|
+|`callable_sites.mappability.kmer`| Kmer size used to compute mappability. | `int`|
+|`callable_sites.mappability.merge_distance`| Merge passing mappability regions within this many base pairs. | `int`|
+|`callable_sites.coverage.merge_distance`| Merge passing coverage regions within this many base pairs. | `int`|
 
 #### Coverage Filtering Options
-If `cov_filter` in the core options is set to `True`, then the following options can be adjusted to the user's needs. Coverage filtering can be handled 3 ways:
-
-1. Hard upper and lower thresholds: regions with a mean coverage that falls within these thresholds are considered callable.
+If `callable_sites.coverage.enabled` is set to `True`, then these options control coverage-based filtering:
 
 | Option | Description | Type |
 | ---- | -------------| ------ |
-|`cov_threshold_lower`| Lower coverage threshold| `int`|
-|`cov_threshold_upper`| Upper coverage threshold| `int`|
-
-2. Standard deviations: regions with a mean coverage that is within N standard deviations (assumes Poisson distribution) are considered callable.
-
-| Option | Description | Type |
-| ---- | -------------| ------ |
-|`cov_threshold_stdev`| Number of standard deviations is considered callable | `int`|
-
-3. Absolute scaling: Thresholds set by factor N. Lower bowund is (global mean coverage / N), upper bound (global mean coverage * N). A region is callable if its mean coverage is within these bounds.
-
-| Option | Description | Type |
-| ---- | -------------| ------ |
-|`cov_threshold_rel`| Scaling factor for coverage threshold| `int`|
-
-```{note}
-In order to use one of the above coverage filtering approaches, you must set the options of the desired approach, and leave the others blank.
-```
+|`callable_sites.coverage.stdev`| Number of standard deviations used by coverage-based callable locus detection. | `float`|
+|`callable_sites.coverage.merge_distance`| Merge passing coverage regions within this many base pairs. | `int`|
 
 #### Module Options
 Please refer to the [modules page](./modules.md) for each module's options.
@@ -170,6 +145,8 @@ Please refer to the [modules page](./modules.md) for each module's options.
 Compute resources (threads, memory, etc.) as well as Snakemake arguments are set by the workflow profile located in `workflow-profiles/default/config.yaml`. This profile is used by default when running Snakemake. To specify a different profile, use the `--workflow-profile` option in your Snakemake command.
 
 In the profile you can set resources to be applied to all rules via the `default-resources` key. You can override this default per-rule by uncommenting that rule under the `set-threads` and/or `set-resources` key.
+
+To configure temporary file location for the entire workflow, set `default-resources.tmpdir` in the workflow profile.
 
 ```{note}
 We recommend you use `--workflow-profile` to set resources for the workflow run. To set Snakemake options such as executor, retries, etc, use `--profile`. Read [here](https://snakemake.readthedocs.io/en/stable/executing/cli.html#profiles) for more info.
@@ -189,9 +166,6 @@ Other resources, such as `slurm_partition`, `runtime`, etc. can also be set here
 ```{note}
 Snakemake allows you to dynamically assign resources. We use the `attempt` keyword to specify memory. For example. `attempt * 2000` will provide 2GB on the first attempt of the rule, if the rule fails (out of memory) then on the second attempt it will be provided 4GB. This behavior requires the `-T/--retries` Snakemake option.
 ```
-
-
-
 
 
 

@@ -1,5 +1,5 @@
 def sentieon_haplotyper_input(wildcards):
-    input_type = samples_df.loc[wildcards.sample, "input_type"]
+    input_type = get_sample_input_type(wildcards.sample)
     
     if input_type == "gvcf":
         raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotyper")
@@ -26,7 +26,7 @@ rule sentieon_haplotyper:
         gvcf="results/gvcfs/{sample}.g.vcf.gz",
         tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
     params:
-        lic=config["sentieon"]["license"],
+        lic=config["variant_calling"]["sentieon"]["license"],
         ploidy=config["variant_calling"]["ploidy"],
     threads: 8
     conda:
@@ -60,7 +60,7 @@ rule sentieon_combine_gvcf:
         vcf=temp("results/vcfs/raw.vcf.gz"),
         tbi=temp("results/vcfs/raw.vcf.gz.tbi"),
     params:
-        lic=config["sentieon"]["license"],
+        lic=config["variant_calling"]["sentieon"]["license"],
         gvcf_args=lambda wc, input: " ".join([f"-v {g}" for g in input.gvcfs]),
     threads: 8
     conda:

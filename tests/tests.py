@@ -62,6 +62,50 @@ def test_full_pipeline_dry_run(request):
         result.assert_success()
 
 
+@pytest.mark.dry_run
+def test_multirow_same_library_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="all",
+            configfile=get_config_file(),
+            samples=SAMPLES_DIR / "local_fastqs_multirow_same_library.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "InputFunctionException" not in output
+        assert "merge_library_bams" in output
+        assert "markdup_library" in output
+        assert "merge_dedup_libraries" in output
+        assert "input_unit=u1" in output
+        assert "input_unit=u2" in output
+
+
+@pytest.mark.dry_run
+def test_multirow_multi_library_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="all",
+            configfile=get_config_file(),
+            samples=SAMPLES_DIR / "local_fastqs_multirow_multi_library.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "InputFunctionException" not in output
+        assert "merge_library_bams" in output
+        assert "markdup_library" in output
+        assert "merge_dedup_libraries" in output
+        assert "library=libA" in output
+        assert "library=libB" in output
+
+
 @pytest.mark.full_run
 def test_setup(request):
     no_conda = request.config.getoption("--no-conda")

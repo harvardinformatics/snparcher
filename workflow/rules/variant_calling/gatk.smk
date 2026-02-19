@@ -2,7 +2,7 @@ localrules: create_db_mapfile
 
 
 def haplotype_caller_input(wildcards):
-    input_type = samples_df.loc[wildcards.sample, "input_type"]
+    input_type = get_sample_input_type(wildcards.sample)
     
     if input_type == "gvcf":
         raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotype_caller")
@@ -75,8 +75,6 @@ rule gatk_genomics_db_import:
         tar="results/gatk_genomics_db.tar",
     params:
         java_opts=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
-    resources:
-        tmpdir=config.get("tmpdir", "/tmp"),
     conda:
         "../envs/gatk.yaml"
     benchmark:
@@ -111,8 +109,6 @@ rule gatk_genotype_gvcfs:
         java_opts=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
         het_prior=config["variant_calling"]["gatk"]["het_prior"],
         db=lambda wc, input: subpath(input.db, strip_suffix=".tar"),
-    resources:
-        tmpdir=config.get("tmpdir", "/tmp"),
     conda:
         "../envs/gatk.yaml"
     benchmark:

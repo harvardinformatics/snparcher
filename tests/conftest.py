@@ -1,5 +1,6 @@
 # tests/conftest.py
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -59,6 +60,9 @@ class SnakemakeRunner:
         else:
             targets = list(target)
 
+        runtime_cache = self.workdir / ".snakemake-runtime-cache"
+        runtime_cache.mkdir(parents=True, exist_ok=True)
+
         cmd = [
             "snakemake",
             "--show-failed-logs",
@@ -70,6 +74,8 @@ class SnakemakeRunner:
             "1",
             "--directory",
             str(self.workdir),
+            "--runtime-source-cache-path",
+            str(runtime_cache),
             "-p",
             *targets,
         ]
@@ -80,10 +86,17 @@ class SnakemakeRunner:
         if self.use_conda:
             cmd.extend(["--use-conda", "--conda-prefix", str(self.conda_prefix)])
 
+        # Optional shell override for test runs (e.g. /bin/zsh).
+        shell_exec = os.environ.get("SNPARCHER_TEST_SHELL_EXECUTABLE")
+        if shell_exec:
+            cmd.extend(["--default-resources", f"shell_exec={shell_exec}"])
+
         if extra_args:
             cmd.extend(extra_args)
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        env = os.environ.copy()
+        env.setdefault("XDG_CACHE_HOME", str(self.workdir / ".cache"))
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         return SnakemakeResult(result, self.workdir)
 
     def dry_run(self, target, configfile, samples=None):

@@ -8,10 +8,12 @@ reference:
 
 variant_calling:
   expected_coverage: "low"  # low | high | auto (future)
-  tool: "gatk" # gatk 
+  tool: "gatk" # gatk | sentieon
   ploidy: 2
   gatk:
     het_prior: 0.005
+  sentieon:
+    license: ""
 
 intervals:
   enabled: true
@@ -31,10 +33,6 @@ callable_sites:
     min_score: 1
     kmer: 150
     merge_distance: 100
-
-sentieon:
-  enabled: false
-  license: ""
 
 modules:
   qc:
