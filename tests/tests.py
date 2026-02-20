@@ -1,4 +1,5 @@
 import platform
+import re
 from pathlib import Path
 import tempfile
 
@@ -22,6 +23,13 @@ def get_config_file():
     if platform.machine() == "arm64":
         return CONFIGS_DIR / "local_genome_no_clam.yaml"
     return CONFIGS_DIR / "local_genome.yaml"
+
+
+def get_multistage_config_file():
+    """Get multistage concat config file based on platform."""
+    if platform.machine() == "arm64":
+        return CONFIGS_DIR / "local_genome_no_clam_multistage.yaml"
+    return CONFIGS_DIR / "local_genome_multistage.yaml"
 
 @pytest.mark.dry_run
 def test_setup_dry_run(request):
@@ -179,3 +187,52 @@ def test_incremental(request):
             samples=get_samples_file(),
         )
         result.assert_success()
+
+
+@pytest.mark.full_run
+def test_multistage_interval_concat(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        configfile = get_multistage_config_file()
+        samples = get_samples_file()
+
+        result = smk.run(
+            target="setup",
+            configfile=configfile,
+            samples=samples,
+        )
+        result.assert_success()
+
+        result = smk.dry_run(
+            target="results/vcfs/raw.vcf.gz",
+            configfile=configfile,
+            samples=samples,
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "concat_interval_gvcfs_stage" in output
+        assert "concat_interval_vcfs_stage" in output
+        gvcf_stage_match = re.search(r"concat_interval_gvcfs_stage\s+(\d+)", output)
+        assert gvcf_stage_match is not None
+        assert int(gvcf_stage_match.group(1)) >= 1
+
+        vcf_stage_match = re.search(r"concat_interval_vcfs_stage\s+(\d+)", output)
+        assert vcf_stage_match is not None
+        assert int(vcf_stage_match.group(1)) > 1
+
+        result = smk.run(
+            target="results/vcfs/raw.vcf.gz",
+            configfile=configfile,
+            samples=samples,
+        )
+        result.assert_success()
+        result.assert_output_exists(
+            "results/vcfs/raw.vcf.gz",
+            "results/vcfs/raw.vcf.gz.tbi",
+            "logs/concat_interval_gvcfs/staged/sample1/r1/c0.txt",
+            "logs/concat_interval_gvcfs/staged/sample2/r1/c0.txt",
+            "logs/concat_interval_vcfs/staged/r2/c0.txt",
+        )
