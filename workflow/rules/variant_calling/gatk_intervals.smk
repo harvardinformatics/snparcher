@@ -282,7 +282,7 @@ rule concat_interval_gvcfs_stage:
     shell:
         """
         bcftools concat -D -a -Ou {input.gvcfs} 2> {log} \
-            | bcftools sort -T {resources.tmpdir}/bcftools-sort -Oz -o {output.gvcf} - 2>> {log}
+            | bcftools sort -T {resources.tmpdir} -Oz -o {output.gvcf} - 2>> {log}
         tabix -p vcf {output.gvcf} 2>> {log}
         """
 
