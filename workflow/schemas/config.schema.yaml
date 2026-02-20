@@ -50,6 +50,14 @@ properties:
             minimum: 0
             maximum: 1
             default: 0.005
+          concat_batch_size:
+            type: integer
+            minimum: 2
+            default: 250
+          concat_max_rounds:
+            type: integer
+            minimum: 1
+            default: 20
       sentieon:
         type: object
         additionalProperties: false

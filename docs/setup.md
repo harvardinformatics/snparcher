@@ -121,6 +121,8 @@ The following options can be adjusted based on your needs and your dataset.
 | `variant_calling.expected_coverage` | Coverage profile used to set caller tuning (`low` or `high`). | `str` |
 | `variant_calling.ploidy` | Ploidy for variant calling step. | `int` |
 | `variant_calling.gatk.het_prior` | Heterozygosity prior passed to GATK GenotypeGVCFs. | `float` |
+| `variant_calling.gatk.concat_batch_size` | Max number of interval VCFs/gVCFs merged per staged concat job. Lower values reduce per-job file pressure; higher values reduce number of rounds. | `int` |
+| `variant_calling.gatk.concat_max_rounds` | Safety limit for staged concat rounds before failing with a config error. | `int` |
 
 #### Callable Sites Options
 | Option | Description | Type |
@@ -166,7 +168,6 @@ Other resources, such as `slurm_partition`, `runtime`, etc. can also be set here
 ```{note}
 Snakemake allows you to dynamically assign resources. We use the `attempt` keyword to specify memory. For example. `attempt * 2000` will provide 2GB on the first attempt of the rule, if the rule fails (out of memory) then on the second attempt it will be provided 4GB. This behavior requires the `-T/--retries` Snakemake option.
 ```
-
 
 
 
