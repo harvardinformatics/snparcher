@@ -300,8 +300,8 @@ rule concat_interval_gvcfs:
         "logs/concat_interval_gvcfs/{sample}.txt"
     shell:
         """
-        cp {input.gvcf} {output.gvcf} 2> {log}
-        cp {input.tbi} {output.tbi} 2>> {log}
+        mv {input.gvcf} {output.gvcf} 2> {log}
+        mv {input.tbi} {output.tbi} 2>> {log}
         """
 
 rule create_db_mapfile:
