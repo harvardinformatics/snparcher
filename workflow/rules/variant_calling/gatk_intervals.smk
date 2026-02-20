@@ -431,7 +431,7 @@ rule concat_interval_vcfs_stage:
     shell:
         """
         bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
-            | bcftools sort -T {resources.tmpdir}/bcftools-sort -Oz -o {output.vcf} - 2>> {log}
+            | bcftools sort -T {resources.tmpdir} -Oz -o {output.vcf} - 2>> {log}
         tabix -p vcf {output.vcf} 2>> {log}
         """
 
