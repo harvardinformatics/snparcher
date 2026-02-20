@@ -23,6 +23,8 @@ DEFAULTS = {
         "ploidy": 2,
         "gatk": {
             "het_prior": 0.005,
+            "concat_batch_size": 250,
+            "concat_max_rounds": 20,
         },
         "sentieon": {
             "license": "",

@@ -10,6 +10,8 @@ variant_calling:
   ploidy: 2
   gatk:
     het_prior: 0.005
+    concat_batch_size: 5
+    concat_max_rounds: 20
   sentieon:
     license: ""
 
