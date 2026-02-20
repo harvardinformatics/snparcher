@@ -449,6 +449,6 @@ rule concat_interval_vcfs:
         "logs/concat_interval_vcfs/log.txt"
     shell:
         """
-        cp {input.vcf} {output.vcf} 2> {log}
-        cp {input.tbi} {output.tbi} 2>> {log}
+        mv {input.vcf} {output.vcf} 2> {log}
+        mv {input.tbi} {output.tbi} 2>> {log}
         """
