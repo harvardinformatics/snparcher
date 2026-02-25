@@ -2,6 +2,9 @@
 
 samples: "config/samples.csv"
 
+# Optional: per-sample metadata for modules (exclude, outgroup, lat, long, etc.)
+# sample_metadata: "config/sample_metadata.csv"
+
 reference:
   name: "my_organism"
   source: "/data/reference/genome.fna.gz"  # Can be a refseq/genbank accession, url, or path

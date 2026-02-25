@@ -10,6 +10,7 @@ from conftest import SnakemakeRunner
 TEST_DIR = Path(__file__).parent
 CONFIGS_DIR = TEST_DIR / "configs"
 SAMPLES_DIR = TEST_DIR / "sample_sheets"
+METADATA_DIR = TEST_DIR / "sample_metadata"
 
 
 def get_samples_file():
@@ -236,3 +237,89 @@ def test_multistage_interval_concat(request):
             "logs/concat_interval_gvcfs/staged/sample2/r1/c0.txt",
             "logs/concat_interval_vcfs/staged/r2/c0.txt",
         )
+
+
+# --- Metadata tests ---
+
+@pytest.mark.dry_run
+def test_no_metadata_dry_run(request):
+    """Pipeline works without sample_metadata configured."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+
+@pytest.mark.dry_run
+def test_valid_metadata_dry_run(request):
+    """Pipeline works with valid sample_metadata."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+            config_overrides={"sample_metadata": str(METADATA_DIR / "valid_metadata.csv")},
+        )
+        result.assert_success()
+
+
+@pytest.mark.dry_run
+def test_minimal_metadata_dry_run(request):
+    """Pipeline works with metadata that only has sample_id and exclude."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+            config_overrides={"sample_metadata": str(METADATA_DIR / "minimal_metadata.csv")},
+        )
+        result.assert_success()
+
+
+@pytest.mark.dry_run
+def test_partial_metadata_warns(request):
+    """Pipeline warns when some samples lack metadata rows."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+            config_overrides={"sample_metadata": str(METADATA_DIR / "partial_metadata.csv")},
+        )
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "sample2" in output, "Expected warning about sample2 missing from metadata"
+
+
+@pytest.mark.dry_run
+def test_unknown_sample_in_metadata_fails(request):
+    """Pipeline fails when metadata contains sample_ids not in the sample sheet."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+            config_overrides={"sample_metadata": str(METADATA_DIR / "unknown_sample.csv")},
+        )
+        assert not result.succeeded, "Expected failure for unknown sample in metadata"
+        output = result.stdout + result.stderr
+        assert "unknown_sample" in output
+
