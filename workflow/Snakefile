@@ -16,7 +16,6 @@ if VARIANT_TOOL == "sentieon":
 elif VARIANT_TOOL == "gatk":
     if config["intervals"]["enabled"]:
         include: "rules/variant_calling/gatk_intervals.smk"
-        include: "rules/variant_calling/joint_gvcf_intervals.smk"
     else:
         include: "rules/variant_calling/gatk.smk"
         include: "rules/variant_calling/joint_gvcf.smk"
