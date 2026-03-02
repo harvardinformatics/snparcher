@@ -42,8 +42,8 @@ def pytest_collection_modifyitems(config, items):
 class SnakemakeRunner:
     """Simple runner for testing snakemake workflows."""
 
-    def __init__(self, workdir, use_conda=True):
-        self.snakefile = WORKFLOW_DIR / "Snakefile"
+    def __init__(self, workdir, use_conda=True, snakefile=None):
+        self.snakefile = Path(snakefile) if snakefile else WORKFLOW_DIR / "Snakefile"
         self.workdir = Path(workdir)
         self.use_conda = use_conda
         self.conda_prefix = CONDA_PREFIX

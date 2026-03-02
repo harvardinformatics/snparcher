@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from conftest import SnakemakeRunner
+from conftest import SnakemakeRunner, WORKFLOW_DIR, TEST_DATA_DIR
 
 TEST_DIR = Path(__file__).parent
 CONFIGS_DIR = TEST_DIR / "configs"
@@ -323,3 +323,206 @@ def test_unknown_sample_in_metadata_fails(request):
         output = result.stdout + result.stderr
         assert "unknown_sample" in output
 
+
+# --- Postprocess module tests ---
+
+def get_postprocess_config():
+    """Config with postprocess module enabled."""
+    return CONFIGS_DIR / "local_genome_postprocess.yaml"
+
+
+@pytest.mark.dry_run
+def test_postprocess_dry_run(request):
+    """Dry run postprocess basic_filter target (no callable_sites.bed dependency)."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        # Target filtered.vcf.gz directly — this exercises filter_individuals
+        # and basic_filter without needing callable_sites.bed (which requires
+        # the zarr→BED conversion rule not yet added).
+        result = smk.dry_run(
+            target="results/postprocess/filtered.vcf.gz",
+            configfile=get_postprocess_config(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "postprocess_filter_individuals" in output, \
+            "Expected postprocess_filter_individuals rule in DAG"
+        assert "postprocess_basic_filter" in output, \
+            "Expected postprocess_basic_filter rule in DAG"
+
+
+@pytest.mark.dry_run
+def test_postprocess_disabled_no_rules(request):
+    """When postprocess is disabled, no postprocess rules appear."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="all",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "postprocess_" not in output, \
+            "Postprocess rules should not appear when module is disabled"
+
+
+@pytest.mark.dry_run
+def test_postprocess_with_metadata_dry_run(request):
+    """Postprocess works with sample metadata (exclude column)."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="results/postprocess/filtered.vcf.gz",
+            configfile=get_postprocess_config(),
+            samples=get_samples_file(),
+            config_overrides={
+                "sample_metadata": str(METADATA_DIR / "exclude_and_outgroup.csv"),
+            },
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "postprocess_filter_individuals" in output
+
+
+# --- QC module tests ---
+
+def get_qc_config():
+    """Config with QC module enabled."""
+    return CONFIGS_DIR / "local_genome_qc.yaml"
+
+
+@pytest.mark.dry_run
+def test_qc_dry_run(request):
+    """Dry run QC dashboard target — exercises all QC rules."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="results/qc/qc_dashboard.html",
+            configfile=get_qc_config(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "qc_check_fai" in output, \
+            "Expected qc_check_fai rule in DAG"
+        assert "qc_vcftools_individuals" in output, \
+            "Expected qc_vcftools_individuals rule in DAG"
+        assert "qc_subsample_snps" in output, \
+            "Expected qc_subsample_snps rule in DAG"
+        assert "qc_plink" in output, \
+            "Expected qc_plink rule in DAG"
+        assert "qc_admixture" in output, \
+            "Expected qc_admixture rule in DAG"
+        assert "qc_qc_dashboard" in output, \
+            "Expected qc_qc_dashboard rule in DAG"
+        # copy_qc_report should appear since main workflow provides qc_report
+        assert "qc_copy_qc_report" in output, \
+            "Expected qc_copy_qc_report rule in DAG"
+
+
+@pytest.mark.dry_run
+def test_qc_disabled_no_rules(request):
+    """When QC is disabled, no QC rules appear."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="all",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "qc_check_fai" not in output, \
+            "QC rules should not appear when module is disabled"
+        assert "qc_plink" not in output, \
+            "QC rules should not appear when module is disabled"
+
+
+@pytest.mark.dry_run
+def test_qc_no_coords_without_metadata(request):
+    """QC works without metadata — generate_coords_file should not run."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="results/qc/qc_dashboard.html",
+            configfile=get_qc_config(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        # No metadata → no coords → no generate_coords_file rule
+        assert "qc_generate_coords_file" not in output, \
+            "generate_coords_file should not run without metadata"
+
+
+@pytest.mark.dry_run
+def test_qc_with_coords_metadata(request):
+    """QC generates coords when metadata has lat/long columns."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="results/qc/qc_dashboard.html",
+            configfile=get_qc_config(),
+            samples=get_samples_file(),
+            config_overrides={
+                "sample_metadata": str(METADATA_DIR / "valid_metadata.csv"),
+            },
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "qc_generate_coords_file" in output, \
+            "generate_coords_file should run when metadata has lat/long"
+
+
+@pytest.mark.full_run
+def test_qc_standalone_full_run(request):
+    """Full execution of QC module as standalone workflow against test fixtures."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "sample_metadata": str(TEST_DATA_DIR / "qc" / "sample_metadata.csv"),
+                "vcf": str(TEST_DATA_DIR / "qc" / "raw.vcf.gz"),
+                "fai": str(TEST_DATA_DIR / "qc" / "ref.fai"),
+                "qc_report": str(TEST_DATA_DIR / "qc" / "qc_report.tsv"),
+            },
+        )
+        result.assert_success()
+        result.assert_output_exists(
+            "results/qc/qc_dashboard.html",
+            "results/qc/plink.eigenvec",
+            "results/qc/plink.3.Q",
+            "results/qc/coords.txt",
+            "results/qc/qc_report.tsv",
+        )

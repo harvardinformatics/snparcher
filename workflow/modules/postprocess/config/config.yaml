@@ -1,17 +1,25 @@
 ##############################
-# Variables you need to change
+# Postprocess module — standalone config
+#
+# Used when running the module directly:
+#   snakemake --snakefile workflow/modules/postprocess/Snakefile
+#
+# When imported by the main workflow, this file is ignored
+# (the parent passes config via the module directive).
 ##############################
 
-samples: "config/samples.csv"  # name of the sample metadata CSV 
-final_prefix: "" # prefix for final output files
+samples: "config/samples.csv"
 
-##############################
-# Variables you *might* need to change
-##############################
+# Optional: per-sample metadata (with exclude column for filtering)
+# sample_metadata: "config/sample_metadata.csv"
 
-## Filtering options ##
+# Input files
+vcf: "results/vcfs/raw.vcf.gz"
+ref_fai: "results/reference/my_organism.fa.gz.fai"
+callable_sites_bed: "results/callable_sites/callable_sites.bed"
 
-contig_size: 10000 # snps on contigs this size or smaller will be filtered from the final clean vcfs. Set to 0 to disable.
-maf: 0.01 #snps with MAF below this value will be filtered from the final clean vcfs. Set to 0 to disable.
-missingness: 0.75 #snps with missingness greater than this value will be filtered from the final clean vcfs. Set to 1 to disable.
-scaffolds_to_exclude: "mtDNA,Y" #comma separated, no spaces list of scaffolds to exclude from final clean vcfs. Set to blank to disable.
+# Filtering parameters
+contig_size: 10000       # Contigs this size or smaller are excluded. Set to 0 to disable.
+maf: 0.01                # SNPs with MAF below this value are removed. Set to 0 to disable.
+missingness: 0.75        # SNPs with missingness above this value are removed. Set to 1 to disable.
+exclude_scaffolds: "mtDNA,Y"  # Comma-separated scaffolds to exclude. Set to "" to disable.

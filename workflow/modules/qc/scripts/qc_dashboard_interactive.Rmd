@@ -8,9 +8,10 @@ output:
 editor_options: 
   chunk_output_type: console
 params:
-  prefix: files.idepth
+  qc_dir: "results/qc"
   nClusters: 3
-  GMKey: NULL 
+  GMKey: NULL
+  has_qc_report: FALSE
 ---
 
 ```{r setup, include=FALSE}
@@ -22,7 +23,11 @@ suppressMessages(library(reshape2))
 suppressMessages(library(ggtree))
 suppressMessages(library(ggmap))
 
-prefix <- params$prefix
+qc_dir <- params$qc_dir
+
+# File paths — vcftools outputs use "individuals" prefix, plink uses "plink" prefix
+vcf_prefix <- file.path(qc_dir, "individuals")
+plink_prefix <- file.path(qc_dir, "plink")
 
 set.colors <- c('#1f78b4','#33a02c','#6a3d9a','#a6cee3','#b2df8a','#fb9a99','#e31a1c','#fdbf6f','#ff7f00','#cab2d6')
 
@@ -37,12 +42,12 @@ Row
 
 ```{r numsnps}
 #fai file for getting genome length
-fai_path <- paste0(prefix, ".fna.fai")
+fai_path <- file.path(qc_dir, "ref.fai")
 df_fai <- read.table(fai_path, header = F)
 genome_size <- sum(df_fai$V2)
 
-#summary of the unfiltered FCT
-sum_path <- paste0(prefix, ".FILTER.summary")
+#summary of the unfiltered VCF
+sum_path <- paste0(vcf_prefix, ".FILTER.summary")
 df_sum <- read.table(sum_path, header =T)
 
 #total number of SNPs found by pipeline
@@ -57,13 +62,13 @@ other_lines <- df_sum %>%
 fil_snps <- other_lines[1,1]  
 tot_snps <- snps_remain + fil_snps
 
-proj_name <- basename(prefix)
+proj_name <- basename(qc_dir)
 
 #num SNPs in pruned data
-nums.nps <- nrow(read.table(paste0(prefix, ".bim"), header = T))
+nums.nps <- nrow(read.table(paste0(plink_prefix, ".bim"), header = T))
 
 #estimate watterson's theta:
-num.samples <- nrow(read.table(paste0(prefix, ".idepth"), header = T))
+num.samples <- nrow(read.table(paste0(vcf_prefix, ".idepth"), header = T))
 
 #harmonic number calculation for n-1 chromosomes (2*sample size)
 Hn = 0
@@ -100,7 +105,7 @@ valueBox(div_text, icon = "fa-dna")
 ### Mean depth
 
 ```{r}
-mean.depth <- round(mean(read.table(paste0(prefix, ".idepth"), header = T)$MEAN_DEPTH), 1)
+mean.depth <- round(mean(read.table(paste0(vcf_prefix, ".idepth"), header = T)$MEAN_DEPTH), 1)
 valueBox(mean.depth, icon = "fa-align-center")
 ```
 
@@ -130,16 +135,16 @@ input$GMKey <- params$GMKey
 
 ```{r, fig.width = 6, fig.height = 8}
 # PCA plot --------------------------------------------------------------
-pca.path <- paste0(prefix, ".eigenvec")
+pca.path <- paste0(plink_prefix, ".eigenvec")
 #this makes it reasonably robust to running with plink 1.9 or plink 2.0
 tmp.head <- sub("#", "", readLines(pca.path))
 df.pca <- read.table(text = tmp.head, header = TRUE)
-df.val <- read.table(gsub("vec","val", pca.path), header = FALSE)
+df.val <- read.table(paste0(plink_prefix, ".eigenval"), header = FALSE)
 df.val$prop <- (df.val$V1 / (sum(df.val$V1))) * 100
 df.val$PC <- paste0("PC", row.names(df.val))
 
 #add depth
-depth.path <- paste0(prefix, ".idepth")
+depth.path <- paste0(vcf_prefix, ".idepth")
 df.depth <- read.table(depth.path, header = T)
 df.depth <- df.depth %>%  mutate_if(is.numeric, round, digits = 2)
 
@@ -223,7 +228,7 @@ Row
 ```{r, fig.width = 5, fig.height = 5}
 # depth plot --------------------------------------------------------------
 #depth is read in the PCA chunk
-imiss.path <- paste0(prefix, ".imiss")
+imiss.path <- paste0(vcf_prefix, ".imiss")
 df.imiss <- read.table(imiss.path, header =T)
 
 df.depth.miss <- inner_join(df.depth, df.imiss, by = "INDV")
@@ -254,21 +259,18 @@ df.depth.miss <- df.depth.miss %>%
 
 ### Mapping rate
 
-
-```{r, fig.width = 5, fig.height = 5}
+```{r, fig.width = 5, fig.height = 5, eval = params$has_qc_report}
 # bamstat plot --------------------------------------------------------------
-bamstat.path <- paste0(prefix, "_bam_sumstats.txt")
-df.bamstat <- read.table(bamstat.path, header =T)
+# v2 qc_report.tsv uses lowercase column names: sample, percent_mapped, mean_depth, etc.
+bamstat.path <- file.path(qc_dir, "qc_report.tsv")
+df.bamstat <- read.table(bamstat.path, header = T, sep = "\t")
 
-df.depth.miss.bamstat <- inner_join(df.depth.miss, df.bamstat, by = c("INDV" = "Sample"))
+df.depth.miss.bamstat <- inner_join(df.depth.miss, df.bamstat, by = c("INDV" = "sample"))
 df.depth.miss.bamstat <- df.depth.miss.bamstat %>% 
  mutate_if(is.numeric, round, digits = 5)
 
-#replace df.depth.miis with r.missing for shiny
-#renderPlotly(
-  #need to wrap ggplot in () to pipe to plotly
   (ggplot(data = df.depth.miss.bamstat, aes(text = INDV)) +
-    geom_point(aes(x = Percent_mapped, y = MEAN_DEPTH, fill = cluster), 
+    geom_point(aes(x = percent_mapped, y = MEAN_DEPTH, fill = cluster), 
                size = 3, color = "black") +
     theme_bw() +
     theme(legend.position = "none") + 
@@ -276,8 +278,11 @@ df.depth.miss.bamstat <- df.depth.miss.bamstat %>%
     labs(x = "% Reads Mapped", y = "SNP Depth") +
     xlim(0,100)) %>% 
     ggplotly(tooltip=c("text","x","y")) 
-#)
 
+```
+
+```{r, eval = !params$has_qc_report, results='asis'}
+cat("*Mapping rate panel skipped — no BAM summary stats provided (qc_report config key is empty).*")
 ```
 
 > Fig. 4: The percent of reads mapped is calcuated from the mapping rate to the reference genome. A lower mapping rate may indicate there are contaminants in your reads or the sample is from the wrong species. For example, a mapping rate <80% means either the sample is of the wrong species (so many reads did not map) or 20% sample comes from another species (such as bacterial contamination). 
@@ -285,7 +290,7 @@ df.depth.miss.bamstat <- df.depth.miss.bamstat %>%
 ### Heterozygosity
 
 ```{r, fig.width = 5, fig.height = 5}
-het.path <- paste0(prefix, ".het")
+het.path <- paste0(vcf_prefix, ".het")
 df.het <- read.table(het.path, header =T)
 
 df.het <- left_join(df.het, df.pca, by = c("INDV" = "IID"))
@@ -304,7 +309,7 @@ df.het <- left_join(df.het, df.pca, by = c("INDV" = "IID"))
 ```{r, fig.width = 10, fig.height = 5, include = F, eval = F}
 ##this was per site heterozygosity and it was not that informative so it has been commented out
 
-#het.path <- paste0(prefix, ".hwe")
+#het.path <- paste0(vcf_prefix, ".hwe")
 #df.het <- read.table(het.path, header =T)
 #
 #biggest_chr <- df.het %>% group_by(CHR) %>% 
@@ -334,10 +339,10 @@ Row
 
 ```{r, fig.height=12, fig.width=12}
 
-dist.id <- read.table(paste0(prefix, ".dist.id"))["V2"]
+dist.id <- read.table(paste0(plink_prefix, ".dist.id"))["V2"]
 dist.id <- left_join(dist.id, df.pca[,c("IID","cluster")], by = c("V2" = "IID"))
 
-df.dist <- read.table(paste0(prefix, ".dist"))
+df.dist <- read.table(paste0(plink_prefix, ".dist"))
 
 mat.dist <- as.dist(df.dist)
 
@@ -395,7 +400,7 @@ Row
 
 ```{r,  fig.height=10, fig.width=6}
 
-df.rel <- read.table(paste0(prefix, ".king"))
+df.rel <- read.table(paste0(plink_prefix, ".king"))
 colnames(df.rel) <- dist.id$V2
 rownames(df.rel) <- dist.id$V2
 
@@ -457,8 +462,10 @@ Row
 
 ```{r, fig.width = 10, fig.height = 10}
 
-if((file.exists(paste0(prefix, ".coords.txt"))) & (file.size(paste0(prefix, ".coords.txt"))>0)){
-    df.coords <- read.table(paste0(prefix, ".coords.txt"))
+coords.path <- file.path(qc_dir, "coords.txt")
+
+if((file.exists(coords.path)) & (file.size(coords.path)>0)){
+    df.coords <- read.table(coords.path)
     names(df.coords) <- c("sample.ID","long","lat")
     
     if(max(df.coords$lat < 90) & min(df.coords$lat) > 0 
@@ -477,9 +484,6 @@ if((file.exists(paste0(prefix, ".coords.txt"))) & (file.size(paste0(prefix, ".co
       showsubunits = TRUE,
       showcountries = TRUE,
       resolution = 50,
-      #center = list( #not sure why, but centering on a coordinates does not work (just defaults to middle of full projection)
-      #  lat = 33.94423,
-      #  lon = -119.3048))
       projection = list(
         type = 'conic conformal',
         rotation = list(lon = -100)),
@@ -515,7 +519,7 @@ if((file.exists(paste0(prefix, ".coords.txt"))) & (file.size(paste0(prefix, ".co
       ) %>% 
      colorbar(title = "cluster")   
   }else{
-    print("a map will appear here if you includes a .coords file ")
+    print("a map will appear here if you provide sample metadata with lat/long columns")
 }
 
 ```
@@ -529,9 +533,11 @@ Row
 
 ```{r, fig.width = 10, fig.height = 10}
 
-if(file.exists(paste0(prefix, ".coords.txt"))){
+coords.path <- file.path(qc_dir, "coords.txt")
+
+if(file.exists(coords.path)){
   if(!is.null(input$GMKey)){
-    df.coords <- read.table(paste0(prefix, ".coords.txt"), na.strings = c("", "nan"))
+    df.coords <- read.table(coords.path, na.strings = c("", "nan"))
     names(df.coords) <- c("sample.ID","long","lat")
     
     df.coords <- left_join(df.pca, df.coords, by = c("IID" = "sample.ID"))
@@ -569,7 +575,7 @@ if(file.exists(paste0(prefix, ".coords.txt"))){
   }
  
 }else{
-  print("a map will appear here if you includes a .coords file ")
+  print("a map will appear here if you provide sample metadata with lat/long columns")
 }
 
 ```
@@ -584,9 +590,9 @@ Row
 ```{r, width = 10, height = 5}
   # admixture ---------------------------------------------------------------
 
-k2 <- paste0(prefix, ".2.Q")
-k3 <- paste0(prefix, ".3.Q")
-samps <- paste0(prefix, ".fam")
+k2 <- paste0(plink_prefix, ".2.Q")
+k3 <- paste0(plink_prefix, ".3.Q")
+samps <- paste0(plink_prefix, ".fam")
 
 x <- read.table(k2, header = F)
 

@@ -1,20 +1,17 @@
-# snpArcher v2 Configuration Example
-
-samples: "config/samples.csv"
-
-# Optional: per-sample metadata for modules (exclude, outgroup, lat, long, etc.)
-# sample_metadata: "config/sample_metadata.csv"
+samples: "samples.csv"
 
 reference:
-  name: "my_organism"
-  source: "/data/reference/genome.fna.gz"  # Can be a refseq/genbank accession, url, or path
+  name: "test_genome"
+  source: "tests/data/reference/test_genome.fa.gz"
 
 variant_calling:
-  expected_coverage: "low"  # low | high | auto (future)
-  tool: "gatk" # gatk | sentieon
+  expected_coverage: "low"
+  tool: "gatk"
   ploidy: 2
   gatk:
     het_prior: 0.005
+    concat_batch_size: 5
+    concat_max_rounds: 20
   sentieon:
     license: ""
 
@@ -24,9 +21,8 @@ intervals:
   num_gvcf_intervals: 50
   db_scatter_factor: 0.15
 
-
 callable_sites:
-  generate_bed_file: True
+  generate_bed_file: false
   coverage:
     enabled: true
     stdev: 2
@@ -43,9 +39,8 @@ modules:
     clusters: 3
     min_depth: 2
     google_api_key: ""
-    exclude_scaffolds: ""
   postprocess:
-    enabled: false
+    enabled: true
     filtering:
       contig_size: 10000
       maf: 0.01
