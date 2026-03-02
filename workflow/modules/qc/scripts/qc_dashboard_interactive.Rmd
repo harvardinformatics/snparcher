@@ -536,7 +536,7 @@ Row
 coords.path <- file.path(qc_dir, "coords.txt")
 
 if(file.exists(coords.path)){
-  if(!is.null(input$GMKey)){
+  if(!is.null(input$GMKey) && nchar(input$GMKey) > 0){
     df.coords <- read.table(coords.path, na.strings = c("", "nan"))
     names(df.coords) <- c("sample.ID","long","lat")
     
