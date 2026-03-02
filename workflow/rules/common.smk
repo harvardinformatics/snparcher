@@ -95,6 +95,7 @@ VARIANT_TOOL = config["variant_calling"]["tool"]
 USE_SENTIEON = VARIANT_TOOL == "sentieon"
 
 
+# Canonical hard-filter definitions used by workflow/rules/variant_calling/hard_filters.smk.
 GATK_HARD_FILTERS = [
     (
         "RPRS_filter",
