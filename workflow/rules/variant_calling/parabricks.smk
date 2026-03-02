@@ -24,7 +24,6 @@ rule parabricks_haplotypecaller:
         image=config["variant_calling"]["parabricks"]["container_image"],
         extra_args=config["variant_calling"]["parabricks"]["extra_args"],
         ploidy=config["variant_calling"]["ploidy"],
-        num_cpu_threads=config["variant_calling"]["parabricks"]["num_cpu_threads"],
         min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
         min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
     threads: config["variant_calling"]["parabricks"]["num_cpu_threads"]
@@ -46,7 +45,7 @@ rule parabricks_haplotypecaller:
             --gvcf \
             --tmp-dir {resources.tmpdir} \
             --num-gpus {resources.gpus} \
-            --num-cpu-threads {params.num_cpu_threads} \
+            --num-cpu-threads {threads} \
             --ploidy {params.ploidy} \
             --min-pruning {params.min_pruning} \
             --min-dangling-branch-length {params.min_dangling} \

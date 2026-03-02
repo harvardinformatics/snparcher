@@ -25,6 +25,7 @@ rule gatk_haplotypecaller:
         ploidy=config["variant_calling"]["ploidy"],
         min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
         min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
+    threads: 1
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -39,6 +40,7 @@ rule gatk_haplotypecaller:
             -I {input.bam} \
             -O {output.gvcf} \
             -ploidy {params.ploidy} \
+            --native-pair-hmm-threads {threads} \
             --emit-ref-confidence GVCF \
             --min-pruning {params.min_pruning} \
             --min-dangling-branch-length {params.min_dangling} \

@@ -22,14 +22,11 @@ set-threads:
   bwa_map: 16
   dedup: 16
 
-  # GVCF
-  bam2gvcf: 1 # Does not benefit from more than 2 threads
-  gvcf2DB: 1 # Does not benefit from more than 2 threads
-
-  # VCF
-  DB2vcf: 1 # Does not benefit from more than 2 threads
-  filterVcfs: 1 # Does not benefit from more than 2 threads
-  sort_gatherVcfs: 1 # Does not benefit from more than 2 threads
+  # GATK Variant Calling
+  gatk_haplotypecaller: 1
+  gatk_haplotypecaller_interval: 1
+  joint_genomics_db_import: 1
+  gatk_genomics_db_import: 1
 
   # Callable Bed
   compute_d4: 6
@@ -51,8 +48,8 @@ set-threads:
 # Examples:
 #
 # set-resources:
-#   # Example 1: Increase memory for bam2gvcf rule
-#   bam2gvcf:
+#   # Example 1: Increase memory for gatk_haplotypecaller rule
+#   gatk_haplotypecaller:
 #     mem_mb: attempt * 64000  # Customize memory allocation
 #     mem_mb_reduced: (attempt * 64000) * 0.9  # Customize Java memory allocation
 #

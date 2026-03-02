@@ -40,6 +40,7 @@ rule joint_genomics_db_import:
         tar="results/gatk_genomics_db.tar",
     params:
         java_opts=lambda wildcards, resources: _java_opts_from_resources(resources),
+    threads: 1
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -55,6 +56,7 @@ rule joint_genomics_db_import:
             --batch-size 25 \
             --genomicsdb-workspace-path {output.db} \
             --merge-input-intervals \
+            --reader-threads {threads} \
             -L {input.ref_fai} \
             --tmp-dir {resources.tmpdir} \
             --sample-name-map {input.db_mapfile} \

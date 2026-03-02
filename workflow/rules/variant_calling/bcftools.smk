@@ -83,6 +83,7 @@ rule bcftools_call:
         max_depth=config["variant_calling"]["bcftools"]["max_depth"],
         ploidy=config["variant_calling"]["ploidy"],
         contig=lambda wc: get_bcftools_region_name(wc.region_id),
+    threads: 1
     conda:
         "../../envs/bcftools.yaml"
     benchmark:
@@ -97,10 +98,12 @@ rule bcftools_call:
             -Q {params.min_baseq} \
             -d {params.max_depth} \
             -r {params.contig} \
+            --threads {threads} \
             -Ou {input.bams} 2> {log} \
         | bcftools call \
             -m \
             --ploidy {params.ploidy} \
+            --threads {threads} \
             -v \
             -Oz \
             -o {output.vcf} - 2>> {log}
@@ -124,6 +127,6 @@ rule bcftools_concat_regions:
     shell:
         """
         bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
-            | bcftools sort -T {resources.tmpdir} -Oz -o {output.vcf} - 2>> {log}
+            | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}
         tabix -p vcf {output.vcf} 2>> {log}
         """

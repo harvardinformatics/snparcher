@@ -196,6 +196,7 @@ rule gatk_genomics_db_import:
         tar="results/gatk_genomics_db/L{interval}.tar",
     params:
         java_mem=lambda wildcards, resources: _java_opts_from_resources(resources),
+    threads: 1
     resources:
         mem_mb=4096,
     conda:
@@ -213,6 +214,7 @@ rule gatk_genomics_db_import:
             --batch-size 25 \
             --genomicsdb-workspace-path {output.db} \
             --merge-input-intervals \
+            --reader-threads {threads} \
             -L {input.interval} \
             --tmp-dir {resources.tmpdir} \
             --sample-name-map {input.db_mapfile} \
@@ -289,6 +291,6 @@ rule concat_interval_vcfs_stage:
     shell:
         """
         bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
-            | bcftools sort -T {resources.tmpdir} -Oz -o {output.vcf} - 2>> {log}
+            | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}
         tabix -p vcf {output.vcf} 2>> {log}
         """

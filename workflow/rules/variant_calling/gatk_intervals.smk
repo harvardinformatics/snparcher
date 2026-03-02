@@ -244,6 +244,7 @@ rule gatk_haplotypecaller_interval:
         ploidy=config["variant_calling"]["ploidy"],
         min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
         min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
+    threads: 1
     resources:
         mem_mb=4096,
     conda:
@@ -261,6 +262,7 @@ rule gatk_haplotypecaller_interval:
         -O {output.gvcf} \
         -L {input.interval} \
         -ploidy {params.ploidy} \
+        --native-pair-hmm-threads {threads} \
         --emit-ref-confidence GVCF \
         --min-pruning {params.min_pruning} \
         --min-dangling-branch-length {params.min_dangling} &> {log}
@@ -282,7 +284,7 @@ rule concat_interval_gvcfs_stage:
     shell:
         """
         bcftools concat -D -a -Ou {input.gvcfs} 2> {log} \
-            | bcftools sort -T {resources.tmpdir} -Oz -o {output.gvcf} - 2>> {log}
+            | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.gvcf} - 2>> {log}
         tabix -p vcf {output.gvcf} 2>> {log}
         """
 
@@ -324,6 +326,7 @@ rule gatk_genomics_db_import:
         tar="results/gatk_genomics_db/L{interval}.tar",
     params:
         java_mem=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
+    threads: 1
     resources:
         mem_mb=4096,
     conda:
@@ -341,6 +344,7 @@ rule gatk_genomics_db_import:
             --batch-size 25 \
             --genomicsdb-workspace-path {output.db} \
             --merge-input-intervals \
+            --reader-threads {threads} \
             -L {input.interval} \
             --tmp-dir {resources.tmpdir} \
             --sample-name-map {input.db_mapfile} \
@@ -397,7 +401,7 @@ rule concat_interval_vcfs_stage:
     shell:
         """
         bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
-            | bcftools sort -T {resources.tmpdir} -Oz -o {output.vcf} - 2>> {log}
+            | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}
         tabix -p vcf {output.vcf} 2>> {log}
         """
 

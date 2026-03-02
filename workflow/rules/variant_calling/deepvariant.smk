@@ -30,7 +30,6 @@ rule deepvariant_call:
         vcf_tbi=temp("results/deepvariant/{sample}.vcf.gz.tbi"),
     params:
         model_type=config["variant_calling"]["deepvariant"]["model_type"],
-        num_shards=config["variant_calling"]["deepvariant"]["num_shards"],
     threads: config["variant_calling"]["deepvariant"]["num_shards"]
     conda:
         "../../envs/deepvariant.yaml"
@@ -47,7 +46,7 @@ rule deepvariant_call:
             --output_vcf {output.vcf} \
             --output_gvcf {output.gvcf} \
             --model_type {params.model_type} \
-            --num_shards {params.num_shards} \
+            --num_shards {threads} \
             --intermediate_results_dir results/deepvariant/{wildcards.sample} \
             &> {log}
         tabix -p vcf {output.gvcf} 2>> {log}
@@ -60,6 +59,7 @@ rule glnexus_joint:
     output:
         vcf=temp("results/vcfs/raw.vcf.gz"),
         tbi=temp("results/vcfs/raw.vcf.gz.tbi"),
+    threads: 1
     conda:
         "../../envs/glnexus.yaml"
     benchmark:
@@ -68,7 +68,7 @@ rule glnexus_joint:
         "logs/glnexus_joint.txt"
     shell:
         """
-        glnexus_cli --config DeepVariant {input.gvcfs} 2> {log} \
+        glnexus_cli --config DeepVariant --threads {threads} {input.gvcfs} 2> {log} \
             | bcftools view -Oz -o {output.vcf} - 2>> {log}
         tabix -p vcf {output.vcf} 2>> {log}
         """
