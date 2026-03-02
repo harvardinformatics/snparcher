@@ -63,10 +63,10 @@ def get_db_intervals(wc):
 
 
 def get_interval_vcfs(wc):
-    """Get filtered interval VCF files."""
+    """Get unfiltered interval VCF files."""
     intervals = get_db_intervals(wc)
     return expand(
-        "results/vcfs/intervals/filtered_{interval}.vcf.gz",
+        "results/vcfs/intervals/L{interval}.vcf.gz",
         interval=intervals,
     )
 
@@ -380,40 +380,6 @@ rule gatk_genotype_gvcfs:
             --tmp-dir {resources.tmpdir} \
             &> {log}
         """
-
-rule gatk_variant_filtration:
-    input:
-        vcf="results/vcfs/intervals/L{interval}.vcf.gz",
-        tbi="results/vcfs/intervals/L{interval}.vcf.gz.tbi",
-        **REF_FILES,
-    output:
-        vcf=temp("results/vcfs/intervals/filtered_{interval}.vcf.gz"),
-        tbi=temp("results/vcfs/intervals/filtered_{interval}.vcf.gz.tbi"),
-    conda:
-        "../../envs/gatk.yaml"
-    benchmark:
-        "benchmarks/gatk_variant_filtration/{interval}.txt"
-    log:
-        "logs/gatk_variant_filtration/{interval}.txt"
-    shell:
-        """
-        gatk VariantFiltration \
-            -R {input.ref} \
-            -V {input.vcf} \
-            --output {output.vcf} \
-            --filter-name "RPRS_filter" \
-            --filter-expression "(vc.isSNP() && (vc.hasAttribute('ReadPosRankSum') && ReadPosRankSum < -8.0)) || ((vc.isIndel() || vc.isMixed()) && (vc.hasAttribute('ReadPosRankSum') && ReadPosRankSum < -20.0)) || (vc.hasAttribute('QD') && QD < 2.0)" \
-            --filter-name "FS_SOR_filter" \
-            --filter-expression "(vc.isSNP() && ((vc.hasAttribute('FS') && FS > 60.0) || (vc.hasAttribute('SOR') &&  SOR > 3.0))) || ((vc.isIndel() || vc.isMixed()) && ((vc.hasAttribute('FS') && FS > 200.0) || (vc.hasAttribute('SOR') &&  SOR > 10.0)))" \
-            --filter-name "MQ_filter" \
-            --filter-expression "vc.isSNP() && ((vc.hasAttribute('MQ') && MQ < 40.0) || (vc.hasAttribute('MQRankSum') && MQRankSum < -12.5))" \
-            --filter-name "QUAL_filter" \
-            --filter-expression "QUAL < 30.0" \
-            --create-output-variant-index \
-            --invalidate-previous-filters true \
-            &> {log}
-        """
-
 
 rule concat_interval_vcfs_stage:
     input:

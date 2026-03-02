@@ -27,19 +27,19 @@ def get_db_intervals(wc):
 
 
 def get_interval_vcfs(wc):
-    """Get filtered interval VCF files."""
+    """Get unfiltered interval VCF files."""
     intervals = get_db_intervals(wc)
     return expand(
-        "results/vcfs/intervals/filtered_{interval}.vcf.gz",
+        "results/vcfs/intervals/L{interval}.vcf.gz",
         interval=intervals,
     )
 
 
 def get_interval_vcf_tbis(wc):
-    """Get filtered interval VCF index files."""
+    """Get unfiltered interval VCF index files."""
     intervals = get_db_intervals(wc)
     return expand(
-        "results/vcfs/intervals/filtered_{interval}.vcf.gz.tbi",
+        "results/vcfs/intervals/L{interval}.vcf.gz.tbi",
         interval=intervals,
     )
 
@@ -129,35 +129,6 @@ rule gatk_genotype_gvcfs:
             -V gendb://{params.db} \
             -O {output.vcf} \
             --tmp-dir {resources.tmpdir} \
-            &> {log}
-        """
-
-
-rule gatk_variant_filtration:
-    input:
-        vcf="results/vcfs/intervals/L{interval}.vcf.gz",
-        tbi="results/vcfs/intervals/L{interval}.vcf.gz.tbi",
-        **REF_FILES,
-    output:
-        vcf=temp("results/vcfs/intervals/filtered_{interval}.vcf.gz"),
-        tbi=temp("results/vcfs/intervals/filtered_{interval}.vcf.gz.tbi"),
-    params:
-        filter_args=get_gatk_hard_filter_args(),
-    conda:
-        "../../envs/gatk.yaml"
-    benchmark:
-        "benchmarks/gatk_variant_filtration/{interval}.txt"
-    log:
-        "logs/gatk_variant_filtration/{interval}.txt"
-    shell:
-        """
-        gatk VariantFiltration \
-            -R {input.ref} \
-            -V {input.vcf} \
-            --output {output.vcf} \
-            {params.filter_args} \
-            --create-output-variant-index \
-            --invalidate-previous-filters true \
             &> {log}
         """
 
