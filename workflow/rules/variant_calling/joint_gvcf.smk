@@ -75,7 +75,7 @@ rule joint_genotype_gvcfs:
     params:
         java_opts=lambda wildcards, resources: _java_opts_from_resources(resources),
         het_prior=config["variant_calling"]["gatk"]["het_prior"],
-        db=lambda wc, input: subpath(input.db, strip_suffix=".tar"),
+        db_rel=lambda wc, input: subpath(input.db, strip_suffix=".tar"),
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -84,13 +84,15 @@ rule joint_genotype_gvcfs:
         "logs/joint_genotype_gvcfs.txt"
     shell:
         """
-        tar -xf {input.db}
+        EXTRACT_DIR=$(mktemp -d {resources.tmpdir}/joint_genotype_gvcfs.XXXXXX)
+        trap 'rm -rf "$EXTRACT_DIR"' EXIT
+        tar -xf {input.db} -C "$EXTRACT_DIR"
         gatk GenotypeGVCFs \
             --java-options '{params.java_opts}' \
             -R {input.ref} \
             --heterozygosity {params.het_prior} \
             --genomicsdb-shared-posixfs-optimizations true \
-            -V gendb://{params.db} \
+            -V gendb://"$EXTRACT_DIR/{params.db_rel}" \
             -O {output.vcf} \
             --tmp-dir {resources.tmpdir} \
             &> {log}

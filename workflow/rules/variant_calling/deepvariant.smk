@@ -49,6 +49,7 @@ rule deepvariant_call:
             --num_shards {threads} \
             --intermediate_results_dir results/deepvariant/{wildcards.sample} \
             &> {log}
+        tabix -p vcf {output.vcf} 2>> {log}
         tabix -p vcf {output.gvcf} 2>> {log}
         """
 
