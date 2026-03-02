@@ -68,7 +68,7 @@ v2 uses nested config keys. Core keys are:
 | --- | --- | --- |
 | `refGenome` | `reference.name` | Required in v2. |
 | `refPath` | `reference.source` | Can be local path, URL, or accession. |
-| `sentieon` | `variant_calling.tool` | Set to `sentieon` (else `gatk`). |
+| `sentieon` | `variant_calling.tool` | Set to `sentieon` (else `gatk`, `bcftools`, `deepvariant`, or `parabricks` as needed). |
 | `sentieon_lic` | `variant_calling.sentieon.license` | String path or license value. |
 | `minNmer` | `intervals.min_nmer` | Integer. |
 | `cov_filter` | `callable_sites.coverage.enabled` | Boolean. |

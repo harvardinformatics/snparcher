@@ -29,6 +29,21 @@ DEFAULTS = {
         "sentieon": {
             "license": "",
         },
+        "bcftools": {
+            "min_mapq": 20,
+            "min_baseq": 20,
+            "max_depth": 250,
+        },
+        "deepvariant": {
+            "model_type": "WGS",
+            "num_shards": 8,
+        },
+        "parabricks": {
+            "container_image": "",
+            "num_gpus": 1,
+            "num_cpu_threads": 16,
+            "extra_args": "",
+        },
     },
     "intervals": {
         "enabled": True,
@@ -76,7 +91,8 @@ DEFAULTS = {
 set_defaults(config, DEFAULTS)
 validate(config, Path(workflow.basedir, "schemas/config.schema.yaml"))
 
-USE_SENTIEON = config["variant_calling"]["tool"] == "sentieon"
+VARIANT_TOOL = config["variant_calling"]["tool"]
+USE_SENTIEON = VARIANT_TOOL == "sentieon"
 
 
 # --- Sample sheet loading and validation ---
@@ -157,6 +173,27 @@ for sample_id, group in samples_df.groupby("sample_id"):
         raise ValueError(
             f"Sample '{sample_id}' has input_type '{input_types[0]}' but multiple rows. "
             "Only one row is supported for bam/gvcf inputs."
+        )
+
+if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
+    gvcf_samples = (
+        samples_df[samples_df["input_type"] == "gvcf"]["sample_id"]
+        .drop_duplicates()
+        .sort_values()
+        .tolist()
+    )
+    if gvcf_samples:
+        raise ValueError(
+            f"variant_calling.tool '{VARIANT_TOOL}' does not support samples with input_type='gvcf'. "
+            f"Incompatible samples: {', '.join(gvcf_samples)}. "
+            "Use 'gatk' or 'sentieon', or provide FASTQ/BAM inputs for all samples."
+        )
+
+if VARIANT_TOOL == "parabricks":
+    image = config["variant_calling"]["parabricks"]["container_image"].strip()
+    if not image:
+        raise ValueError(
+            "variant_calling.parabricks.container_image is required when variant_calling.tool='parabricks'."
         )
 
 samples_df["input_unit"] = (

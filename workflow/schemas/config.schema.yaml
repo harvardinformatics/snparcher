@@ -34,7 +34,7 @@ properties:
         default: "low"
       tool:
         type: string
-        enum: ["gatk", "sentieon"]
+        enum: ["gatk", "sentieon", "bcftools", "deepvariant", "parabricks"]
         default: "gatk"
       ploidy:
         type: integer
@@ -64,6 +64,55 @@ properties:
         default: {}
         properties:
           license:
+            type: string
+            default: ""
+      bcftools:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          min_mapq:
+            type: integer
+            minimum: 0
+            default: 20
+          min_baseq:
+            type: integer
+            minimum: 0
+            default: 20
+          max_depth:
+            type: integer
+            minimum: 1
+            default: 250
+      deepvariant:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          model_type:
+            type: string
+            enum: ["WGS", "WES", "PACBIO", "ONT_R104", "HYBRID_PACBIO_ILLUMINA"]
+            default: "WGS"
+          num_shards:
+            type: integer
+            minimum: 1
+            default: 8
+      parabricks:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          container_image:
+            type: string
+            default: ""
+          num_gpus:
+            type: integer
+            minimum: 1
+            default: 1
+          num_cpu_threads:
+            type: integer
+            minimum: 1
+            default: 16
+          extra_args:
             type: string
             default: ""
 

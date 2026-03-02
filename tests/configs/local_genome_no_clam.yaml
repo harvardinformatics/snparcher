@@ -14,6 +14,18 @@ variant_calling:
     concat_max_rounds: 20
   sentieon:
     license: ""
+  bcftools:
+    min_mapq: 20
+    min_baseq: 20
+    max_depth: 250
+  deepvariant:
+    model_type: "WGS"
+    num_shards: 8
+  parabricks:
+    container_image: "/tmp/parabricks.sif"
+    num_gpus: 1
+    num_cpu_threads: 4
+    extra_args: ""
 
 intervals:
   enabled: true

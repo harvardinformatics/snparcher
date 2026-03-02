@@ -40,6 +40,12 @@ set-threads:
   sentieon_dedup: 16
   sentieon_haplotyper: 32
   sentieon_combine_gvcf: 32
+
+  # Additional Variant Callers
+  bcftools_call: 8
+  deepvariant_call: 8
+  glnexus_joint: 4
+  parabricks_haplotypecaller: 16
 # Control/overwrite resources per rule.
 # To use this feature, uncomment "set-resources:" below and add rules you want to customize.
 # Examples:

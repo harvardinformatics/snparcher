@@ -11,13 +11,25 @@ include: "rules/mapping.smk"
 include: "rules/qc_metrics.smk"
 include: "rules/callable_sites.smk"
 
-if USE_SENTIEON:
+if VARIANT_TOOL == "sentieon":
     include: "rules/variant_calling/sentieon.smk"
-else:
+elif VARIANT_TOOL == "gatk":
     if config["intervals"]["enabled"]:
         include: "rules/variant_calling/gatk_intervals.smk"
     else:
         include: "rules/variant_calling/gatk.smk"
+        include: "rules/variant_calling/joint_gvcf.smk"
+elif VARIANT_TOOL == "bcftools":
+    include: "rules/variant_calling/bcftools.smk"
+elif VARIANT_TOOL == "deepvariant":
+    include: "rules/variant_calling/deepvariant.smk"
+elif VARIANT_TOOL == "parabricks":
+    include: "rules/variant_calling/parabricks.smk"
+    include: "rules/variant_calling/joint_gvcf.smk"
+else:
+    raise ValueError(f"Unsupported variant_calling.tool: {VARIANT_TOOL}")
+
+include: "rules/variant_calling/hard_filters.smk"
 
 
 rule all:
@@ -39,8 +51,8 @@ rule setup:
         REF_FILES["ref_fai"],
         REF_FILES["ref_dict"],
         REF_BWA_IDX,
-        "results/intervals/gvcf/intervals.txt" if config["intervals"]["enabled"] else [],
-        "results/intervals/db/intervals.txt" if config["intervals"]["enabled"] else []
+        "results/intervals/gvcf/intervals.txt" if VARIANT_TOOL == "gatk" and config["intervals"]["enabled"] else [],
+        "results/intervals/db/intervals.txt" if VARIANT_TOOL == "gatk" and config["intervals"]["enabled"] else []
 
 rule download_reads:
     """Download fastqs for all SRA samples."""

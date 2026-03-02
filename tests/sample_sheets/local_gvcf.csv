@@ -1,0 +1,2 @@
+sample_id,input_type,input
+sample_gvcf,gvcf,/tmp/sample_gvcf.g.vcf.gz
