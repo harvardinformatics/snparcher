@@ -54,6 +54,128 @@ def get_gvcfs_for_db(wc):
     }
 
 
+def get_concat_batch_size():
+    """Get batch size for staged bcftools concat operations."""
+    size = int(config["variant_calling"]["gatk"]["concat_batch_size"])
+    if size < 2:
+        raise ValueError("variant_calling.gatk.concat_batch_size must be >= 2")
+    return size
+
+
+def get_concat_max_rounds():
+    """Get max allowed rounds for staged concat operations."""
+    rounds = int(config["variant_calling"]["gatk"]["concat_max_rounds"])
+    if rounds < 1:
+        raise ValueError("variant_calling.gatk.concat_max_rounds must be >= 1")
+    return rounds
+
+
+def _ceil_div(a, b):
+    return (a + b - 1) // b
+
+
+def get_stage_chunk_counts(num_files):
+    """Compute chunk counts for each staged concat round."""
+    if num_files < 1:
+        raise ValueError("Staged concat requires at least one input file")
+
+    batch_size = get_concat_batch_size()
+    max_rounds = get_concat_max_rounds()
+
+    counts = []
+    current = num_files
+    while current > 1:
+        if len(counts) >= max_rounds:
+            raise ValueError(
+                f"Staged concat exceeded variant_calling.gatk.concat_max_rounds={max_rounds}. "
+                "Increase concat_batch_size or concat_max_rounds."
+            )
+        n_chunks = _ceil_div(current, batch_size)
+        counts.append(n_chunks)
+        current = n_chunks
+    return counts
+
+
+def staged_vcf_path(wc, round_idx, chunk_idx):
+    return f"results/vcfs/staged/r{round_idx}/c{chunk_idx}.vcf.gz"
+
+
+def get_stage_inputs(base_files, round_idx, chunk_idx, wc, path_builder):
+    """Return input files for one staged concat chunk."""
+    stage_counts = get_stage_chunk_counts(len(base_files))
+    if not stage_counts:
+        raise ValueError("Requested staged concat inputs with only one base file")
+
+    if round_idx < 1 or round_idx > len(stage_counts):
+        raise ValueError(
+            f"Invalid staged concat round {round_idx}. Valid rounds are 1..{len(stage_counts)}"
+        )
+
+    n_chunks = stage_counts[round_idx - 1]
+    if chunk_idx < 0 or chunk_idx >= n_chunks:
+        raise ValueError(
+            f"Invalid staged concat chunk {chunk_idx} for round {round_idx}. "
+            f"Valid chunks are 0..{n_chunks - 1}"
+        )
+
+    if round_idx == 1:
+        round_inputs = list(base_files)
+    else:
+        prev_chunks = stage_counts[round_idx - 2]
+        round_inputs = [path_builder(wc, round_idx - 1, i) for i in range(prev_chunks)]
+
+    batch_size = get_concat_batch_size()
+    start = chunk_idx * batch_size
+    end = min(start + batch_size, len(round_inputs))
+    selected = round_inputs[start:end]
+
+    if not selected:
+        raise ValueError(
+            f"No files selected for staged concat round={round_idx}, chunk={chunk_idx}"
+        )
+    return selected
+
+
+def get_final_stage_file(base_files, wc, path_builder):
+    """Return final staged output path (or original file if no staging is needed)."""
+    if not base_files:
+        raise ValueError("No files available for concat")
+
+    stage_counts = get_stage_chunk_counts(len(base_files))
+    if not stage_counts:
+        return base_files[0]
+
+    final_round = len(stage_counts)
+    return path_builder(wc, final_round, 0)
+
+
+def get_interval_vcf_stage_inputs(wc):
+    return get_stage_inputs(
+        base_files=get_interval_vcfs(wc),
+        round_idx=int(wc.round),
+        chunk_idx=int(wc.chunk),
+        wc=wc,
+        path_builder=staged_vcf_path,
+    )
+
+
+def get_interval_vcf_stage_tbis(wc):
+    stage_inputs = get_interval_vcf_stage_inputs(wc)
+    return [f"{vcf}.tbi" for vcf in stage_inputs]
+
+
+def get_final_interval_vcf_stage_file(wc):
+    return get_final_stage_file(
+        base_files=get_interval_vcfs(wc),
+        wc=wc,
+        path_builder=staged_vcf_path,
+    )
+
+
+def get_final_interval_vcf_stage_tbi(wc):
+    return get_final_interval_vcf_stage_file(wc) + ".tbi"
+
+
 rule create_db_mapfile:
     input:
         gvcfs=[get_final_gvcf(s) for s in SAMPLES_ALL],
@@ -135,17 +257,35 @@ rule gatk_genotype_gvcfs:
 
 rule concat_interval_vcfs:
     input:
-        vcfs=get_interval_vcfs,
-        tbis=get_interval_vcf_tbis,
+        vcf=get_final_interval_vcf_stage_file,
+        tbi=get_final_interval_vcf_stage_tbi,
     output:
         vcf="results/vcfs/raw.vcf.gz",
         tbi="results/vcfs/raw.vcf.gz.tbi",
-    conda:
-        "../../envs/bcftools.yaml"
     benchmark:
         "benchmarks/concat_interval_vcfs/benchmark.txt"
     log:
         "logs/concat_interval_vcfs/log.txt"
+    shell:
+        """
+        mv {input.vcf} {output.vcf} 2> {log}
+        mv {input.tbi} {output.tbi} 2>> {log}
+        """
+
+
+rule concat_interval_vcfs_stage:
+    input:
+        vcfs=get_interval_vcf_stage_inputs,
+        tbis=get_interval_vcf_stage_tbis,
+    output:
+        vcf=temp("results/vcfs/staged/r{round}/c{chunk}.vcf.gz"),
+        tbi=temp("results/vcfs/staged/r{round}/c{chunk}.vcf.gz.tbi"),
+    conda:
+        "../../envs/bcftools.yaml"
+    benchmark:
+        "benchmarks/concat_interval_vcfs/staged/r{round}/c{chunk}.txt"
+    log:
+        "logs/concat_interval_vcfs/staged/r{round}/c{chunk}.txt"
     shell:
         """
         bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
