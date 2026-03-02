@@ -1,5 +1,6 @@
 import platform
 import re
+import shutil
 from pathlib import Path
 import tempfile
 
@@ -526,3 +527,10 @@ def test_qc_standalone_full_run(request):
             "results/qc/coords.txt",
             "results/qc/qc_report.tsv",
         )
+
+        # Copy dashboard HTML out before tmpdir cleanup so CI can upload it
+        artifacts_dir = Path("test-artifacts")
+        artifacts_dir.mkdir(exist_ok=True)
+        dashboard = Path(tmpdir) / "results" / "qc" / "qc_dashboard.html"
+        if dashboard.exists():
+            shutil.copy2(dashboard, artifacts_dir / "qc_dashboard.html")

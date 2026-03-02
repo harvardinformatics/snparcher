@@ -46,3 +46,12 @@ jobs:
         env:
           TMPDIR: ${{ runner.temp }}
         run: pixi run -e dev-tools pytest -v tests/tests.py -k "${{ matrix.filter }}"
+
+      - name: Upload QC dashboard
+        if: matrix.group == 'qc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qc-dashboard
+          path: test-artifacts/
+          retention-days: 5
+          if-no-files-found: ignore
