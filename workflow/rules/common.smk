@@ -95,6 +95,38 @@ VARIANT_TOOL = config["variant_calling"]["tool"]
 USE_SENTIEON = VARIANT_TOOL == "sentieon"
 
 
+GATK_HARD_FILTERS = [
+    (
+        "RPRS_filter",
+        "(vc.isSNP() && (vc.hasAttribute('ReadPosRankSum') && ReadPosRankSum < -8.0)) || "
+        "((vc.isIndel() || vc.isMixed()) && (vc.hasAttribute('ReadPosRankSum') && ReadPosRankSum < -20.0)) || "
+        "(vc.hasAttribute('QD') && QD < 2.0)",
+    ),
+    (
+        "FS_SOR_filter",
+        "(vc.isSNP() && ((vc.hasAttribute('FS') && FS > 60.0) || (vc.hasAttribute('SOR') &&  SOR > 3.0))) || "
+        "((vc.isIndel() || vc.isMixed()) && ((vc.hasAttribute('FS') && FS > 200.0) || (vc.hasAttribute('SOR') &&  SOR > 10.0)))",
+    ),
+    (
+        "MQ_filter",
+        "vc.isSNP() && ((vc.hasAttribute('MQ') && MQ < 40.0) || (vc.hasAttribute('MQRankSum') && MQRankSum < -12.5))",
+    ),
+    ("QUAL_filter", "QUAL < 30.0"),
+]
+
+
+def get_gatk_hard_filter_args():
+    args = []
+    for name, expr in GATK_HARD_FILTERS:
+        args.extend(
+            [
+                f'--filter-name "{name}"',
+                f'--filter-expression "{expr}"',
+            ]
+        )
+    return " ".join(args)
+
+
 # --- Sample sheet loading and validation ---
 
 def _parse_mark_duplicates(values):

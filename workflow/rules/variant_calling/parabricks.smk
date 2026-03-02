@@ -25,6 +25,8 @@ rule parabricks_haplotypecaller:
         extra_args=config["variant_calling"]["parabricks"]["extra_args"],
         ploidy=config["variant_calling"]["ploidy"],
         num_cpu_threads=config["variant_calling"]["parabricks"]["num_cpu_threads"],
+        min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
+        min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
     threads: config["variant_calling"]["parabricks"]["num_cpu_threads"]
     resources:
         gpus=config["variant_calling"]["parabricks"]["num_gpus"]
@@ -46,6 +48,8 @@ rule parabricks_haplotypecaller:
             --num-gpus {resources.gpus} \
             --num-cpu-threads {params.num_cpu_threads} \
             --ploidy {params.ploidy} \
+            --min-pruning {params.min_pruning} \
+            --min-dangling-branch-length {params.min_dangling} \
             {params.extra_args} \
             &> {log}
         tabix -p vcf {output.gvcf} 2>> {log}

@@ -6,6 +6,8 @@ rule variant_filtration:
     output:
         vcf="results/vcfs/filtered.vcf.gz",
         tbi="results/vcfs/filtered.vcf.gz.tbi",
+    params:
+        filter_args=get_gatk_hard_filter_args(),
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -18,14 +20,7 @@ rule variant_filtration:
             -R {input.ref} \
             -V {input.vcf} \
             --output {output.vcf} \
-            --filter-name "RPRS_filter" \
-            --filter-expression "(vc.isSNP() && (vc.hasAttribute('ReadPosRankSum') && ReadPosRankSum < -8.0)) || ((vc.isIndel() || vc.isMixed()) && (vc.hasAttribute('ReadPosRankSum') && ReadPosRankSum < -20.0)) || (vc.hasAttribute('QD') && QD < 2.0)" \
-            --filter-name "FS_SOR_filter" \
-            --filter-expression "(vc.isSNP() && ((vc.hasAttribute('FS') && FS > 60.0) || (vc.hasAttribute('SOR') &&  SOR > 3.0))) || ((vc.isIndel() || vc.isMixed()) && ((vc.hasAttribute('FS') && FS > 200.0) || (vc.hasAttribute('SOR') &&  SOR > 10.0)))" \
-            --filter-name "MQ_filter" \
-            --filter-expression "vc.isSNP() && ((vc.hasAttribute('MQ') && MQ < 40.0) || (vc.hasAttribute('MQRankSum') && MQRankSum < -12.5))" \
-            --filter-name "QUAL_filter" \
-            --filter-expression "QUAL < 30.0" \
+            {params.filter_args} \
             --create-output-variant-index \
             --invalidate-previous-filters true \
             &> {log}

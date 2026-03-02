@@ -16,6 +16,7 @@ if VARIANT_TOOL == "sentieon":
 elif VARIANT_TOOL == "gatk":
     if config["intervals"]["enabled"]:
         include: "rules/variant_calling/gatk_intervals.smk"
+        include: "rules/variant_calling/joint_gvcf_intervals.smk"
     else:
         include: "rules/variant_calling/gatk.smk"
         include: "rules/variant_calling/joint_gvcf.smk"
@@ -25,7 +26,7 @@ elif VARIANT_TOOL == "deepvariant":
     include: "rules/variant_calling/deepvariant.smk"
 elif VARIANT_TOOL == "parabricks":
     include: "rules/variant_calling/parabricks.smk"
-    include: "rules/variant_calling/joint_gvcf.smk"
+    include: "rules/variant_calling/joint_gvcf_intervals.smk"
 else:
     raise ValueError(f"Unsupported variant_calling.tool: {VARIANT_TOOL}")
 
@@ -52,7 +53,9 @@ rule setup:
         REF_FILES["ref_dict"],
         REF_BWA_IDX,
         "results/intervals/gvcf/intervals.txt" if VARIANT_TOOL == "gatk" and config["intervals"]["enabled"] else [],
-        "results/intervals/db/intervals.txt" if VARIANT_TOOL == "gatk" and config["intervals"]["enabled"] else []
+        "results/intervals/db/intervals.txt"
+        if (VARIANT_TOOL == "gatk" and config["intervals"]["enabled"]) or VARIANT_TOOL == "parabricks"
+        else [],
 
 rule download_reads:
     """Download fastqs for all SRA samples."""
