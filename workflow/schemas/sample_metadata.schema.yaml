@@ -1,0 +1,40 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+description: >
+  Schema for the optional sample metadata CSV. Only sample_id is required.
+  All other columns are optional and consumed by specific modules.
+type: object
+additionalProperties: true
+
+properties:
+  sample_id:
+    type: string
+    description: >
+      Sample identifier. Must match a sample_id in the main samples CSV.
+    pattern: "^[A-Za-z0-9._-]+$"
+
+  exclude:
+    type: boolean
+    description: >
+      If true, sample is excluded from postprocess output.
+    default: false
+
+  outgroup:
+    type: boolean
+    description: >
+      If true, sample is treated as outgroup for MK analysis.
+    default: false
+
+  lat:
+    type: number
+    description: Latitude for geographic QC plots.
+    minimum: -90
+    maximum: 90
+
+  long:
+    type: number
+    description: Longitude for geographic QC plots.
+    minimum: -180
+    maximum: 180
+
+required:
+  - sample_id

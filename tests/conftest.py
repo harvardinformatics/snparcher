@@ -42,8 +42,8 @@ def pytest_collection_modifyitems(config, items):
 class SnakemakeRunner:
     """Simple runner for testing snakemake workflows."""
 
-    def __init__(self, workdir, use_conda=True):
-        self.snakefile = WORKFLOW_DIR / "Snakefile"
+    def __init__(self, workdir, use_conda=True, snakefile=None):
+        self.snakefile = Path(snakefile) if snakefile else WORKFLOW_DIR / "Snakefile"
         self.workdir = Path(workdir)
         self.use_conda = use_conda
         self.conda_prefix = CONDA_PREFIX
@@ -54,7 +54,7 @@ class SnakemakeRunner:
         if not test_data_link.exists():
             test_data_link.symlink_to(TEST_DATA_DIR)
 
-    def run(self, target, configfile, samples=None, extra_args=None):
+    def run(self, target, configfile, samples=None, extra_args=None, config_overrides=None):
         if isinstance(target, str):
             targets = [target]
         else:
@@ -80,8 +80,15 @@ class SnakemakeRunner:
             *targets,
         ]
 
+        # Build a single --config with all overrides
+        config_pairs = []
         if samples:
-            cmd.extend(["--config", f"samples={samples}"])
+            config_pairs.append(f"samples={samples}")
+        if config_overrides:
+            for key, value in config_overrides.items():
+                config_pairs.append(f"{key}={value}")
+        if config_pairs:
+            cmd.extend(["--config"] + config_pairs)
 
         if self.use_conda:
             cmd.extend(["--use-conda", "--conda-prefix", str(self.conda_prefix)])
@@ -99,8 +106,11 @@ class SnakemakeRunner:
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         return SnakemakeResult(result, self.workdir)
 
-    def dry_run(self, target, configfile, samples=None):
-        return self.run(target, configfile, samples, extra_args=["--dry-run"])
+    def dry_run(self, target, configfile, samples=None, extra_args=None, config_overrides=None):
+        all_args = ["--dry-run"]
+        if extra_args:
+            all_args.extend(extra_args)
+        return self.run(target, configfile, samples, extra_args=all_args, config_overrides=config_overrides)
 
 
 class SnakemakeResult:

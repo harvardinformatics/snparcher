@@ -2,6 +2,8 @@ name: Tests
 
 on:
   push:
+    branches:
+      - main
     paths:
       - "**/Snakefile"
       - "**/*.smk"
@@ -18,8 +20,22 @@ on:
 
 jobs:
   tests:
-    name: tests
+    name: tests (${{ matrix.group }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: core
+            filter: "not metadata and not postprocess and not qc and not mk"
+          - group: metadata
+            filter: "metadata and not postprocess and not qc and not mk"
+          - group: postprocess
+            filter: "postprocess"
+          - group: qc
+            filter: "qc"
+          - group: mk
+            filter: "mk"
     steps:
       - uses: actions/checkout@v4
 
@@ -28,7 +44,16 @@ jobs:
           cache: true
           environments: dev-tools
 
-      - name: Run test
+      - name: Run tests
         env:
           TMPDIR: ${{ runner.temp }}
-        run: pixi run -e dev-tools pytest -v tests/tests.py --no-conda
+        run: pixi run -e dev-tools pytest -v tests/tests.py -k "${{ matrix.filter }}"
+
+      - name: Upload QC dashboard
+        if: matrix.group == 'qc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qc-dashboard
+          path: test-artifacts/
+          retention-days: 5
+          if-no-files-found: ignore

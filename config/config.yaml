@@ -2,6 +2,9 @@
 
 samples: "config/samples.csv"
 
+# Optional: per-sample metadata for modules (exclude, outgroup, lat, long, etc.)
+# sample_metadata: "config/sample_metadata.csv"
+
 reference:
   name: "my_organism"
   source: "/data/reference/genome.fna.gz"  # Can be a refseq/genbank accession, url, or path
@@ -52,6 +55,7 @@ modules:
     clusters: 3
     min_depth: 2
     google_api_key: ""
+    exclude_scaffolds: ""
   postprocess:
     enabled: false
     filtering:
@@ -62,3 +66,6 @@ modules:
   trackhub:
     enabled: false
     email: "example@email.com"
+  mk:
+    enabled: false
+    gff: ""  # path to GFF annotation file (required when mk is enabled)

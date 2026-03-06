@@ -9,6 +9,13 @@ properties:
     description: Path to samples CSV file
     default: "config/samples.csv"
 
+  sample_metadata:
+    type: string
+    description: >
+      Optional path to a sample metadata CSV file. Must contain a sample_id
+      column that matches entries in the samples CSV. Additional columns
+      (exclude, outgroup, lat, long, etc.) are used by modules.
+
   reference:
     type: object
     additionalProperties: false
@@ -207,6 +214,9 @@ properties:
           google_api_key:
             type: string
             default: ""
+          exclude_scaffolds:
+            type: string
+            default: ""
       postprocess:
         type: object
         additionalProperties: false
@@ -248,6 +258,17 @@ properties:
           email:
             type: string
             default: "example@email.com"
+      mk:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          gff:
+            type: string
+            default: ""
 
 required:
   - samples

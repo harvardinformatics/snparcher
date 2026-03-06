@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import pandas as pd
 from snakemake.utils import validate
+from snakemake.logging import logger
 
 
 # --- Config defaults and validation ---
@@ -17,6 +18,7 @@ def set_defaults(cfg, defaults):
 
 DEFAULTS = {
     "samples": "config/samples.csv",
+    "sample_metadata": "",
     "variant_calling": {
         "expected_coverage": "low",
         "tool": "gatk",
@@ -349,3 +351,123 @@ def get_final_gvcf(sample):
 
     result = f"results/gvcfs/{sample}.g.vcf.gz"
     return result
+
+
+# --- Sample metadata loading (optional) ---
+
+def _parse_bool_column(series, column_name):
+    """Parse a boolean column from metadata CSV, tolerating string representations."""
+    truthy = {"true", "t", "yes", "y", "1"}
+    falsy = {"false", "f", "no", "n", "0", ""}
+    parsed = []
+    for idx, value in series.items():
+        if pd.isna(value):
+            parsed.append(False)
+        elif isinstance(value, bool):
+            parsed.append(value)
+        elif isinstance(value, (int, float)):
+            parsed.append(bool(value))
+        else:
+            v = str(value).strip().lower()
+            if v in truthy:
+                parsed.append(True)
+            elif v in falsy:
+                parsed.append(False)
+            else:
+                raise ValueError(
+                    f"Invalid {column_name} value at row {idx + 2}: {value!r}. "
+                    "Use true/false (or equivalent boolean values)."
+                )
+    return pd.Series(parsed, index=series.index, dtype=bool)
+
+
+metadata_df = None
+
+if config.get("sample_metadata"):
+    metadata_df = pd.read_csv(config["sample_metadata"])
+    validate(metadata_df, Path(workflow.basedir, "schemas/sample_metadata.schema.yaml"))
+
+    # Validate sample_id values exist in the main sample sheet
+    unknown = set(metadata_df["sample_id"]) - set(samples_df["sample_id"])
+    if unknown:
+        raise ValueError(
+            f"sample_metadata contains sample_id(s) not in the samples CSV: {sorted(unknown)}"
+        )
+
+    # Parse boolean columns if present
+    for col in ("exclude", "outgroup"):
+        if col in metadata_df.columns:
+            metadata_df[col] = _parse_bool_column(metadata_df[col], col)
+
+    # Warn about samples without metadata
+    missing = set(samples_df["sample_id"]) - set(metadata_df["sample_id"])
+    if missing:
+        logger.warning(
+            f"Samples in sample sheet but not in sample_metadata: {sorted(missing)}. "
+            "These samples will use default metadata values."
+        )
+
+
+def get_excluded_samples():
+    """Return list of sample_ids where exclude=True. Empty list if no metadata."""
+    if metadata_df is None or "exclude" not in metadata_df.columns:
+        return []
+    return metadata_df.loc[metadata_df["exclude"], "sample_id"].tolist()
+
+
+def get_included_samples():
+    """Return list of sample_ids NOT marked for exclusion."""
+    excluded = set(get_excluded_samples())
+    return [s for s in SAMPLES_ALL if s not in excluded]
+
+
+def get_outgroup_samples():
+    """Return list of sample_ids where outgroup=True. Empty list if no metadata."""
+    if metadata_df is None or "outgroup" not in metadata_df.columns:
+        return []
+    return metadata_df.loc[metadata_df["outgroup"], "sample_id"].tolist()
+
+
+def get_ingroup_samples():
+    """Return list of sample_ids that are not outgroup and not excluded."""
+    excluded = set(get_excluded_samples())
+    outgroup = set(get_outgroup_samples())
+    return [s for s in SAMPLES_ALL if s not in excluded and s not in outgroup]
+
+
+def get_sample_coords():
+    """Return DataFrame with sample_id, lat, long for samples that have coordinates.
+    Returns empty DataFrame if no metadata or no lat/long columns."""
+    if metadata_df is None:
+        return pd.DataFrame(columns=["sample_id", "lat", "long"])
+    if "lat" not in metadata_df.columns or "long" not in metadata_df.columns:
+        return pd.DataFrame(columns=["sample_id", "lat", "long"])
+    coords = metadata_df[["sample_id", "lat", "long"]].dropna(subset=["lat", "long"])
+    return coords
+
+
+def get_sample_metadata(sample_id, column, default=None):
+    """Get a metadata value for a specific sample. Returns default if not available."""
+    if metadata_df is None or column not in metadata_df.columns:
+        return default
+    rows = metadata_df.loc[metadata_df["sample_id"] == sample_id, column]
+    if rows.empty:
+        return default
+    return rows.iloc[0]
+
+
+def require_metadata(module_name, required_columns=None):
+    """Validate that metadata is available. Called by modules that need it.
+    Raises a clear error if metadata CSV is not configured."""
+    if metadata_df is None:
+        raise ValueError(
+            f"Module '{module_name}' requires sample_metadata to be configured. "
+            f"Set 'sample_metadata' in your config.yaml to a CSV file path."
+        )
+    if required_columns:
+        missing = [c for c in required_columns if c not in metadata_df.columns]
+        if missing:
+            raise ValueError(
+                f"Module '{module_name}' requires column(s) {missing} in sample_metadata CSV."
+            )
+

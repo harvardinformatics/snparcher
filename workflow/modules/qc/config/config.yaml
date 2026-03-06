@@ -1,15 +1,15 @@
 ##############################
-# Variables you need to change
+# snpArcher v2 QC Module — Standalone Config
 ##############################
 
-samples: "config/test_coords.csv"  # name of the sample metadata CSV 
-final_prefix: "" # prefix for final output files
+samples: "config/samples.csv"
+sample_metadata: ""            # optional: path to metadata CSV with lat/long for map
 
-##############################
-# Variables you *might* need to change
-##############################
+vcf: "results/vcfs/raw.vcf.gz"
+fai: "results/reference/ref.fa.gz.fai"
+qc_report: ""                  # optional: path to BAM summary stats TSV (empty = skip mapping rate panel)
 
-## QC options ##
-nClusters: 3
-GoogleAPIKey:
-min_depth: 2
+clusters: 3                    # k-means clusters for PCA visualization
+min_depth: 2                   # minimum depth to include a sample
+google_api_key: ""             # Google Maps API key for terrain map
+exclude_scaffolds: ""          # comma-separated scaffolds to exclude
