@@ -31,6 +31,22 @@ def get_multistage_config_file():
         return CONFIGS_DIR / "local_genome_no_clam_multistage.yaml"
     return CONFIGS_DIR / "local_genome_multistage.yaml"
 
+
+def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
+    """Write a config copy with variant_calling.tool overridden."""
+    text = Path(base_config).read_text()
+    text = text.replace('tool: "gatk"', f'tool: "{tool}"', 1)
+    if parabricks_image is not None:
+        text = text.replace(
+            'container_image: "/tmp/parabricks.sif"',
+            f'container_image: "{parabricks_image}"',
+            1,
+        )
+
+    out_path = Path(out_dir) / f"config_{tool}.yaml"
+    out_path.write_text(text)
+    return out_path
+
 @pytest.mark.dry_run
 def test_setup_dry_run(request):
     no_conda = request.config.getoption("--no-conda")
@@ -151,6 +167,123 @@ def test_full_pipeline(request):
             "results/vcfs/raw.vcf.gz",
             "results/qc_metrics/qc_report.tsv",
             "results/callable_sites/mappability.bed",
+        )
+
+
+@pytest.mark.dry_run
+def test_bcftools_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "bcftools")
+
+        result = smk.dry_run(
+            target="call_variants",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "bcftools_regions" in output
+        assert "bcftools_concat_regions" in output
+        assert "variant_filtration" in output
+
+
+@pytest.mark.dry_run
+def test_deepvariant_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "deepvariant")
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "deepvariant_call" in output
+        assert "glnexus_joint" in output
+
+
+@pytest.mark.dry_run
+def test_parabricks_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "parabricks")
+
+        result = smk.dry_run(
+            target=["call_variants", "results/gvcfs/sample1.g.vcf.gz"],
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "parabricks_haplotypecaller" in output
+        assert "concat_interval_vcfs" in output
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize("tool", ["bcftools", "deepvariant", "parabricks"])
+def test_gvcf_input_rejected_for_new_callers(request, tool):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, tool)
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=SAMPLES_DIR / "local_gvcf.csv",
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "does not support samples with input_type='gvcf'" in output
+
+
+@pytest.mark.dry_run
+def test_parabricks_requires_container_image(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(
+            get_config_file(), tmpdir, "parabricks", parabricks_image=""
+        )
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "parabricks.container_image is required" in output
+
+
+@pytest.mark.full_run
+def test_full_pipeline_bcftools(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "bcftools")
+
+        result = smk.run(
+            target=["all", "call_variants"],
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+        result.assert_output_exists(
+            "results/vcfs/raw.vcf.gz",
+            "results/vcfs/filtered.vcf.gz",
+            "results/qc_metrics/qc_report.tsv",
         )
 
 

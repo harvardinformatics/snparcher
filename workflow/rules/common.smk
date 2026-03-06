@@ -29,6 +29,21 @@ DEFAULTS = {
         "sentieon": {
             "license": "",
         },
+        "bcftools": {
+            "min_mapq": 20,
+            "min_baseq": 20,
+            "max_depth": 250,
+        },
+        "deepvariant": {
+            "model_type": "WGS",
+            "num_shards": 8,
+        },
+        "parabricks": {
+            "container_image": "",
+            "num_gpus": 1,
+            "num_cpu_threads": 16,
+            "extra_args": "",
+        },
     },
     "intervals": {
         "enabled": True,
@@ -76,7 +91,41 @@ DEFAULTS = {
 set_defaults(config, DEFAULTS)
 validate(config, Path(workflow.basedir, "schemas/config.schema.yaml"))
 
-USE_SENTIEON = config["variant_calling"]["tool"] == "sentieon"
+VARIANT_TOOL = config["variant_calling"]["tool"]
+USE_SENTIEON = VARIANT_TOOL == "sentieon"
+
+
+# Canonical hard-filter definitions used by workflow/rules/variant_calling/hard_filters.smk.
+GATK_HARD_FILTERS = [
+    (
+        "RPRS_filter",
+        "(vc.isSNP() && (vc.hasAttribute('ReadPosRankSum') && ReadPosRankSum < -8.0)) || "
+        "((vc.isIndel() || vc.isMixed()) && (vc.hasAttribute('ReadPosRankSum') && ReadPosRankSum < -20.0)) || "
+        "(vc.hasAttribute('QD') && QD < 2.0)",
+    ),
+    (
+        "FS_SOR_filter",
+        "(vc.isSNP() && ((vc.hasAttribute('FS') && FS > 60.0) || (vc.hasAttribute('SOR') &&  SOR > 3.0))) || "
+        "((vc.isIndel() || vc.isMixed()) && ((vc.hasAttribute('FS') && FS > 200.0) || (vc.hasAttribute('SOR') &&  SOR > 10.0)))",
+    ),
+    (
+        "MQ_filter",
+        "vc.isSNP() && ((vc.hasAttribute('MQ') && MQ < 40.0) || (vc.hasAttribute('MQRankSum') && MQRankSum < -12.5))",
+    ),
+    ("QUAL_filter", "QUAL < 30.0"),
+]
+
+
+def get_gatk_hard_filter_args():
+    args = []
+    for name, expr in GATK_HARD_FILTERS:
+        args.extend(
+            [
+                f'--filter-name "{name}"',
+                f'--filter-expression "{expr}"',
+            ]
+        )
+    return " ".join(args)
 
 
 # --- Sample sheet loading and validation ---
@@ -157,6 +206,27 @@ for sample_id, group in samples_df.groupby("sample_id"):
         raise ValueError(
             f"Sample '{sample_id}' has input_type '{input_types[0]}' but multiple rows. "
             "Only one row is supported for bam/gvcf inputs."
+        )
+
+if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
+    gvcf_samples = (
+        samples_df[samples_df["input_type"] == "gvcf"]["sample_id"]
+        .drop_duplicates()
+        .sort_values()
+        .tolist()
+    )
+    if gvcf_samples:
+        raise ValueError(
+            f"variant_calling.tool '{VARIANT_TOOL}' does not support samples with input_type='gvcf'. "
+            f"Incompatible samples: {', '.join(gvcf_samples)}. "
+            "Use 'gatk' or 'sentieon', or provide FASTQ/BAM inputs for all samples."
+        )
+
+if VARIANT_TOOL == "parabricks":
+    image = config["variant_calling"]["parabricks"]["container_image"].strip()
+    if not image:
+        raise ValueError(
+            "variant_calling.parabricks.container_image is required when variant_calling.tool='parabricks'."
         )
 
 samples_df["input_unit"] = (

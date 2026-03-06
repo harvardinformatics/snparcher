@@ -8,12 +8,24 @@ reference:
 
 variant_calling:
   expected_coverage: "low"  # low | high | auto (future)
-  tool: "gatk" # gatk | sentieon
+  tool: "gatk" # gatk | sentieon | bcftools | deepvariant | parabricks
   ploidy: 2
   gatk:
     het_prior: 0.005
   sentieon:
     license: ""
+  bcftools:
+    min_mapq: 20
+    min_baseq: 20
+    max_depth: 250
+  deepvariant:
+    model_type: "WGS"
+    num_shards: 8
+  parabricks:
+    container_image: ""  # Required if tool == "parabricks"
+    num_gpus: 1
+    num_cpu_threads: 16
+    extra_args: ""
 
 intervals:
   enabled: true

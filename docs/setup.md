@@ -104,7 +104,7 @@ The following options in `config/config.yaml` must be set before running snpArch
 | `samples` | Path to CSV sample sheet.| `str` | `True` | `None` |
 | `reference.name` | Reference genome name used for output filenames. | `str` | `True` | `None` |
 | `reference.source` | Reference source (local path, URL, or accession). | `str` | `True` | `None` |
-| `variant_calling.tool` | Variant caller implementation to run. | `str` | `True` | `gatk` |
+| `variant_calling.tool` | Variant caller implementation to run (`gatk`, `sentieon`, `bcftools`, `deepvariant`, or `parabricks`). | `str` | `True` | `gatk` |
 | `variant_calling.sentieon.license` | Sentieon license value/path (used when tool is `sentieon`). | `str` | `False` | `""` |
 | `intervals.enabled` | Use split-by-intervals calling workflow. | `bool` | `False` | `True` |
 | `callable_sites.coverage.enabled` | Enable coverage-based callable region filtering. | `bool` | `False` | `True` |
@@ -123,6 +123,23 @@ The following options can be adjusted based on your needs and your dataset.
 | `variant_calling.gatk.het_prior` | Heterozygosity prior passed to GATK GenotypeGVCFs. | `float` |
 | `variant_calling.gatk.concat_batch_size` | Max number of interval VCFs/gVCFs merged per staged concat job. Lower values reduce per-job file pressure; higher values reduce number of rounds. | `int` |
 | `variant_calling.gatk.concat_max_rounds` | Safety limit for staged concat rounds before failing with a config error. | `int` |
+| `variant_calling.bcftools.min_mapq` | Minimum mapping quality for bcftools mpileup. | `int` |
+| `variant_calling.bcftools.min_baseq` | Minimum base quality for bcftools mpileup. | `int` |
+| `variant_calling.bcftools.max_depth` | Maximum per-file depth for bcftools mpileup. | `int` |
+| `variant_calling.deepvariant.model_type` | DeepVariant model type (`WGS`, `WES`, `PACBIO`, `ONT_R104`, `HYBRID_PACBIO_ILLUMINA`). | `str` |
+| `variant_calling.deepvariant.num_shards` | Number of shards (threads) used by DeepVariant. | `int` |
+| `variant_calling.parabricks.container_image` | Apptainer/Singularity image path for Parabricks (required when tool is `parabricks`). | `str` |
+| `variant_calling.parabricks.num_gpus` | Number of GPUs requested for Parabricks haplotype calling. | `int` |
+| `variant_calling.parabricks.num_cpu_threads` | CPU threads passed to Parabricks haplotype calling. | `int` |
+| `variant_calling.parabricks.extra_args` | Extra CLI flags appended to `pbrun haplotypecaller`. | `str` |
+
+When `variant_calling.tool` is `bcftools`, `deepvariant`, or `parabricks`, sample rows with `input_type: gvcf` are rejected at config validation time.
+
+`intervals.enabled` controls interval-split HaplotypeCaller for the GATK backend.
+Parabricks uses interval-split joint genotyping (GenomicsDBImport/GenotypeGVCFs) regardless of `intervals.enabled`.
+
+Parabricks execution expects NVIDIA GPUs and an Apptainer/Singularity image path in `variant_calling.parabricks.container_image`.
+Parabricks HaplotypeCaller also follows `variant_calling.expected_coverage` to set `--min-pruning` and `--min-dangling-branch-length`.
 
 #### Callable Sites Options
 | Option | Description | Type |
@@ -168,8 +185,6 @@ Other resources, such as `slurm_partition`, `runtime`, etc. can also be set here
 ```{note}
 Snakemake allows you to dynamically assign resources. We use the `attempt` keyword to specify memory. For example. `attempt * 2000` will provide 2GB on the first attempt of the rule, if the rule fails (out of memory) then on the second attempt it will be provided 4GB. This behavior requires the `-T/--retries` Snakemake option.
 ```
-
-
 
 
 

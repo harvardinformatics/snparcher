@@ -77,13 +77,25 @@ reference:
   source: "/storage/data/bird.fa.gz"
 
 variant_calling:
-  tool: "gatk" # "gatk" or "sentieon"
+  tool: "gatk" # "gatk", "sentieon", "bcftools", "deepvariant", or "parabricks"
   expected_coverage: "low"
   ploidy: 2
   gatk:
     het_prior: 0.005
   sentieon:
     license: ""
+  bcftools:
+    min_mapq: 20
+    min_baseq: 20
+    max_depth: 250
+  deepvariant:
+    model_type: "WGS"
+    num_shards: 8
+  parabricks:
+    container_image: "/path/to/parabricks.sif" # required when tool == "parabricks"
+    num_gpus: 1
+    num_cpu_threads: 16
+    extra_args: ""
 ```
 
 ## Profile setup
