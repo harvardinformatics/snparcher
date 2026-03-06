@@ -1,7 +1,6 @@
 channels:
   - conda-forge
   - bioconda
-  - defaults
 dependencies:
   - plink2==2.00a2.3
   - plink==1.90b6.21
