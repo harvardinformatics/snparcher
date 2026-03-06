@@ -534,3 +534,77 @@ def test_qc_standalone_full_run(request):
         dashboard = Path(tmpdir) / "results" / "qc" / "qc_dashboard.html"
         if dashboard.exists():
             shutil.copy2(dashboard, artifacts_dir / "qc_dashboard.html")
+
+
+# --- MK module tests ---
+
+def get_mk_config():
+    """Config with MK module enabled."""
+    return CONFIGS_DIR / "local_genome_mk.yaml"
+
+
+@pytest.mark.dry_run
+def test_mk_dry_run(request):
+    """Dry run MK module — exercises all MK rules."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="results/mk/mk_table.tsv",
+            configfile=get_mk_config(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "mk_decompress_ref" in output, \
+            "Expected mk_decompress_ref rule in DAG"
+        assert "mk_split_samples" in output, \
+            "Expected mk_split_samples rule in DAG"
+        assert "mk_degenotate" in output, \
+            "Expected mk_degenotate rule in DAG"
+        assert "mk_copy_gff" in output, \
+            "Expected mk_copy_gff rule in DAG"
+
+
+@pytest.mark.dry_run
+def test_mk_disabled_no_rules(request):
+    """When MK is disabled, no MK rules appear."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="all",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "mk_degenotate" not in output, \
+            "MK rules should not appear when module is disabled"
+        assert "mk_split_samples" not in output, \
+            "MK rules should not appear when module is disabled"
+
+
+@pytest.mark.dry_run
+def test_mk_with_metadata_dry_run(request):
+    """MK works with sample metadata (outgroup/exclude columns)."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="results/mk/mk_table.tsv",
+            configfile=get_mk_config(),
+            samples=get_samples_file(),
+            config_overrides={
+                "sample_metadata": str(METADATA_DIR / "exclude_and_outgroup.csv"),
+            },
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "mk_split_samples" in output

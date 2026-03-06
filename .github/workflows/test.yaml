@@ -27,13 +27,15 @@ jobs:
       matrix:
         include:
           - group: core
-            filter: "not metadata and not postprocess and not qc"
+            filter: "not metadata and not postprocess and not qc and not mk"
           - group: metadata
-            filter: "metadata and not postprocess and not qc"
+            filter: "metadata and not postprocess and not qc and not mk"
           - group: postprocess
             filter: "postprocess"
           - group: qc
             filter: "qc"
+          - group: mk
+            filter: "mk"
     steps:
       - uses: actions/checkout@v4
 

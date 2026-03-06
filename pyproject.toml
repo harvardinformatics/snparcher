@@ -54,10 +54,11 @@ format = "ruff format workflow/ && snakefmt workflow/"
 check = { depends-on = ["lint", "lint-snakemake"] }
 test = "pytest -v tests/tests.py"
 test-dry-run = "pytest -v tests/tests.py --dry-run-only"
-test-core = 'pytest -v tests/tests.py -k "not metadata and not postprocess and not qc"'
-test-metadata = 'pytest -v tests/tests.py -k "metadata and not postprocess and not qc"'
+test-core = 'pytest -v tests/tests.py -k "not metadata and not postprocess and not qc and not mk"'
+test-metadata = 'pytest -v tests/tests.py -k "metadata and not postprocess and not qc and not mk"'
 test-postprocess = 'pytest -v tests/tests.py -k "postprocess"'
 test-qc = 'pytest -v tests/tests.py -k "qc"'
+test-mk = 'pytest -v tests/tests.py -k "mk"'
 dry-run = "snakemake -s workflow/Snakefile --configfile tests/configs/local_genome.yaml --config samples=tests/sample_sheets/local_fastqs_no_dedup.csv -n -p all"
 
 # Tasks for docs environment

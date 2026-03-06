@@ -209,6 +209,17 @@ properties:
           email:
             type: string
             default: "example@email.com"
+      mk:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          gff:
+            type: string
+            default: ""
 
 required:
   - samples

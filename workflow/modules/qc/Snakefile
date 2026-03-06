@@ -25,7 +25,6 @@ Config keys (flat):
 import os
 import pandas as pd
 
-# ---------- Config / defaults ------------------------------------------------
 # When imported via `module ... config: config`, this configfile is ignored.
 configfile: "config/config.yaml"
 
