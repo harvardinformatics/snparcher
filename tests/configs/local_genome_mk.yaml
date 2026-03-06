@@ -1,0 +1,55 @@
+samples: "samples.csv"
+
+reference:
+  name: "test_genome"
+  source: "tests/data/reference/test_genome.fa.gz"
+
+variant_calling:
+  expected_coverage: "low"
+  tool: "gatk"
+  ploidy: 2
+  gatk:
+    het_prior: 0.005
+    concat_batch_size: 5
+    concat_max_rounds: 20
+  sentieon:
+    license: ""
+
+intervals:
+  enabled: true
+  min_nmer: 500
+  num_gvcf_intervals: 50
+  db_scatter_factor: 0.15
+
+callable_sites:
+  generate_bed_file: false
+  coverage:
+    enabled: true
+    stdev: 2
+    merge_distance: 100
+  mappability:
+    enabled: true
+    min_score: 1
+    kmer: 150
+    merge_distance: 100
+
+modules:
+  qc:
+    enabled: false
+    clusters: 3
+    min_depth: 2
+    google_api_key: ""
+    exclude_scaffolds: ""
+  postprocess:
+    enabled: true
+    filtering:
+      contig_size: 10000
+      maf: 0.01
+      missingness: 0.75
+      exclude_scaffolds: "mtDNA,Y"
+  trackhub:
+    enabled: false
+    email: "example@email.com"
+  mk:
+    enabled: true
+    gff: "tests/data/mk/test.gff"

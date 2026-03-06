@@ -32,6 +32,63 @@ else:
 include: "rules/variant_calling/hard_filters.smk"
 
 
+# --- Module imports ----------------------------------------------------------
+
+if config["modules"]["postprocess"]["enabled"]:
+    _postprocess_config = {
+        "samples": config["samples"],
+        "sample_metadata": config.get("sample_metadata", ""),
+        "vcf": "results/vcfs/raw.vcf.gz",
+        "ref_fai": REF_FILES["ref_fai"],
+        "callable_sites_bed": "results/callable_sites/callable_sites.bed",
+        **config["modules"]["postprocess"]["filtering"],
+    }
+
+    module postprocess:
+        snakefile: "modules/postprocess/Snakefile"
+        config: _postprocess_config
+
+    use rule * from postprocess exclude all as postprocess_*
+
+
+if config["modules"]["qc"]["enabled"]:
+    _qc_config = {
+        "samples": config["samples"],
+        "sample_metadata": config.get("sample_metadata", ""),
+        "vcf": "results/vcfs/raw.vcf.gz",
+        "fai": REF_FILES["ref_fai"],
+        "qc_report": "results/qc_metrics/qc_report.tsv",
+        "clusters": config["modules"]["qc"]["clusters"],
+        "min_depth": config["modules"]["qc"]["min_depth"],
+        "google_api_key": config["modules"]["qc"]["google_api_key"],
+        "exclude_scaffolds": config["modules"]["qc"]["exclude_scaffolds"],
+    }
+
+    module qc:
+        snakefile: "modules/qc/Snakefile"
+        config: _qc_config
+
+    use rule * from qc exclude all as qc_*
+
+
+if config["modules"]["mk"]["enabled"]:
+    _mk_config = {
+        "samples": config["samples"],
+        "sample_metadata": config.get("sample_metadata", ""),
+        "vcf": "results/postprocess/filtered.vcf.gz",
+        "ref": REF_FILES["ref"],
+        "gff": config["modules"]["mk"]["gff"],
+    }
+
+    module mk:
+        snakefile: "modules/mk/Snakefile"
+        config: _mk_config
+
+    use rule * from mk exclude all as mk_*
+
+
+# --- Default target ----------------------------------------------------------
+
 rule all:
     """Default target: full pipeline."""
     input:
@@ -39,6 +96,14 @@ rule all:
         "results/qc_metrics/qc_report.tsv",
         "results/callable_sites/callable_loci.zarr" if config["callable_sites"]["coverage"]["enabled"] else [],
         "results/callable_sites/mappability.bed" if config["callable_sites"]["mappability"]["enabled"] else [],
+        # Postprocess outputs (when enabled)
+        "results/postprocess/filtered.vcf.gz" if config["modules"]["postprocess"]["enabled"] else [],
+        "results/postprocess/clean_snps.vcf.gz" if config["modules"]["postprocess"]["enabled"] else [],
+        "results/postprocess/clean_indels.vcf.gz" if config["modules"]["postprocess"]["enabled"] else [],
+        # QC dashboard (when enabled)
+        "results/qc/qc_dashboard.html" if config["modules"]["qc"]["enabled"] else [],
+        # MK table (when enabled)
+        "results/mk/mk_table.tsv" if config["modules"]["mk"]["enabled"] else [],
 
 
 rule setup:

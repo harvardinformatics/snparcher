@@ -40,3 +40,5 @@ slurm_logs/
 
 # MkDocs build output
 site/
+scratch
+*.bak

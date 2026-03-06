@@ -1,166 +1,266 @@
-import sys
-import os
-from pathlib import Path
+"""
+snpArcher v2 — Postprocess Module
 
-# Get utils. This is not great, but we can move to setup.py and install via pip later if want
-utils_path = (Path(workflow.main_snakefile).parent.parent.parent).resolve()
-if str(utils_path) not in sys.path:
-    sys.path.append(str(utils_path))
+Filters a raw VCF to remove excluded individuals, non-callable sites,
+small contigs, and low-quality variants.  Produces filtered, clean-SNP,
+and clean-indel VCF files.
+
+Can run standalone:
+    snakemake --snakefile workflow/modules/postprocess/Snakefile
+
+Or imported by the main workflow via Snakemake's `module` directive
+(config is passed in, overriding the configfile below).
+
+Config keys (flat):
+    samples             - path to samples CSV (required)
+    sample_metadata     - path to metadata CSV (optional, for exclude column)
+    vcf                 - path to raw VCF input (required)
+    ref_fai             - path to reference .fai index (required)
+    callable_sites_bed  - path to callable sites BED (required)
+    contig_size         - contigs <= this size are excluded (default 10000)
+    maf                 - MAF filter threshold (default 0.01)
+    missingness         - max missingness threshold (default 0.75)
+    exclude_scaffolds   - comma-separated scaffolds to exclude (default "")
+"""
 
 import pandas as pd
-import snparcher_utils
+
+# ---------- Config / defaults ------------------------------------------------
+# When imported via `module ... config: config`, this configfile is ignored.
 configfile: "config/config.yaml"
 
-samples = snparcher_utils.parse_sample_sheet(config)
-REFGENOME = samples['refGenome'].unique().tolist()
+_PP_DEFAULTS = {
+    "samples": "config/samples.csv",
+    "sample_metadata": "",
+    "vcf": "results/vcfs/raw.vcf.gz",
+    "ref_fai": "results/reference/ref.fa.gz.fai",
+    "callable_sites_bed": "results/callable_sites/callable_sites.bed",
+    "contig_size": 10000,
+    "maf": 0.01,
+    "missingness": 0.75,
+    "exclude_scaffolds": "",
+}
+
+for _k, _v in _PP_DEFAULTS.items():
+    if _k not in config:
+        config[_k] = _v
+
+
+# ---------- Sample sheet + metadata ------------------------------------------
+
+_samples_df = pd.read_csv(config["samples"])
+_ALL_SAMPLES = _samples_df["sample_id"].unique().tolist()
+
+_metadata_df = None
+_meta_path = config.get("sample_metadata", "")
+if _meta_path:
+    _metadata_df = pd.read_csv(_meta_path)
+
+
+def _parse_bool(series, col_name):
+    """Tolerant boolean parser (matches common.smk logic)."""
+    truthy = {"true", "t", "yes", "y", "1"}
+    falsy  = {"false", "f", "no", "n", "0", ""}
+    out = []
+    for idx, v in series.items():
+        if pd.isna(v):
+            out.append(False)
+        elif isinstance(v, bool):
+            out.append(v)
+        elif isinstance(v, (int, float)):
+            out.append(bool(v))
+        else:
+            s = str(v).strip().lower()
+            if s in truthy:
+                out.append(True)
+            elif s in falsy:
+                out.append(False)
+            else:
+                raise ValueError(
+                    f"Invalid {col_name} value at row {idx + 2}: {v!r}"
+                )
+    return pd.Series(out, index=series.index, dtype=bool)
+
+
+if _metadata_df is not None and "exclude" in _metadata_df.columns:
+    _metadata_df["exclude"] = _parse_bool(_metadata_df["exclude"], "exclude")
+
+
+def _get_excluded_samples():
+    if _metadata_df is None or "exclude" not in _metadata_df.columns:
+        return []
+    return _metadata_df.loc[_metadata_df["exclude"], "sample_id"].tolist()
+
+
+def _get_included_samples():
+    excluded = set(_get_excluded_samples())
+    return [s for s in _ALL_SAMPLES if s not in excluded]
+
+
+# ---------- rule all (standalone entry point) --------------------------------
 
 rule all:
     input:
-        expand("results/{refGenome}/{prefix}_filtered.vcf.gz", refGenome=REFGENOME, prefix=config['final_prefix']),
-        expand("results/{refGenome}/{prefix}_clean_snps.vcf.gz", refGenome=REFGENOME, prefix=config['final_prefix']),
-        expand("results/{refGenome}/{prefix}_clean_indels.vcf.gz", refGenome=REFGENOME, prefix=config['final_prefix'])
+        "results/postprocess/filtered.vcf.gz",
+        "results/postprocess/clean_snps.vcf.gz",
+        "results/postprocess/clean_indels.vcf.gz",
+
+
+# ---------- Rules ------------------------------------------------------------
 
 rule filter_individuals:
     """
-    make list of individuals to exclude based on sampleType column
+    Write a list of samples to INCLUDE in downstream filtering.
+    Samples with exclude=True in sample_metadata are removed.
     """
     output:
-        include = "results/{refGenome}/postprocess/{prefix}_samps.txt",
+        include="results/postprocess/include_samples.txt",
     run:
-        out_df = samples[["BioSample", "SampleType"]]
-        out_df.drop_duplicates("BioSample", inplace=True)
-        include =out_df[~out_df.SampleType.isin(["exclude"])].BioSample
-        include_clean = include.dropna()
-        include_clean.to_csv(output[0], index=False, sep="\t", header=False)
+        included = _get_included_samples()
+        with open(output.include, "w") as fh:
+            for s in included:
+                fh.write(s + "\n")
+
 
 rule basic_filter:
     """
-    Filters a vcf file to remove samples marked exclude, sites that don't pass filters,
-    sites with reference equal to N or alt equal to ., and sites with AF == 0.
+    Remove excluded individuals, sites failing filters, ref=N, alt=.,
+    and sites with AF==0.
     """
-    input: 
-        vcf = "results/{refGenome}/{prefix}_raw.vcf.gz",
-        include = "results/{refGenome}/postprocess/{prefix}_samps.txt"
+    input:
+        vcf=config["vcf"],
+        include="results/postprocess/include_samples.txt",
     output:
-        filtered = "results/{refGenome}/{prefix}_filtered.vcf.gz",
-        filtered_idx = "results/{refGenome}/{prefix}_filtered.vcf.gz.csi"
+        filtered="results/postprocess/filtered.vcf.gz",
+        filtered_idx="results/postprocess/filtered.vcf.gz.csi",
     conda:
         "envs/filter.yml"
     shell:
         """
-        bcftools view -S {input.include} -f .,PASS {input.vcf} -a -U -O u | bcftools +fill-tags -Ou |
-        bcftools view -m2 -e 'AF==0 | ref="N" | ALT="."' -O z -o {output.filtered}
+        bcftools view -S {input.include} -f .,PASS {input.vcf} -a -U -O u \
+            | bcftools +fill-tags -Ou \
+            | bcftools view -m2 -e 'AF==0 | ref="N" | ALT="."' -O z -o {output.filtered}
         bcftools index {output.filtered}
         """
 
+
 rule update_bed:
     """
-    Updates callable sites bed file to add contigs less than threshold to regions to exclude
+    Refine callable-sites BED: remove regions on contigs smaller than the
+    configured threshold.  Input BED contains INCLUDE regions; output also
+    contains INCLUDE regions (small contigs subtracted).
     """
     input:
-        bed = "results/{refGenome}/{prefix}_callable_sites.bed",
-        fai = "results/{refGenome}/data/genome/{refGenome}.fna.fai"
+        bed=config["callable_sites_bed"],
+        fai=config["ref_fai"],
     output:
-        bed = "results/{refGenome}/postprocess/{prefix}_exclude_sites.bed",
-        tmp_bed = temp("results/{refGenome}/postprocess/{prefix}_tmp.bed")
+        bed="results/postprocess/callable_sites_filtered.bed",
+        small_contigs=temp("results/postprocess/small_contigs.bed"),
     conda:
         "envs/bed.yml"
     params:
-        size_filter = config["contig_size"],
+        size_filter=config["contig_size"],
     shell:
         """
-        awk 'BEGIN{{OFS="\\t"}}{{if ($2<{params.size_filter}) {{print $1,0,$2}}}}' {input.fai} > {output.tmp_bed}
-        cat {output.tmp_bed} {input.bed} | bedtools sort -i - | bedtools merge -i - > {output.bed}
+        awk 'BEGIN{{OFS="\\t"}}{{if ($2<{params.size_filter}) {{print $1,0,$2}}}}' \
+            {input.fai} > {output.small_contigs}
+        bedtools subtract -a {input.bed} -b {output.small_contigs} \
+            | bedtools sort -i - \
+            | bedtools merge -i - > {output.bed}
         """
 
-rule strict_filter:  
-    input: 
-        bed = "results/{refGenome}/postprocess/{prefix}_exclude_sites.bed",
-        vcf = "results/{refGenome}/{prefix}_filtered.vcf.gz",
-        filtered_idx = "results/{refGenome}/{prefix}_filtered.vcf.gz.csi"
-    output: 
-        vcf = temp("results/{refGenome}/postprocess/{prefix}_filtered.TEMP.vcf.gz"),
-        idx = temp("results/{refGenome}/postprocess/{prefix}_filtered.TEMP.vcf.gz.csi")
+
+rule strict_filter:
+    """
+    Apply missingness, MAF, and scaffold-exclusion filters.
+    Restrict to callable (include) regions.
+    """
+    input:
+        bed="results/postprocess/callable_sites_filtered.bed",
+        vcf="results/postprocess/filtered.vcf.gz",
+        filtered_idx="results/postprocess/filtered.vcf.gz.csi",
+    output:
+        vcf=temp("results/postprocess/filtered.TEMP.vcf.gz"),
+        idx=temp("results/postprocess/filtered.TEMP.vcf.gz.csi"),
     conda:
         "envs/filter.yml"
     params:
-        miss = config["missingness"],
-        maf = config["maf"],
-        upper_bound = lambda wildcards: 1 - float(config["maf"]),
-        chr_ex = config["scaffolds_to_exclude"],   
+        miss=config["missingness"],
+        maf=config["maf"],
+        upper_bound=lambda wildcards: 1 - float(config["maf"]),
+        chr_ex=config["exclude_scaffolds"],
     shell:
         """
         if [ -z "{params.chr_ex}" ]
         then
             bcftools view -R {input.bed} -m2 -M2 \
-            -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
-            {input.vcf} -O u -o {output.vcf}
+                -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
+                {input.vcf} -O u -o {output.vcf}
         else
             bcftools view -t ^{params.chr_ex} -R {input.bed} -m2 -M2 \
-            -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
-            {input.vcf} -O u -o {output.vcf} 
+                -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
+                {input.vcf} -O u -o {output.vcf}
         fi
         bcftools index {output.vcf}
         """
 
+
 rule subset_indels:
-    """
-    Produce a clean vcf with only indels variants.
-    """
-    input: 
-        vcf = "results/{refGenome}/postprocess/{prefix}_filtered.TEMP.vcf.gz",
-        idx = "results/{refGenome}/postprocess/{prefix}_filtered.TEMP.vcf.gz.csi",
-    output: 
-        vcf = "results/{refGenome}/{prefix}_clean_indels.vcf.gz",
-        idx = "results/{refGenome}/{prefix}_clean_indels.vcf.gz.tbi"
+    """Extract clean indels from strictly-filtered VCF."""
+    input:
+        vcf="results/postprocess/filtered.TEMP.vcf.gz",
+        idx="results/postprocess/filtered.TEMP.vcf.gz.csi",
+    output:
+        vcf="results/postprocess/clean_indels.vcf.gz",
+        idx="results/postprocess/clean_indels.vcf.gz.tbi",
     conda:
         "envs/filter.yml"
     log:
-        "logs/{refGenome}/postprocess/{prefix}_subset_indels.txt"
+        "logs/postprocess/subset_indels.txt"
     shell:
         """
         bcftools view -v indels -O z -o {output.vcf} {input.vcf}
         bcftools index -t {output.vcf}
         """
 
+
 rule subset_snps:
-    """
-    Produce a clean vcf with only simple snps.
-    """
-    input: 
-        vcf = "results/{refGenome}/postprocess/{prefix}_filtered.TEMP.vcf.gz",
-        idx = "results/{refGenome}/postprocess/{prefix}_filtered.TEMP.vcf.gz.csi"
-    output: 
-        vcf = temp("results/{refGenome}/postprocess/{prefix}_clean_snps_1.vcf.gz"),
-        idx = temp("results/{refGenome}/postprocess/{prefix}_clean_snps_1.vcf.gz.tbi")
+    """Extract SNPs (excluding indel-overlapping sites) from strictly-filtered VCF."""
+    input:
+        vcf="results/postprocess/filtered.TEMP.vcf.gz",
+        idx="results/postprocess/filtered.TEMP.vcf.gz.csi",
+    output:
+        vcf=temp("results/postprocess/clean_snps_prefilter.vcf.gz"),
+        idx=temp("results/postprocess/clean_snps_prefilter.vcf.gz.tbi"),
     conda:
-        "envs/filter.yml"    
+        "envs/filter.yml"
     log:
-        "logs/{refGenome}/postprocess/{prefix}_subset_snps.txt"
+        "logs/postprocess/subset_snps.txt"
     shell:
         """
         bcftools view -v snps -e 'TYPE ~ "indel"' -O z -o {output.vcf} {input.vcf}
         bcftools index -t {output.vcf}
         """
 
+
 rule drop_indel_SNPs:
-    """
-    identify and remove SNPs that overlapped with indels and are coded as genotype length > 1
-    """
-    input: 
-        vcf = "results/{refGenome}/postprocess/{prefix}_clean_snps_1.vcf.gz",
-        idx = "results/{refGenome}/postprocess/{prefix}_clean_snps_1.vcf.gz.tbi"
+    """Remove SNPs that overlap indels (genotype length > 1)."""
+    input:
+        vcf="results/postprocess/clean_snps_prefilter.vcf.gz",
+        idx="results/postprocess/clean_snps_prefilter.vcf.gz.tbi",
     output:
-        keep_snps = temp("results/{refGenome}/postprocess/{prefix}_keep_snp_positions.txt"),
-        vcf = "results/{refGenome}/{prefix}_clean_snps.vcf.gz",
-        idx = "results/{refGenome}/{prefix}_clean_snps.vcf.gz.tbi"
+        keep_snps=temp("results/postprocess/keep_snp_positions.txt"),
+        vcf="results/postprocess/clean_snps.vcf.gz",
+        idx="results/postprocess/clean_snps.vcf.gz.tbi",
     conda:
-        "envs/filter.yml"    
+        "envs/filter.yml"
     log:
-        "logs/{refGenome}/postprocess/{prefix}_drop_indel_snps.txt"
+        "logs/postprocess/drop_indel_snps.txt"
     shell:
         """
-        bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\n' {input.vcf} | awk 'length($3) == 1 {{print $1"\t"$2}}' | bgzip -c > {output.keep_snps} 
+        bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\n' {input.vcf} \
+            | awk 'length($3) == 1 {{print $1"\t"$2}}' \
+            | bgzip -c > {output.keep_snps}
         tabix -s1 -b2 -e2 {output.keep_snps}
         bcftools view -T {output.keep_snps} {input.vcf} -Oz -o {output.vcf}
         bcftools index -t {output.vcf}
