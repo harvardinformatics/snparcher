@@ -1,0 +1,275 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+description: snpArcher configuration schema
+type: object
+additionalProperties: false
+
+properties:
+  samples:
+    type: string
+    description: Path to samples CSV file
+    default: "config/samples.csv"
+
+  sample_metadata:
+    type: string
+    description: >
+      Optional path to a sample metadata CSV file. Must contain a sample_id
+      column that matches entries in the samples CSV. Additional columns
+      (exclude, outgroup, lat, long, etc.) are used by modules.
+
+  reference:
+    type: object
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        description: Reference genome name (used for output filenames)
+      source:
+        type: string
+        description: Path, URL, or NCBI accession for reference genome
+    required:
+      - name
+      - source
+
+  variant_calling:
+    type: object
+    additionalProperties: false
+    default: {}
+    properties:
+      expected_coverage:
+        type: string
+        enum: ["low", "high"]
+        default: "low"
+      tool:
+        type: string
+        enum: ["gatk", "sentieon", "bcftools", "deepvariant", "parabricks"]
+        default: "gatk"
+      ploidy:
+        type: integer
+        minimum: 1
+        default: 2
+      gatk:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          het_prior:
+            type: number
+            minimum: 0
+            maximum: 1
+            default: 0.005
+          concat_batch_size:
+            type: integer
+            minimum: 2
+            default: 250
+          concat_max_rounds:
+            type: integer
+            minimum: 1
+            default: 20
+      sentieon:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          license:
+            type: string
+            default: ""
+      bcftools:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          min_mapq:
+            type: integer
+            minimum: 0
+            default: 20
+          min_baseq:
+            type: integer
+            minimum: 0
+            default: 20
+          max_depth:
+            type: integer
+            minimum: 1
+            default: 250
+      deepvariant:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          model_type:
+            type: string
+            enum: ["WGS", "WES", "PACBIO", "ONT_R104", "HYBRID_PACBIO_ILLUMINA"]
+            default: "WGS"
+          num_shards:
+            type: integer
+            minimum: 1
+            default: 8
+      parabricks:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          container_image:
+            type: string
+            default: ""
+          num_gpus:
+            type: integer
+            minimum: 1
+            default: 1
+          num_cpu_threads:
+            type: integer
+            minimum: 1
+            default: 16
+          extra_args:
+            type: string
+            default: ""
+
+  intervals:
+    type: object
+    additionalProperties: false
+    default: {}
+    properties:
+      enabled:
+        type: boolean
+        default: true
+      min_nmer:
+        type: integer
+        minimum: 1
+        default: 500
+      num_gvcf_intervals:
+        type: integer
+        minimum: 1
+        default: 50
+      db_scatter_factor:
+        type: number
+        minimum: 0
+        default: 0.15
+
+  callable_sites:
+    type: object
+    additionalProperties: false
+    default: {}
+    properties:
+      generate_bed_file:
+        type: boolean
+        default: true
+      coverage:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: true
+          stdev:
+            type: number
+            minimum: 0
+            default: 2
+          merge_distance:
+            type: integer
+            minimum: 0
+            default: 100
+      mappability:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: true
+          kmer:
+            type: integer
+            minimum: 1
+            default: 150
+          min_score:
+            type: number
+            minimum: 0
+            maximum: 1
+            default: 1
+          merge_distance:
+            type: integer
+            minimum: 0
+            default: 100
+
+  modules:
+    type: object
+    additionalProperties: false
+    default: {}
+    properties:
+      qc:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          clusters:
+            type: integer
+            minimum: 1
+            default: 3
+          min_depth:
+            type: number
+            minimum: 0
+            default: 2
+          google_api_key:
+            type: string
+            default: ""
+          exclude_scaffolds:
+            type: string
+            default: ""
+      postprocess:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          filtering:
+            type: object
+            additionalProperties: false
+            default: {}
+            properties:
+              contig_size:
+                type: integer
+                minimum: 0
+                default: 10000
+              maf:
+                type: number
+                minimum: 0
+                maximum: 1
+                default: 0.01
+              missingness:
+                type: number
+                minimum: 0
+                maximum: 1
+                default: 0.75
+              exclude_scaffolds:
+                type: string
+                default: "mtDNA,Y"
+      trackhub:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          email:
+            type: string
+            default: "example@email.com"
+      mk:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          gff:
+            type: string
+            default: ""
+
+required:
+  - samples
+  - reference

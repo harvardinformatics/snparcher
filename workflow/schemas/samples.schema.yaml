@@ -1,0 +1,45 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+description: snpArcher samples schema
+type: object
+additionalProperties: false
+
+properties:
+  sample_id:
+    type: string
+    description: Unique sample identifier
+    minLength: 1
+    maxLength: 80
+    pattern: "^[A-Za-z0-9._-]+$"
+  input_type:
+    type: string
+    enum: ["srr", "fastq", "bam", "gvcf"]
+    description: Type of input data
+  input:
+    type: string
+    description: Input path, SRA accession, or semicolon-separated fastq paths
+    minLength: 1
+  library_id:
+    type: string
+    description: Library identifier (defaults to sample_id)
+    minLength: 1
+    maxLength: 80
+    pattern: "^[A-Za-z0-9._-]+$"
+  mark_duplicates:
+    type: boolean
+    default: true
+    description: Whether to mark duplicates
+
+required:
+  - sample_id
+  - input_type
+  - input
+
+allOf:
+  - if:
+      properties:
+        input_type:
+          const: "fastq"
+    then:
+      properties:
+        input:
+          pattern: "^.+;.+$"

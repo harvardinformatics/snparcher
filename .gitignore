@@ -1,52 +1,44 @@
+# OS files
 .DS_Store
-pixi.lock
-pixi.toml
-data_preparation/
+
+# Editor settings
+.vscode/
+
+# Codex app
+.codex/
+.tmp/
+
+# Python cache/build artifacts
+__pycache__/
+*.egg-info/
+
+# Conda / Pixi environments
+.conda-envs/
+tests/.conda-envs/
+.pixi/
+!.pixi/config.toml
+
+# Snakemake + workflow outputs
 .snakemake*
-template_slurm.sh
-slurm_logs/*
-# indexing and creating a sequence dictionary gets done within pipeline
-data/zebraFinch/genome/*.sa
-data/zebraFinch/genome/*.pac
-data/zebraFinch/genome/*.bwt
-data/zebraFinch/genome/*.ann
-data/zebraFinch/genome/*.amb
-data/zebraFinch/genome/*.fai
-data/zebraFinch/genome/*.dict
-rules/.snakemake
-data/BHduck/genome/*.sa
-data/BHduck/genome/*.pac
-data/BHduck/genome/*.bwt
-data/BHduck/genome/*.ann
-data/BHduck/genome/*.amb
-data/BHduck/genome/*.fai
-data/BHduck/genome/*.dict
-/data/
-fastp.*
-intervalFiles/
-out
-err
-__pycache__
-log/
-fastq2bam/
-intervalFiles/
-freebayes/
-gatk/
-logs/
-*_dryrun.txt
 results/
+logs/
+benchmarks/
 tmp/
-.test/ecoli/benchmarks/
-.test/ecoli/logs/
-.test/ecoli/results/
-.test/ecoli/data/
-*.lic
-.test/ci/results
-.test/ci/benchmarks
-.test/ci/logs
-.vscode
+slurm_logs/
+*_dryrun.txt
+
+# Test outputs
+.test/*/benchmarks/
+.test/*/logs/
+.test/*/results/
+.test/*/.snakemake/
 .test/trackhub/*.sizes
 .test/trackhub/out.log
-# pixi environments
-.pixi
-*.egg-info
+
+# Licenses and secrets
+*.lic
+
+# MkDocs build output
+site/
+scratch
+*.bak

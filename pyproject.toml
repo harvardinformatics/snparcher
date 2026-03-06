@@ -1,0 +1,102 @@
+[project]
+name = "snparcher"
+version = "2.0.0-dev"
+description = "A Snakemake workflow for population genomic variant calling"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = []
+
+# ============ PIXI CONFIGURATION ============
+
+[tool.pixi.workspace]
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64", "osx-arm64", "osx-64"]
+
+[tool.pixi.dependencies]
+python = ">=3.11"
+snakemake = ">=9.0"
+pandas = "*"
+pyyaml = "*"
+conda = "*"
+
+[tool.pixi.feature.dev.dependencies]
+ruff = "*"
+snakefmt = "*"
+pytest="*"
+pytest-dependency = ">=0.5.1,<0.6"
+
+[tool.pixi.feature.docs.dependencies]
+mkdocs = "*"
+mkdocs-material = "*"
+
+[tool.pixi.environments]
+default = { features = [], solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+docs = { features = ["docs"], solve-group = "default" }
+tools = { features = ["tools"], solve-group = "tools" }
+dev-tools = { features = ["dev", "tools"], solve-group = "tools" }
+
+# Tasks for default environment (workflow operations)
+[tool.pixi.tasks]
+lint-snakemake = "snakemake --lint"
+
+[tool.pixi.feature.dev.tasks]
+lint = "ruff check workflow/"
+format = "ruff format workflow/ && snakefmt workflow/"
+check = { depends-on = ["lint", "lint-snakemake"] }
+test = "pytest -v tests/tests.py"
+test-dry-run = "pytest -v tests/tests.py --dry-run-only"
+test-core = 'pytest -v tests/tests.py -k "not metadata and not postprocess and not qc and not mk"'
+test-metadata = 'pytest -v tests/tests.py -k "metadata and not postprocess and not qc and not mk"'
+test-postprocess = 'pytest -v tests/tests.py -k "postprocess"'
+test-qc = 'pytest -v tests/tests.py -k "qc"'
+test-mk = 'pytest -v tests/tests.py -k "mk"'
+dry-run = "snakemake -s workflow/Snakefile --configfile tests/configs/local_genome.yaml --config samples=tests/sample_sheets/local_fastqs_no_dedup.csv -n -p all"
+
+# Tasks for docs environment
+[tool.pixi.feature.docs.tasks]
+docs-serve = "mkdocs serve"
+docs-build = "mkdocs build"
+
+[tool.pixi.feature.tools.dependencies]
+samtools = "*"
+bwa = "*"
+ncbi-datasets-cli = "*"
+htslib = "*"
+gatk4 = "*"
+picard = "*"
+bcftools = "*"
+fastp = "*"
+sra-tools = "*"
+unzip = "*"
+curl = "*"
+ffq = "*"
+sambamba = "*"
+mosdepth = "==0.3.3"
+genmap = "*"
+bedtools = "*"
+
+[tool.pixi.feature.tools.target.linux-64.dependencies]
+clam = ">=1.1.0"
+
+# ============ RUFF CONFIGURATION ============
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

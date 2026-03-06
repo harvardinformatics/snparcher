@@ -1,64 +1,163 @@
-from snakemake.utils import min_version
-min_version("7.0")
+from pathlib import Path
+import os
 
 configfile: "config/config.yaml"
+
 include: "rules/common.smk"
-include: "rules/sumstats.smk"
-include: "rules/fastq.smk"
 include: "rules/reference.smk"
-include: "rules/mappability.smk"
+include: "rules/intervals.smk"
+include: "rules/fastq.smk"
+include: "rules/mapping.smk"
+include: "rules/qc_metrics.smk"
+include: "rules/callable_sites.smk"
 
-setup_curlrc()
-onerror: cleanup_curlrc()
-onsuccess: cleanup_curlrc()
-
-
-if config['sentieon']:
-    include: "rules/sentieon.smk"
-else:
-    include: "rules/fastq2bam.smk"
-    if config['intervals']:
-        include: "rules/bam2vcf_gatk_intervals.smk"
-        include: "rules/intervals.smk"
+if VARIANT_TOOL == "sentieon":
+    include: "rules/variant_calling/sentieon.smk"
+elif VARIANT_TOOL == "gatk":
+    if config["intervals"]["enabled"]:
+        include: "rules/variant_calling/gatk_intervals.smk"
     else:
-        include: "rules/bam2vcf_gatk.smk"
+        include: "rules/variant_calling/gatk.smk"
+        include: "rules/variant_calling/joint_gvcf.smk"
+elif VARIANT_TOOL == "bcftools":
+    include: "rules/variant_calling/bcftools.smk"
+elif VARIANT_TOOL == "deepvariant":
+    include: "rules/variant_calling/deepvariant.smk"
+elif VARIANT_TOOL == "parabricks":
+    include: "rules/variant_calling/parabricks.smk"
+    include: "rules/variant_calling/joint_gvcf_intervals.smk"
+else:
+    raise ValueError(f"Unsupported variant_calling.tool: {VARIANT_TOOL}")
 
-if config['cov_filter']:
-    include: "rules/cov_filter.smk"
+include: "rules/variant_calling/hard_filters.smk"
 
-module qc:
-    snakefile:
-        "modules/qc/Snakefile"
-    config:
-        config
 
-use rule * from qc as qc_*
+# --- Module imports ----------------------------------------------------------
 
-module mk:
-    snakefile:
-        "modules/mk/Snakefile"
-    config:
-        config
+if config["modules"]["postprocess"]["enabled"]:
+    _postprocess_config = {
+        "samples": config["samples"],
+        "sample_metadata": config.get("sample_metadata", ""),
+        "vcf": "results/vcfs/raw.vcf.gz",
+        "ref_fai": REF_FILES["ref_fai"],
+        "callable_sites_bed": "results/callable_sites/callable_sites.bed",
+        **config["modules"]["postprocess"]["filtering"],
+    }
 
-use rule * from mk as mk_*
+    module postprocess:
+        snakefile: "modules/postprocess/Snakefile"
+        config: _postprocess_config
 
-module postprocess:
-    snakefile:
-        "modules/postprocess/Snakefile"
-    config:
-        config
+    use rule * from postprocess exclude all as postprocess_*
 
-use rule * from postprocess as postprocess_*
 
-module trackhub:
-    snakefile:
-        "modules/trackhub/Snakefile"
-    config:
-        config
+if config["modules"]["qc"]["enabled"]:
+    _qc_config = {
+        "samples": config["samples"],
+        "sample_metadata": config.get("sample_metadata", ""),
+        "vcf": "results/vcfs/raw.vcf.gz",
+        "fai": REF_FILES["ref_fai"],
+        "qc_report": "results/qc_metrics/qc_report.tsv",
+        "clusters": config["modules"]["qc"]["clusters"],
+        "min_depth": config["modules"]["qc"]["min_depth"],
+        "google_api_key": config["modules"]["qc"]["google_api_key"],
+        "exclude_scaffolds": config["modules"]["qc"]["exclude_scaffolds"],
+    }
 
-use rule * from trackhub as trackhub_*
+    module qc:
+        snakefile: "modules/qc/Snakefile"
+        config: _qc_config
+
+    use rule * from qc exclude all as qc_*
+
+
+if config["modules"]["mk"]["enabled"]:
+    _mk_config = {
+        "samples": config["samples"],
+        "sample_metadata": config.get("sample_metadata", ""),
+        "vcf": "results/postprocess/filtered.vcf.gz",
+        "ref": REF_FILES["ref"],
+        "gff": config["modules"]["mk"]["gff"],
+    }
+
+    module mk:
+        snakefile: "modules/mk/Snakefile"
+        config: _mk_config
+
+    use rule * from mk exclude all as mk_*
+
+
+# --- Default target ----------------------------------------------------------
 
 rule all:
+    """Default target: full pipeline."""
     input:
-        get_output()
-    default_target: True
+        "results/vcfs/raw.vcf.gz",
+        "results/qc_metrics/qc_report.tsv",
+        "results/callable_sites/callable_loci.zarr" if config["callable_sites"]["coverage"]["enabled"] else [],
+        "results/callable_sites/mappability.bed" if config["callable_sites"]["mappability"]["enabled"] else [],
+        # Postprocess outputs (when enabled)
+        "results/postprocess/filtered.vcf.gz" if config["modules"]["postprocess"]["enabled"] else [],
+        "results/postprocess/clean_snps.vcf.gz" if config["modules"]["postprocess"]["enabled"] else [],
+        "results/postprocess/clean_indels.vcf.gz" if config["modules"]["postprocess"]["enabled"] else [],
+        # QC dashboard (when enabled)
+        "results/qc/qc_dashboard.html" if config["modules"]["qc"]["enabled"] else [],
+        # MK table (when enabled)
+        "results/mk/mk_table.tsv" if config["modules"]["mk"]["enabled"] else [],
+
+
+rule setup:
+    """
+    Prepare reference, indices, and intervals.
+    Resolves checkpoints so subsequent runs can build the full DAG.
+    """
+    input:
+        REF_FILES["ref"],
+        REF_FILES["ref_fai"],
+        REF_FILES["ref_dict"],
+        REF_BWA_IDX,
+        "results/intervals/gvcf/intervals.txt" if VARIANT_TOOL == "gatk" and config["intervals"]["enabled"] else [],
+        "results/intervals/db/intervals.txt"
+        if (VARIANT_TOOL == "gatk" and config["intervals"]["enabled"]) or VARIANT_TOOL == "parabricks"
+        else [],
+
+rule download_reads:
+    """Download fastqs for all SRA samples."""
+    input:
+        [
+            f"results/fastqs/{record['sample_id']}/{record['library_id']}/{record['input_unit']}/{record['input']}_{read}.fastq.gz"
+            for sample in SAMPLES_SRR
+            for record in get_sample_srr_records(sample)
+            for read in [1, 2]
+        ] if SAMPLES_SRR else [],
+
+
+rule map_samples:
+    """Align all samples that need alignment."""
+    input:
+        [get_final_bam(s) for s in SAMPLES_NEED_ALIGNMENT],
+
+
+rule call_variants:
+    """Run variant calling through to filtered VCF."""
+    input:
+        "results/vcfs/filtered.vcf.gz",
+
+
+rule qc_report:
+    """Generate QC metrics report."""
+    input:
+        "results/qc_metrics/qc_report.tsv",
+
+
+rule callable_sites:
+    """Generate callable sites from coverage and mappability."""
+    input:
+        "results/callable_sites/callable_loci.zarr",
+        "results/callable_sites/mappability.bed",
+
+
+rule gvcfs:
+    """Generate normalized gVCFs for all samples."""
+    input:
+        expand("results/gvcfs_norm/{sample}.g.vcf.gz", sample=SAMPLES_ALL),

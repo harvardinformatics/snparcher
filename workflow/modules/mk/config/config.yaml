@@ -1,9 +1,8 @@
-##############################
-# Variables you need to change
-##############################
+# snpArcher v2 — MK Module standalone config
+# Used when running the module independently (not from the main workflow).
 
-samples: "config/samples.csv" # path to the sample metadata CSV
-final_prefix: "" # prefix for final output files
-
-
-
+samples: "config/samples.csv"        # path to sample sheet CSV (sample_id column required)
+sample_metadata: ""                  # path to metadata CSV (outgroup/exclude columns)
+vcf: "results/postprocess/filtered.vcf.gz"  # path to filtered VCF
+ref: "results/reference/ref.fa.gz"   # path to reference FASTA (may be bgzipped)
+gff: ""                              # path to GFF annotation file (REQUIRED)

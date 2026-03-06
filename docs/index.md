@@ -34,6 +34,7 @@ Remember to examine the config.yaml file to edit options for each step. We have 
 ```{toctree}
 :hidden: True
 ./setup.md
+./v2-migration.md
 ./executing.md
 ./examples.md
 ./modules.md
