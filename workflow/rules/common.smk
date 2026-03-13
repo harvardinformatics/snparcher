@@ -475,6 +475,12 @@ SAMPLES_WITH_FASTQ = samples_df[
     samples_df["input_type"].isin(["srr", "fastq"])
 ]["sample_id"].unique().tolist()
 
+if config["callable_sites"]["coverage"]["enabled"] and not SAMPLES_WITH_BAM:
+    raise ValueError(
+        "callable_sites.coverage.enabled requires at least one BAM-backed sample. "
+        "Disable callable_sites.coverage.enabled for gVCF-only workflows."
+    )
+
 
 # --- Helper functions ---
 

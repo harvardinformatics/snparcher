@@ -543,6 +543,29 @@ def test_gvcf_input_rejected_for_new_callers(request, tool):
 
 
 @pytest.mark.dry_run
+def test_callable_sites_coverage_rejected_for_gvcf_only_inputs(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            coverage_enabled=True,
+            mappability_enabled=True,
+        )
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=SAMPLES_DIR / "local_gvcf.csv",
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "callable_sites.coverage.enabled requires at least one BAM-backed sample" in output
+
+
+@pytest.mark.dry_run
 def test_parabricks_requires_container_image(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
