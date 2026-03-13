@@ -1,8 +1,14 @@
+import functools
+import gzip
+import http.server
 import platform
 import re
 import shutil
-from pathlib import Path
+import socket
 import tempfile
+import threading
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -85,6 +91,57 @@ def write_callable_sites_config(base_config, out_dir, *, coverage_enabled, mappa
     )
     out_path.write_text(pattern.sub(new_block, text, count=1))
     return out_path
+
+def write_intervals_config(base_config, out_dir, *, enabled):
+    """Write a config copy with intervals.enabled overridden."""
+    text = Path(base_config).read_text()
+    pattern = re.compile(r"intervals:\n  enabled: (?:true|false)\n")
+    if not pattern.search(text):
+        raise AssertionError("Expected intervals block not found in config")
+
+    out_path = Path(out_dir) / f"config_intervals_{int(enabled)}.yaml"
+    out_path.write_text(
+        pattern.sub(
+            f"intervals:\n  enabled: {'true' if enabled else 'false'}\n",
+            text,
+            count=1,
+        )
+    )
+    return out_path
+
+
+def write_reference_source_config(base_config, out_dir, *, source):
+    """Write a config copy with reference.source overridden."""
+    text = Path(base_config).read_text()
+    pattern = re.compile(
+        r'(^reference:\n  name: ".*"\n  source: ").*(".*$)',
+        re.MULTILINE,
+    )
+    if not pattern.search(text):
+        raise AssertionError("Expected reference block not found in config")
+
+    out_path = Path(out_dir) / "config_reference_source.yaml"
+    out_path.write_text(pattern.sub(rf'\1{source}\2', text, count=1))
+    return out_path
+
+
+@contextmanager
+def serve_directory(directory):
+    """Serve a directory over HTTP for reference URL tests."""
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        host, port = sock.getsockname()
+
+    server = http.server.ThreadingHTTPServer((host, port), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://{host}:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 @pytest.mark.dry_run
@@ -272,6 +329,62 @@ def test_callable_sites_target_dry_run(request, coverage_enabled, mappability_en
         output = result.stdout + result.stderr
         assert ("clam_loci" in output) == coverage_enabled
         assert ("mappability_bed" in output) == mappability_enabled
+
+
+@pytest.mark.dry_run
+def test_gatk_without_intervals_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_intervals_config(get_config_file(), tmpdir, enabled=False)
+
+        result = smk.dry_run(
+            target="call_variants",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "gatk_haplotypecaller" in output
+        assert "joint_genomics_db_import" in output
+
+
+@pytest.mark.full_run
+@pytest.mark.parametrize("compressed", [False, True])
+def test_reference_url_sources(request, compressed):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        source_dir = tmp_path / "reference_server"
+        source_dir.mkdir()
+
+        gz_ref = TEST_DATA_DIR / "reference" / "test_genome.fa.gz"
+        plain_ref = source_dir / "test_genome.fa"
+        plain_ref.write_text(gzip.decompress(gz_ref.read_bytes()).decode())
+        shutil.copy2(gz_ref, source_dir / "test_genome.fa.gz")
+
+        filename = "test_genome.fa.gz" if compressed else "test_genome.fa"
+
+        with serve_directory(source_dir) as base_url:
+            smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
+            cfg = write_reference_source_config(
+                get_config_file(),
+                tmpdir,
+                source=f"{base_url}/{filename}",
+            )
+
+            result = smk.run(
+                target="setup",
+                configfile=cfg,
+                samples=get_samples_file(),
+            )
+            result.assert_success()
+            result.assert_output_exists(
+                "results/reference/test_genome.fa.gz",
+                "results/reference/test_genome.fa.gz.fai",
+                "results/reference/test_genome.dict",
+            )
 
 
 @pytest.mark.full_run
