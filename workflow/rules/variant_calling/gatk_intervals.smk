@@ -1,9 +1,15 @@
 localrules: create_db_mapfile
 
+import time
+
 wildcard_constraints:
     sample="[^/]+",
     round=r"\d+",
     chunk=r"\d+"
+
+
+CHECKPOINT_FILE_POLL_SECONDS = 30
+CHECKPOINT_FILE_POLL_INTERVAL_SECONDS = 1
 
 def haplotype_caller_input(wildcards):
     input_type = get_sample_input_type(wildcards.sample)
@@ -22,21 +28,13 @@ def haplotype_caller_input(wildcards):
 
 def get_interval_gvcfs(wc):
     """Get interval gVCF files for a sample."""
-    intervals_file = "results/intervals/gvcf/intervals.txt"
-    
-    if exists(intervals_file):
-        # Read directly from file if it exists
-        # We do this because checkpoint.get() doesn't seem to pick up the checkpoint output if it was created in previous run
-        # I.e if user does setup target rule, then rule all, the workflow fails 
-        # Related GH issue: https://github.com/snakemake/snakemake/issues/3879
-        with open(intervals_file) as f:
-            lines = [l.strip() for l in f.readlines()]
-    else:
-        # Fall back to checkpoint mechanism to trigger creation
-        checkpoint_output = checkpoints.create_gvcf_intervals.get().output[0]
-        with open(checkpoint_output) as f:
-            lines = [l.strip() for l in f.readlines()]
-    
+    intervals_file = _get_checkpoint_manifest(
+        wc=wc,
+        manifest_path="results/intervals/gvcf/intervals.txt",
+        checkpoint_getter=checkpoints.create_gvcf_intervals,
+    )
+    lines = _read_checkpoint_manifest(intervals_file)
+
     list_files = [os.path.basename(x) for x in lines]
     intervals = [f.replace("-scattered.interval_list", "") for f in list_files]
     return expand(
@@ -48,18 +46,45 @@ def get_interval_gvcfs(wc):
 
 def get_db_intervals(wc):
     """Get DB interval IDs from checkpoint output."""
-    intervals_file = "results/intervals/db/intervals.txt"
-    
-    if exists(intervals_file):
-        with open(intervals_file) as f:
-            lines = [l.strip() for l in f.readlines()]
-    else:
-        checkpoint_output = checkpoints.create_db_intervals.get().output[0]
-        with open(checkpoint_output) as f:
-            lines = [l.strip() for l in f.readlines()]
-    
+    intervals_file = _get_checkpoint_manifest(
+        wc=wc,
+        manifest_path="results/intervals/db/intervals.txt",
+        checkpoint_getter=checkpoints.create_db_intervals,
+    )
+    lines = _read_checkpoint_manifest(intervals_file)
+
     list_files = [os.path.basename(x) for x in lines]
     return [f.replace("-scattered.interval_list", "") for f in list_files]
+
+
+def _read_checkpoint_manifest(manifest_path):
+    """Read a checkpoint manifest after waiting briefly for shared-fs visibility."""
+    deadline = time.time() + CHECKPOINT_FILE_POLL_SECONDS
+    last_error = None
+
+    while time.time() < deadline:
+        try:
+            with open(manifest_path) as f:
+                lines = [l.strip() for l in f.readlines() if l.strip()]
+            if lines:
+                return lines
+        except FileNotFoundError as err:
+            last_error = err
+
+        time.sleep(CHECKPOINT_FILE_POLL_INTERVAL_SECONDS)
+
+    raise FileNotFoundError(
+        f"Timed out waiting for checkpoint manifest to become readable: {manifest_path}"
+    ) from last_error
+
+
+def _get_checkpoint_manifest(wc, manifest_path, checkpoint_getter):
+    """Resolve checkpoint outputs while preserving support for manifests from previous runs."""
+    if exists(manifest_path):
+        return manifest_path
+
+    checkpoint_output = checkpoint_getter.get(**wc).output[0]
+    return checkpoint_output
 
 
 def get_interval_vcfs(wc):
