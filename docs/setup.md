@@ -7,7 +7,7 @@ Mamba is a faster version of conda. Conda is a package manager that makes it eas
 Once Mamba is installed, create a conda environment with snakemake. These are the only two dependencies you need for the pipeline to work, the workflow will create mamba environments for each rule, and there is no need to install each package separately. 
 
 ```
-mamba create -c conda-forge -c bioconda -n snparcher "snakemake>=8" "python==3.11.4"
+mamba create -c conda-forge -c bioconda -n snparcher "snakemake>=9" "python==3.11.4"
 mamba activate snparcher
 ```
 If you encounter issues, please see the [Snakemake docs](https://snakemake.readthedocs.io/en/stable/getting_started/installation.html) for detailed installation instructions.
@@ -185,6 +185,5 @@ Other resources, such as `slurm_partition`, `runtime`, etc. can also be set here
 ```{note}
 Snakemake allows you to dynamically assign resources. We use the `attempt` keyword to specify memory. For example. `attempt * 2000` will provide 2GB on the first attempt of the rule, if the rule fails (out of memory) then on the second attempt it will be provided 4GB. This behavior requires the `-T/--retries` Snakemake option.
 ```
-
 
 

@@ -1,3 +1,4 @@
+from importlib.metadata import PackageNotFoundError, version
 import os
 from pathlib import Path
 import pandas as pd
@@ -9,6 +10,25 @@ from snakemake.utils import validate
 
 
 # --- Config defaults and validation ---
+
+def warn_if_old_snakemake_version():
+    """Warn when running on Snakemake versions older than the supported v9 series."""
+    try:
+        raw_version = version("snakemake")
+    except PackageNotFoundError:
+        return
+
+    parts = raw_version.split(".")
+    try:
+        major = int(parts[0])
+    except (TypeError, ValueError, IndexError):
+        return
+
+    if major < 9:
+        logger.warning(
+            f"snpArcher v2 is tested with Snakemake >=9, but this run is using Snakemake {raw_version}. "
+            "Checkpoint behavior and other workflow features may be unreliable on older versions."
+        )
 
 def set_defaults(cfg, defaults):
     """Recursively apply defaults to config dict."""
@@ -255,6 +275,8 @@ def validate_config_with_warnings(cfg, schema_path):
             + "\n".join(formatted)
         )
 
+
+warn_if_old_snakemake_version()
 
 CONFIG_SCHEMA_PATH = Path(workflow.basedir, "schemas/config.schema.yaml")
 v1_markers = detect_v1_config_markers(config)
