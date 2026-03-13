@@ -407,7 +407,13 @@ def test_create_db_mapfile_preserves_external_gvcf_sample_id(request, intervals_
         gvcf_path.write_text("")
 
         smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
-        cfg = write_intervals_config(get_config_file(), tmpdir, enabled=intervals_enabled)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            coverage_enabled=False,
+            mappability_enabled=True,
+        )
+        cfg = write_intervals_config(cfg, tmpdir, enabled=intervals_enabled)
         samples = write_gvcf_sample_sheet(
             tmpdir,
             sample_id="sample_gvcf",
