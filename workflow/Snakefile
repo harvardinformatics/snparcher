@@ -153,11 +153,11 @@ rule qc_report:
 rule callable_sites:
     """Generate callable sites from coverage and mappability."""
     input:
-        "results/callable_sites/callable_loci.zarr",
-        "results/callable_sites/mappability.bed",
+        "results/callable_sites/callable_loci.zarr" if config["callable_sites"]["coverage"]["enabled"] else [],
+        "results/callable_sites/mappability.bed" if config["callable_sites"]["mappability"]["enabled"] else [],
 
 
 rule gvcfs:
     """Generate normalized gVCFs for all samples."""
     input:
-        expand("results/gvcfs_norm/{sample}.g.vcf.gz", sample=SAMPLES_ALL),
+        [get_final_gvcf(sample) for sample in SAMPLES_ALL],

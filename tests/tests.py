@@ -1,8 +1,14 @@
+import functools
+import gzip
+import http.server
 import platform
 import re
 import shutil
-from pathlib import Path
+import socket
 import tempfile
+import threading
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -48,6 +54,104 @@ def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
     out_path = Path(out_dir) / f"config_{tool}.yaml"
     out_path.write_text(text)
     return out_path
+
+def write_callable_sites_config(base_config, out_dir, *, coverage_enabled, mappability_enabled):
+    """Write a config copy with callable-sites toggles overridden."""
+    text = Path(base_config).read_text()
+    new_block = f"""callable_sites:
+  generate_bed_file: false
+  coverage:
+    enabled: {"true" if coverage_enabled else "false"}
+    stdev: 2
+    merge_distance: 100
+  mappability:
+    enabled: {"true" if mappability_enabled else "false"}
+    min_score: 1
+    kmer: 150
+    merge_distance: 100
+"""
+    pattern = re.compile(
+        r"callable_sites:\n"
+        r"  generate_bed_file: false\n"
+        r"  coverage:\n"
+        r"    enabled: (?:true|false)\n"
+        r"    stdev: 2\n"
+        r"    merge_distance: 100\n"
+        r"  mappability:\n"
+        r"    enabled: (?:true|false)\n"
+        r"    min_score: 1\n"
+        r"    kmer: 150\n"
+        r"    merge_distance: 100\n"
+    )
+    if not pattern.search(text):
+        raise AssertionError("Expected callable_sites block not found in config")
+
+    out_path = Path(out_dir) / (
+        f"config_callable_sites_{int(coverage_enabled)}_{int(mappability_enabled)}.yaml"
+    )
+    out_path.write_text(pattern.sub(new_block, text, count=1))
+    return out_path
+
+def write_intervals_config(base_config, out_dir, *, enabled):
+    """Write a config copy with intervals.enabled overridden."""
+    text = Path(base_config).read_text()
+    pattern = re.compile(r"intervals:\n  enabled: (?:true|false)\n")
+    if not pattern.search(text):
+        raise AssertionError("Expected intervals block not found in config")
+
+    out_path = Path(out_dir) / f"config_intervals_{int(enabled)}.yaml"
+    out_path.write_text(
+        pattern.sub(
+            f"intervals:\n  enabled: {'true' if enabled else 'false'}\n",
+            text,
+            count=1,
+        )
+    )
+    return out_path
+
+
+def write_reference_source_config(base_config, out_dir, *, source):
+    """Write a config copy with reference.source overridden."""
+    text = Path(base_config).read_text()
+    pattern = re.compile(
+        r'(^reference:\n  name: ".*"\n  source: ").*(".*$)',
+        re.MULTILINE,
+    )
+    if not pattern.search(text):
+        raise AssertionError("Expected reference block not found in config")
+
+    out_path = Path(out_dir) / "config_reference_source.yaml"
+    out_path.write_text(pattern.sub(rf'\1{source}\2', text, count=1))
+    return out_path
+
+
+def write_gvcf_sample_sheet(out_dir, *, sample_id, gvcf_path):
+    """Write a sample sheet for one external gVCF input."""
+    out_path = Path(out_dir) / "external_gvcf_samples.csv"
+    out_path.write_text(
+        "sample_id,input_type,input\n"
+        f"{sample_id},gvcf,{gvcf_path}\n"
+    )
+    return out_path
+
+
+@contextmanager
+def serve_directory(directory):
+    """Serve a directory over HTTP for reference URL tests."""
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        host, port = sock.getsockname()
+
+    server = http.server.ThreadingHTTPServer((host, port), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://{host}:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 @pytest.mark.dry_run
@@ -148,6 +252,20 @@ def test_full_pipeline_dry_run(request):
 
 
 @pytest.mark.dry_run
+def test_gvcfs_target_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="gvcfs",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+
+@pytest.mark.dry_run
 def test_multirow_same_library_dry_run(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -189,6 +307,128 @@ def test_multirow_multi_library_dry_run(request):
         assert "merge_dedup_libraries" in output
         assert "library=libA" in output
         assert "library=libB" in output
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize(
+    ("coverage_enabled", "mappability_enabled"),
+    [
+        (True, True),
+        (False, True),
+        (True, False),
+    ],
+)
+def test_callable_sites_target_dry_run(request, coverage_enabled, mappability_enabled):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            coverage_enabled=coverage_enabled,
+            mappability_enabled=mappability_enabled,
+        )
+
+        result = smk.dry_run(
+            target="callable_sites",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert ("clam_loci" in output) == coverage_enabled
+        assert ("mappability_bed" in output) == mappability_enabled
+
+
+@pytest.mark.dry_run
+def test_gatk_without_intervals_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_intervals_config(get_config_file(), tmpdir, enabled=False)
+
+        result = smk.dry_run(
+            target="call_variants",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "gatk_haplotypecaller" in output
+        assert "joint_genomics_db_import" in output
+
+
+@pytest.mark.full_run
+@pytest.mark.parametrize("compressed", [False, True])
+def test_reference_url_sources(request, compressed):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        source_dir = tmp_path / "reference_server"
+        source_dir.mkdir()
+
+        gz_ref = TEST_DATA_DIR / "reference" / "test_genome.fa.gz"
+        plain_ref = source_dir / "test_genome.fa"
+        plain_ref.write_text(gzip.decompress(gz_ref.read_bytes()).decode())
+        shutil.copy2(gz_ref, source_dir / "test_genome.fa.gz")
+
+        filename = "test_genome.fa.gz" if compressed else "test_genome.fa"
+
+        with serve_directory(source_dir) as base_url:
+            smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
+            cfg = write_reference_source_config(
+                get_config_file(),
+                tmpdir,
+                source=f"{base_url}/{filename}",
+            )
+
+            result = smk.run(
+                target="setup",
+                configfile=cfg,
+                samples=get_samples_file(),
+            )
+            result.assert_success()
+            result.assert_output_exists(
+                "results/reference/test_genome.fa.gz",
+                "results/reference/test_genome.fa.gz.fai",
+                "results/reference/test_genome.dict",
+            )
+
+
+@pytest.mark.full_run
+@pytest.mark.parametrize("intervals_enabled", [False, True])
+def test_create_db_mapfile_preserves_external_gvcf_sample_id(request, intervals_enabled):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        gvcf_path = tmp_path / "external_name.g.vcf.gz"
+        gvcf_path.write_text("")
+
+        smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            coverage_enabled=False,
+            mappability_enabled=True,
+        )
+        cfg = write_intervals_config(cfg, tmpdir, enabled=intervals_enabled)
+        samples = write_gvcf_sample_sheet(
+            tmpdir,
+            sample_id="sample_gvcf",
+            gvcf_path=gvcf_path,
+        )
+
+        result = smk.run(
+            target="create_db_mapfile",
+            configfile=cfg,
+            samples=samples,
+        )
+        result.assert_success()
+
+        mapfile = (tmp_path / "results/genomics_db/mapfile.txt").read_text().strip()
+        assert mapfile == f"sample_gvcf\t{gvcf_path}"
 
 
 @pytest.mark.full_run
@@ -306,6 +546,29 @@ def test_gvcf_input_rejected_for_new_callers(request, tool):
         assert not result.succeeded
         output = result.stdout + result.stderr
         assert "does not support samples with input_type='gvcf'" in output
+
+
+@pytest.mark.dry_run
+def test_callable_sites_coverage_rejected_for_gvcf_only_inputs(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            coverage_enabled=True,
+            mappability_enabled=True,
+        )
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=SAMPLES_DIR / "local_gvcf.csv",
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "callable_sites.coverage.enabled requires at least one BAM-backed sample" in output
 
 
 @pytest.mark.dry_run

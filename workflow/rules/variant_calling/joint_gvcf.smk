@@ -11,10 +11,9 @@ def _java_opts_from_resources(resources, default_mem_mb=4096):
 
 
 def get_gvcfs_for_db(wc):
-    gvcfs = [get_final_gvcf(s) for s in SAMPLES_ALL]
     return {
-        "gvcfs": gvcfs,
-        "tbis": [g + ".tbi" for g in gvcfs],
+        "gvcfs": get_joint_gvcf_paths(),
+        "tbis": get_joint_gvcf_tbis(),
         "db_mapfile": "results/genomics_db/mapfile.txt",
         **REF_FILES,
     }
@@ -22,14 +21,11 @@ def get_gvcfs_for_db(wc):
 
 rule create_db_mapfile:
     input:
-        gvcfs=[get_final_gvcf(s) for s in SAMPLES_ALL],
+        gvcfs=get_joint_gvcf_paths(),
     output:
         mapfile="results/genomics_db/mapfile.txt",
     run:
-        with open(output.mapfile, "w") as f:
-            for gvcf in input.gvcfs:
-                sample = os.path.basename(gvcf).replace(".g.vcf.gz", "")
-                print(sample, gvcf, sep="\t", file=f)
+        write_joint_gvcf_mapfile(output.mapfile)
 
 
 rule joint_genomics_db_import:

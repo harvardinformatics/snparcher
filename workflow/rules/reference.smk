@@ -46,7 +46,11 @@ elif REF_TYPE == "url":
             "logs/prepare_reference/{name}.txt"
         shell:
             """
-            curl -fSL "{params.source}" 2> {log} | gunzip -c 2>> {log} | bgzip -c > {output.ref} 2>> {log}
+            if [[ "{params.source}" == *.gz ]]; then
+                curl -fSL "{params.source}" 2> {log} | gunzip -c 2>> {log} | bgzip -c > {output.ref} 2>> {log}
+            else
+                curl -fSL "{params.source}" 2> {log} | bgzip -c > {output.ref} 2>> {log}
+            fi
             """
 
 
