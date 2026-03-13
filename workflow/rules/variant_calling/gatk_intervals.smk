@@ -33,10 +33,10 @@ def get_interval_gvcfs(wc):
             lines = [l.strip() for l in f.readlines()]
     else:
         # Fall back to checkpoint mechanism to trigger creation
-        checkpoint_output = checkpoints.create_gvcf_intervals.get().output[0]
+        checkpoint_output = checkpoints.create_gvcf_intervals.get(**wc).output[0]
         with open(checkpoint_output) as f:
             lines = [l.strip() for l in f.readlines()]
-    
+
     list_files = [os.path.basename(x) for x in lines]
     intervals = [f.replace("-scattered.interval_list", "") for f in list_files]
     return expand(
@@ -54,10 +54,10 @@ def get_db_intervals(wc):
         with open(intervals_file) as f:
             lines = [l.strip() for l in f.readlines()]
     else:
-        checkpoint_output = checkpoints.create_db_intervals.get().output[0]
+        checkpoint_output = checkpoints.create_db_intervals.get(**wc).output[0]
         with open(checkpoint_output) as f:
             lines = [l.strip() for l in f.readlines()]
-    
+
     list_files = [os.path.basename(x) for x in lines]
     return [f.replace("-scattered.interval_list", "") for f in list_files]
 

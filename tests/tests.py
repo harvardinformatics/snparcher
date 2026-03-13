@@ -49,6 +49,65 @@ def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
     out_path.write_text(text)
     return out_path
 
+
+@pytest.mark.dry_run
+def test_v1_style_config_exits_with_migration_message(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=CONFIGS_DIR / "legacy_v1_style.yaml",
+            samples=get_samples_file(),
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "Detected a v1-style snpArcher config" in output
+        assert "docs/v2-migration.md" in output
+        assert "sentieon" in output
+
+
+@pytest.mark.dry_run
+def test_extra_config_keys_warn_but_do_not_fail(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=CONFIGS_DIR / "local_genome_extra_keys.yaml",
+            samples=get_samples_file(),
+        )
+
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "Ignoring unsupported config key(s):" in output
+        assert "reads.sort" in output
+        assert "remote_reads" in output
+        assert "variant_calling.gatk.min_pruning" in output
+        assert "reference.path" in output
+
+
+@pytest.mark.dry_run
+def test_global_mark_duplicates_config_default_is_respected(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="all",
+            configfile=CONFIGS_DIR / "local_genome_global_markdup.yaml",
+            samples=SAMPLES_DIR / "local_fastqs_global_markdup.csv",
+        )
+
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "merge_library_level_bams" in output
+        assert "markdup_library" not in output
+        assert "merge_dedup_libraries" not in output
+
 @pytest.mark.dry_run
 def test_setup_dry_run(request):
     no_conda = request.config.getoption("--no-conda")

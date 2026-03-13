@@ -16,6 +16,15 @@ properties:
       column that matches entries in the samples CSV. Additional columns
       (exclude, outgroup, lat, long, etc.) are used by modules.
 
+  reads:
+    type: object
+    additionalProperties: false
+    default: {}
+    properties:
+      mark_duplicates:
+        type: boolean
+        default: true
+
   reference:
     type: object
     additionalProperties: false

@@ -1,0 +1,7 @@
+samples: "samples.csv"
+final_prefix: "legacy_test"
+sentieon: false
+refGenome: "legacy_ref"
+refPath: "tests/data/reference/test_genome.fa.gz"
+cov_filter: false
+minNmer: 500
