@@ -465,9 +465,6 @@ SAMPLES_SRR = samples_df[samples_df["input_type"] == "srr"]["sample_id"].unique(
 SAMPLES_NEED_ALIGNMENT = samples_df[
     samples_df["input_type"].isin(["srr", "fastq"])
 ]["sample_id"].unique().tolist()
-SAMPLES_NEED_HAPLOTYPECALLER = samples_df[
-    samples_df["input_type"] != "gvcf"
-]["sample_id"].unique().tolist()
 SAMPLES_WITH_BAM = samples_df[
     samples_df["input_type"].isin(["srr", "fastq", "bam"])
 ]["sample_id"].unique().tolist()
@@ -483,12 +480,6 @@ if config["callable_sites"]["coverage"]["enabled"] and not SAMPLES_WITH_BAM:
 
 
 # --- Helper functions ---
-
-def sample_has_multiple_libraries(sample):
-    """Check if sample has multiple libraries."""
-    sample_rows = samples_df[samples_df["sample_id"] == sample]
-    return sample_rows["library_id"].nunique() > 1
-
 
 def get_sample_libraries(sample):
     """Get all library IDs for a sample."""
@@ -667,40 +658,3 @@ def get_ingroup_samples():
     excluded = set(get_excluded_samples())
     outgroup = set(get_outgroup_samples())
     return [s for s in SAMPLES_ALL if s not in excluded and s not in outgroup]
-
-
-def get_sample_coords():
-    """Return DataFrame with sample_id, lat, long for samples that have coordinates.
-    Returns empty DataFrame if no metadata or no lat/long columns."""
-    if metadata_df is None:
-        return pd.DataFrame(columns=["sample_id", "lat", "long"])
-    if "lat" not in metadata_df.columns or "long" not in metadata_df.columns:
-        return pd.DataFrame(columns=["sample_id", "lat", "long"])
-    coords = metadata_df[["sample_id", "lat", "long"]].dropna(subset=["lat", "long"])
-    return coords
-
-
-def get_sample_metadata(sample_id, column, default=None):
-    """Get a metadata value for a specific sample. Returns default if not available."""
-    if metadata_df is None or column not in metadata_df.columns:
-        return default
-    rows = metadata_df.loc[metadata_df["sample_id"] == sample_id, column]
-    if rows.empty:
-        return default
-    return rows.iloc[0]
-
-
-def require_metadata(module_name, required_columns=None):
-    """Validate that metadata is available. Called by modules that need it.
-    Raises a clear error if metadata CSV is not configured."""
-    if metadata_df is None:
-        raise ValueError(
-            f"Module '{module_name}' requires sample_metadata to be configured. "
-            f"Set 'sample_metadata' in your config.yaml to a CSV file path."
-        )
-    if required_columns:
-        missing = [c for c in required_columns if c not in metadata_df.columns]
-        if missing:
-            raise ValueError(
-                f"Module '{module_name}' requires column(s) {missing} in sample_metadata CSV."
-            )
