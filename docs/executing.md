@@ -4,7 +4,7 @@ Please refer to our [setup instructions](./setup.md) to prepare the snpArcher en
 ## Test datasets
 To test that your environment is properly setup, you can run a quick test with the following command:
 ```
-snakemake -d .test/ecoli --cores 1 --use-conda --workflow-profile workflow-profiles/default
+snakemake -s workflow/Snakefile --directory .test/ecoli --workflow-profile workflow-profiles/default --cores 1 -p all
 ```
 If this runs without errors, you are ready to go!
 ## Using the Dry-run option
