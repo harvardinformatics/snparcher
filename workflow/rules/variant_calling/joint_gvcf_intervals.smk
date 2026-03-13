@@ -45,10 +45,9 @@ def get_interval_vcf_tbis(wc):
 
 
 def get_gvcfs_for_db(wc):
-    gvcfs = [get_final_gvcf(s) for s in SAMPLES_ALL]
     return {
-        "gvcfs": gvcfs,
-        "tbis": [g + ".tbi" for g in gvcfs],
+        "gvcfs": get_joint_gvcf_paths(),
+        "tbis": get_joint_gvcf_tbis(),
         "interval": f"results/intervals/db/{wc.interval}-scattered.interval_list",
         "db_mapfile": "results/genomics_db/mapfile.txt",
     }
@@ -178,14 +177,11 @@ def get_final_interval_vcf_stage_tbi(wc):
 
 rule create_db_mapfile:
     input:
-        gvcfs=[get_final_gvcf(s) for s in SAMPLES_ALL],
+        gvcfs=get_joint_gvcf_paths(),
     output:
         mapfile="results/genomics_db/mapfile.txt",
     run:
-        with open(output.mapfile, "w") as f:
-            for gvcf in input.gvcfs:
-                sample = os.path.basename(gvcf).replace(".g.vcf.gz", "")
-                print(sample, gvcf, sep="\t", file=f)
+        write_joint_gvcf_mapfile(output.mapfile)
 
 
 rule gatk_genomics_db_import:

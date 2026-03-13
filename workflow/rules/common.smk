@@ -559,6 +559,28 @@ def get_final_gvcf(sample):
     return result
 
 
+def get_joint_gvcf_records():
+    """Return sample IDs paired with their final gVCF paths."""
+    return [(sample, get_final_gvcf(sample)) for sample in SAMPLES_ALL]
+
+
+def get_joint_gvcf_paths():
+    """Return final gVCF paths for joint genotyping."""
+    return [gvcf for _, gvcf in get_joint_gvcf_records()]
+
+
+def get_joint_gvcf_tbis():
+    """Return final gVCF index paths for joint genotyping."""
+    return [f"{gvcf}.tbi" for gvcf in get_joint_gvcf_paths()]
+
+
+def write_joint_gvcf_mapfile(path):
+    """Write a GenomicsDB sample-name map keyed by sample_id."""
+    with open(path, "w") as handle:
+        for sample, gvcf in get_joint_gvcf_records():
+            print(sample, gvcf, sep="\t", file=handle)
+
+
 # --- Sample metadata loading (optional) ---
 
 def _parse_bool_column(series, column_name):

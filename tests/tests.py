@@ -125,6 +125,16 @@ def write_reference_source_config(base_config, out_dir, *, source):
     return out_path
 
 
+def write_gvcf_sample_sheet(out_dir, *, sample_id, gvcf_path):
+    """Write a sample sheet for one external gVCF input."""
+    out_path = Path(out_dir) / "external_gvcf_samples.csv"
+    out_path.write_text(
+        "sample_id,input_type,input\n"
+        f"{sample_id},gvcf,{gvcf_path}\n"
+    )
+    return out_path
+
+
 @contextmanager
 def serve_directory(directory):
     """Serve a directory over HTTP for reference URL tests."""
@@ -385,6 +395,34 @@ def test_reference_url_sources(request, compressed):
                 "results/reference/test_genome.fa.gz.fai",
                 "results/reference/test_genome.dict",
             )
+
+
+@pytest.mark.full_run
+@pytest.mark.parametrize("intervals_enabled", [False, True])
+def test_create_db_mapfile_preserves_external_gvcf_sample_id(request, intervals_enabled):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        gvcf_path = tmp_path / "external_name.g.vcf.gz"
+        gvcf_path.write_text("")
+
+        smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
+        cfg = write_intervals_config(get_config_file(), tmpdir, enabled=intervals_enabled)
+        samples = write_gvcf_sample_sheet(
+            tmpdir,
+            sample_id="sample_gvcf",
+            gvcf_path=gvcf_path,
+        )
+
+        result = smk.run(
+            target="create_db_mapfile",
+            configfile=cfg,
+            samples=samples,
+        )
+        result.assert_success()
+
+        mapfile = (tmp_path / "results/genomics_db/mapfile.txt").read_text().strip()
+        assert mapfile == f"sample_gvcf\t{gvcf_path}"
 
 
 @pytest.mark.full_run
