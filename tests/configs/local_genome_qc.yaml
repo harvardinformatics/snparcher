@@ -22,10 +22,12 @@ intervals:
   db_scatter_factor: 0.15
 
 callable_sites:
-  generate_bed_file: false
+  generate_bed_file: true
   coverage:
     enabled: true
-    stdev: 2
+    fraction: 1.0
+    min_coverage: auto
+    max_coverage: auto
     merge_distance: 100
   mappability:
     enabled: true

@@ -34,7 +34,7 @@ include: "rules/variant_calling/hard_filters.smk"
 
 # --- Module imports ----------------------------------------------------------
 
-if config["modules"]["postprocess"]["enabled"]:
+if POSTPROCESS_ENABLED:
     _postprocess_config = {
         "samples": config["samples"],
         "sample_metadata": config.get("sample_metadata", ""),
@@ -94,12 +94,11 @@ rule all:
     input:
         "results/vcfs/raw.vcf.gz",
         "results/qc_metrics/qc_report.tsv",
-        "results/callable_sites/callable_loci.zarr" if config["callable_sites"]["coverage"]["enabled"] else [],
-        "results/callable_sites/mappability.bed" if config["callable_sites"]["mappability"]["enabled"] else [],
+        CALLABLE_TARGETS,
         # Postprocess outputs (when enabled)
-        "results/postprocess/filtered.vcf.gz" if config["modules"]["postprocess"]["enabled"] else [],
-        "results/postprocess/clean_snps.vcf.gz" if config["modules"]["postprocess"]["enabled"] else [],
-        "results/postprocess/clean_indels.vcf.gz" if config["modules"]["postprocess"]["enabled"] else [],
+        "results/postprocess/filtered.vcf.gz" if POSTPROCESS_ENABLED else [],
+        "results/postprocess/clean_snps.vcf.gz" if POSTPROCESS_ENABLED else [],
+        "results/postprocess/clean_indels.vcf.gz" if POSTPROCESS_ENABLED else [],
         # QC dashboard (when enabled)
         "results/qc/qc_dashboard.html" if config["modules"]["qc"]["enabled"] else [],
         # MK table (when enabled)
@@ -153,8 +152,7 @@ rule qc_report:
 rule callable_sites:
     """Generate callable sites from coverage and mappability."""
     input:
-        "results/callable_sites/callable_loci.zarr" if config["callable_sites"]["coverage"]["enabled"] else [],
-        "results/callable_sites/mappability.bed" if config["callable_sites"]["mappability"]["enabled"] else [],
+        CALLABLE_TARGETS,
 
 
 rule gvcfs:
