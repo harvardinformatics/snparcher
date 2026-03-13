@@ -49,6 +49,43 @@ def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
     out_path.write_text(text)
     return out_path
 
+def write_callable_sites_config(base_config, out_dir, *, coverage_enabled, mappability_enabled):
+    """Write a config copy with callable-sites toggles overridden."""
+    text = Path(base_config).read_text()
+    new_block = f"""callable_sites:
+  generate_bed_file: false
+  coverage:
+    enabled: {"true" if coverage_enabled else "false"}
+    stdev: 2
+    merge_distance: 100
+  mappability:
+    enabled: {"true" if mappability_enabled else "false"}
+    min_score: 1
+    kmer: 150
+    merge_distance: 100
+"""
+    pattern = re.compile(
+        r"callable_sites:\n"
+        r"  generate_bed_file: false\n"
+        r"  coverage:\n"
+        r"    enabled: (?:true|false)\n"
+        r"    stdev: 2\n"
+        r"    merge_distance: 100\n"
+        r"  mappability:\n"
+        r"    enabled: (?:true|false)\n"
+        r"    min_score: 1\n"
+        r"    kmer: 150\n"
+        r"    merge_distance: 100\n"
+    )
+    if not pattern.search(text):
+        raise AssertionError("Expected callable_sites block not found in config")
+
+    out_path = Path(out_dir) / (
+        f"config_callable_sites_{int(coverage_enabled)}_{int(mappability_enabled)}.yaml"
+    )
+    out_path.write_text(pattern.sub(new_block, text, count=1))
+    return out_path
+
 
 @pytest.mark.dry_run
 def test_v1_style_config_exits_with_migration_message(request):
@@ -148,6 +185,20 @@ def test_full_pipeline_dry_run(request):
 
 
 @pytest.mark.dry_run
+def test_gvcfs_target_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="gvcfs",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+
+@pytest.mark.dry_run
 def test_multirow_same_library_dry_run(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -189,6 +240,38 @@ def test_multirow_multi_library_dry_run(request):
         assert "merge_dedup_libraries" in output
         assert "library=libA" in output
         assert "library=libB" in output
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize(
+    ("coverage_enabled", "mappability_enabled"),
+    [
+        (True, True),
+        (False, True),
+        (True, False),
+    ],
+)
+def test_callable_sites_target_dry_run(request, coverage_enabled, mappability_enabled):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            coverage_enabled=coverage_enabled,
+            mappability_enabled=mappability_enabled,
+        )
+
+        result = smk.dry_run(
+            target="callable_sites",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert ("clam_loci" in output) == coverage_enabled
+        assert ("mappability_bed" in output) == mappability_enabled
 
 
 @pytest.mark.full_run
