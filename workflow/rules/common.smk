@@ -1,8 +1,11 @@
 import os
 from pathlib import Path
 import pandas as pd
-from snakemake.utils import validate
+import yaml
+from jsonschema import Draft202012Validator
+from snakemake.exceptions import WorkflowError
 from snakemake.logging import logger
+from snakemake.utils import validate
 
 
 # --- Config defaults and validation ---
@@ -19,6 +22,9 @@ def set_defaults(cfg, defaults):
 DEFAULTS = {
     "samples": "config/samples.csv",
     "sample_metadata": "",
+    "reads": {
+        "mark_duplicates": True,
+    },
     "variant_calling": {
         "expected_coverage": "low",
         "tool": "gatk",
@@ -87,11 +93,185 @@ DEFAULTS = {
             "enabled": False,
             "email": "example@email.com",
         },
+        "mk": {
+            "enabled": False,
+            "gff": "",
+        },
     },
 }
 
+V1_CONFIG_MARKERS = (
+    "final_prefix",
+    "resource_config",
+    "intervals",
+    "sentieon",
+    "sentieon_lic",
+    "remote_reads_prefix",
+    "bigtmp",
+    "cov_filter",
+    "generate_trackhub",
+    "trackhub_email",
+    "mark_duplicates",
+    "sort_reads",
+    "refGenome",
+    "refPath",
+    "minNmer",
+    "num_gvcf_intervals",
+    "db_scatter_factor",
+    "ploidy",
+    "minP",
+    "minD",
+    "het_prior",
+    "mappability_min",
+    "mappability_k",
+    "mappability_merge",
+    "cov_merge",
+    "cov_threshold",
+    "cov_threshold_lower",
+    "cov_threshold_upper",
+    "cov_threshold_stdev",
+    "cov_threshold_rel",
+    "callable_merge",
+    "nClusters",
+    "GoogleAPIKey",
+    "contig_size",
+    "maf",
+    "missingness",
+    "scaffolds_to_exclude",
+)
+
+
+def _config_has_v2_blocks(cfg):
+    return (
+        isinstance(cfg.get("reference"), dict)
+        and isinstance(cfg.get("variant_calling"), dict)
+    )
+
+
+def detect_v1_config_markers(cfg):
+    """Return legacy v1-style keys when config does not have the v2 block structure."""
+    found = [key for key in V1_CONFIG_MARKERS if key in cfg]
+
+    if isinstance(cfg.get("remote_reads"), bool):
+        found.append("remote_reads")
+
+    if not found or _config_has_v2_blocks(cfg):
+        return []
+
+    return sorted(set(found))
+
+
+def normalize_supported_config_aliases(cfg):
+    """Normalize a few deprecated aliases for configs that are otherwise v2-shaped."""
+    reference_cfg = cfg.get("reference")
+    if isinstance(reference_cfg, dict) and "path" in reference_cfg:
+        if "source" not in reference_cfg:
+            logger.warning(
+                "Config key 'reference.path' is deprecated; using it as 'reference.source'."
+            )
+            reference_cfg["source"] = reference_cfg["path"]
+        else:
+            logger.warning(
+                "Ignoring deprecated config key 'reference.path' because 'reference.source' is set."
+            )
+        reference_cfg.pop("path", None)
+
+    variant_cfg = cfg.get("variant_calling")
+    if not isinstance(variant_cfg, dict):
+        return
+
+    gatk_cfg = variant_cfg.get("gatk")
+    if isinstance(gatk_cfg, dict) and "ploidy" in gatk_cfg:
+        if "ploidy" not in variant_cfg:
+            logger.warning(
+                "Config key 'variant_calling.gatk.ploidy' is deprecated; using it as 'variant_calling.ploidy'."
+            )
+            variant_cfg["ploidy"] = gatk_cfg["ploidy"]
+        else:
+            logger.warning(
+                "Ignoring deprecated config key 'variant_calling.gatk.ploidy' because 'variant_calling.ploidy' is set."
+            )
+        gatk_cfg.pop("ploidy", None)
+
+
+def _load_yaml(path):
+    with open(path) as handle:
+        return yaml.safe_load(handle)
+
+
+def _schema_without_additional_properties(schema):
+    if isinstance(schema, dict):
+        relaxed = {}
+        for key, value in schema.items():
+            if key == "additionalProperties":
+                continue
+            relaxed[key] = _schema_without_additional_properties(value)
+        return relaxed
+    if isinstance(schema, list):
+        return [_schema_without_additional_properties(item) for item in schema]
+    return schema
+
+
+def _collect_unknown_config_keys(cfg, schema, prefix=""):
+    if not isinstance(cfg, dict) or not isinstance(schema, dict):
+        return []
+
+    properties = schema.get("properties", {})
+    unknown = []
+    for key, value in cfg.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if key not in properties:
+            unknown.append(path)
+            continue
+        unknown.extend(_collect_unknown_config_keys(value, properties[key], path))
+    return unknown
+
+
+def _format_validation_error(error):
+    path = ".".join(str(part) for part in error.absolute_path) or "<root>"
+    return f"- {path}: {error.message}"
+
+
+def validate_config_with_warnings(cfg, schema_path):
+    raw_schema = _load_yaml(schema_path)
+    unknown_keys = sorted(set(_collect_unknown_config_keys(cfg, raw_schema)))
+    if unknown_keys:
+        logger.warning(
+            f"Ignoring unsupported config key(s): {', '.join(unknown_keys)}"
+        )
+
+    relaxed_schema = _schema_without_additional_properties(raw_schema)
+    validator = Draft202012Validator(relaxed_schema)
+    errors = sorted(
+        validator.iter_errors(cfg),
+        key=lambda error: [str(part) for part in error.absolute_path],
+    )
+    if errors:
+        formatted = [_format_validation_error(error) for error in errors[:10]]
+        if len(errors) > 10:
+            formatted.append(f"... and {len(errors) - 10} more validation error(s)")
+        raise WorkflowError(
+            "Error validating config file.\n"
+            + "\n".join(formatted)
+        )
+
+
+CONFIG_SCHEMA_PATH = Path(workflow.basedir, "schemas/config.schema.yaml")
+v1_markers = detect_v1_config_markers(config)
+if v1_markers:
+    markers_text = ", ".join(v1_markers[:8])
+    if len(v1_markers) > 8:
+        markers_text += ", ..."
+    raise WorkflowError(
+        "Detected a v1-style snpArcher config. "
+        "This workflow expects the v2 config structure and will not auto-migrate v1 configs.\n"
+        f"Legacy keys detected: {markers_text}\n"
+        "See docs/v2-migration.md for the v1 -> v2 mapping."
+    )
+
+normalize_supported_config_aliases(config)
 set_defaults(config, DEFAULTS)
-validate(config, Path(workflow.basedir, "schemas/config.schema.yaml"))
+validate_config_with_warnings(config, CONFIG_SCHEMA_PATH)
 
 VARIANT_TOOL = config["variant_calling"]["tool"]
 USE_SENTIEON = VARIANT_TOOL == "sentieon"
@@ -132,7 +312,7 @@ def get_gatk_hard_filter_args():
 
 # --- Sample sheet loading and validation ---
 
-def _parse_mark_duplicates(values):
+def _parse_mark_duplicates(values, default):
     truthy = {"true", "t", "yes", "y", "1"}
     falsy = {"false", "f", "no", "n", "0"}
     parsed = []
@@ -140,7 +320,7 @@ def _parse_mark_duplicates(values):
 
     for idx, value in values.items():
         if pd.isna(value):
-            parsed.append(True)
+            parsed.append(default)
             continue
 
         if isinstance(value, bool):
@@ -174,6 +354,7 @@ def _parse_mark_duplicates(values):
 
 
 samples_df = pd.read_csv(config["samples"])
+global_mark_duplicates = bool(config["reads"]["mark_duplicates"])
 
 if "library_id" not in samples_df.columns:
     samples_df["library_id"] = samples_df["sample_id"]
@@ -185,9 +366,12 @@ else:
     )
 
 if "mark_duplicates" not in samples_df.columns:
-    samples_df["mark_duplicates"] = True
+    samples_df["mark_duplicates"] = global_mark_duplicates
 else:
-    samples_df["mark_duplicates"] = _parse_mark_duplicates(samples_df["mark_duplicates"])
+    samples_df["mark_duplicates"] = _parse_mark_duplicates(
+        samples_df["mark_duplicates"],
+        default=global_mark_duplicates,
+    )
 
 validate(samples_df, Path(workflow.basedir, "schemas/samples.schema.yaml"))
 
@@ -470,4 +654,3 @@ def require_metadata(module_name, required_columns=None):
             raise ValueError(
                 f"Module '{module_name}' requires column(s) {missing} in sample_metadata CSV."
             )
-

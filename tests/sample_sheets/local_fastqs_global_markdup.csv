@@ -1,0 +1,3 @@
+sample_id,input_type,input,library_id
+sample1,fastq,tests/data/fastq/sample1_1.fastq.gz;tests/data/fastq/sample1_2.fastq.gz,
+sample2,fastq,tests/data/fastq/sample2_1.fastq.gz;tests/data/fastq/sample2_2.fastq.gz,
