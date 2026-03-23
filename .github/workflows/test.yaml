@@ -91,7 +91,7 @@ jobs:
       - name: Run unit tests
         env:
           TMPDIR: ${{ runner.temp }}
-        run: pixi run -e dev unit-test
+        run: pixi run -e dev unit-test-parallel
 
   full-run-tests:
     name: full-run (${{ matrix.group }})
