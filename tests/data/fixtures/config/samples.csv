@@ -1,0 +1,6 @@
+sample_id,input_type,input,library_id,mark_duplicates
+sample0,fastq,data/reads/Pop1_sample_0_1.fq.gz;data/reads/Pop1_sample_0_2.fq.gz,,true
+sample1,fastq,data/reads/Pop1_sample_1_1.fq.gz;data/reads/Pop1_sample_1_2.fq.gz,,true
+sample2,fastq,data/reads/Pop1_sample_2_1.fq.gz;data/reads/Pop1_sample_2_2.fq.gz,,true
+sample3,fastq,data/reads/Pop1_sample_3_1.fq.gz;data/reads/Pop1_sample_3_2.fq.gz,,true
+sample4,fastq,data/reads/Pop1_sample_4_1.fq.gz;data/reads/Pop1_sample_4_2.fq.gz,,true

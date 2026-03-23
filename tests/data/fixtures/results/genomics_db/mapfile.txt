@@ -1,0 +1,5 @@
+sample0	results/gvcfs/sample0.g.vcf.gz
+sample1	results/gvcfs/sample1.g.vcf.gz
+sample2	results/gvcfs/sample2.g.vcf.gz
+sample3	results/gvcfs/sample3.g.vcf.gz
+sample4	results/gvcfs/sample4.g.vcf.gz

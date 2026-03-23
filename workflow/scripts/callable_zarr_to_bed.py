@@ -201,10 +201,51 @@ def write_bed_intervals(
             if current_start is not None:
                 handle.write(f"{name}\t{current_start}\t{current_end}\n")
 
+def register_packbits_codec() -> None:
+    """Register a zarrs-compatible PackBits codec for zarr v3.
+
+    The clam tool (via zarrs/Rust) writes boolean arrays with a 'packbits'
+    array-to-bytes codec. The Python zarr library doesn't have this codec
+    registered by default, so we provide a compatible implementation here.
+    """
+    try:
+        import numpy as np
+        from dataclasses import dataclass
+        from zarr.abc.codec import ArrayBytesCodec
+        from zarr.registry import register_codec
+
+        @dataclass(frozen=True)
+        class ZarrsPackBitsCodec(ArrayBytesCodec):
+            async def _decode_single(self, chunk_bytes, chunk_spec):
+                raw = np.frombuffer(chunk_bytes.as_numpy_array(), dtype=np.uint8)
+                total_elements = int(np.prod(chunk_spec.shape))
+                unpacked = np.unpackbits(raw)[:total_elements].astype(bool)
+                unpacked = unpacked.reshape(chunk_spec.shape)
+                return chunk_spec.prototype.nd_buffer.from_numpy_array(unpacked)
+
+            async def _encode_single(self, chunk_array, chunk_spec):
+                flat = chunk_array.as_numpy_array().astype(bool).ravel()
+                packed = np.packbits(flat)
+                return chunk_spec.prototype.buffer.from_bytes(packed.tobytes())
+
+            def compute_encoded_size(self, input_byte_length, chunk_spec):
+                total_elements = int(np.prod(chunk_spec.shape))
+                return (total_elements + 7) // 8
+
+            @classmethod
+            def from_dict(cls, data):
+                return cls()
+
+            def to_dict(self):
+                return {"name": "packbits"}
+
+        register_codec("packbits", ZarrsPackBitsCodec)
+    except ImportError:
+        pass
 
 def main() -> int:
     args = parse_args()
-
+    register_packbits_codec()
     try:
         validate_fraction(args.fraction)
         group = open_group(args.callable_zarr)
