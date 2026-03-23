@@ -32,6 +32,7 @@ ruff = "*"
 snakefmt = "*"
 pytest = "*"
 pytest-xdist = "*"
+pytest-split = "*"
 pytest-dependency = ">=0.5.1,<0.6"
 
 [tool.pixi.feature.docs.dependencies]

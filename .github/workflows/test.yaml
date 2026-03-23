@@ -70,9 +70,13 @@ jobs:
         run: pixi run -e dev setup-test-envs
 
   unit-tests:
-    name: unit tests
+    name: unit (${{ matrix.group }})
     needs: build-conda-envs
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
 
@@ -91,7 +95,10 @@ jobs:
       - name: Run unit tests
         env:
           TMPDIR: ${{ runner.temp }}
-        run: pixi run -e dev unit-test-parallel
+        run: |
+          pixi run -e dev pytest -v tests/unit_tests.py \
+            --conda-prefix $(pwd)/.snakemake/conda \
+            --splits 4 --group ${{ matrix.group }}
 
   full-run-tests:
     name: full-run (${{ matrix.group }})
@@ -126,6 +133,7 @@ jobs:
         run: |
           pixi run -e dev pytest -v tests/tests.py \
             --conda-prefix $(pwd)/.snakemake/conda \
+            -m full_run \
             -k "${{ matrix.filter }}"
 
       - name: Upload QC dashboard
