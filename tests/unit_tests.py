@@ -342,3 +342,37 @@ def test_mosdepth(request):
         result.assert_output_exists(
             "results/callable_sites/depths/sample0.mosdepth.summary.txt",
         )
+@pytest.mark.unit
+def test_coverage_bed(request):
+    """Coverage BED generation from callable loci zarr."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals",
+            "results/callable_sites/callable_loci.zarr",
+        )
+
+        result = smk.run(
+            target="results/callable_sites/coverage.bed",
+            samples=SAMPLES,
+        )
+        result.print_log()
+        result.assert_success()
+        result.assert_output_exists(
+            "results/callable_sites/coverage.bed",
+        )
+
+        # Verify BED file is non-empty and well-formed
+        bed_path = Path(tmpdir) / "results" / "callable_sites" / "coverage.bed"
+        lines = bed_path.read_text().strip().splitlines()
+        assert len(lines) > 0, "coverage.bed should not be empty"
+        for line in lines:
+            fields = line.split("\t")
+            assert len(fields) == 3, f"BED line should have 3 fields: {line}"
+            assert fields[0] == "chr2l", f"Expected contig chr2l: {line}"
+            assert int(fields[1]) < int(fields[2]), f"Start should be < end: {line}"
