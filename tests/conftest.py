@@ -42,6 +42,12 @@ class SnakemakeRunner:
         else:
             self.conda_prefix = CONDA_PREFIX
 
+        # Symlink test data so sample sheets with relative paths resolve
+        test_data_link = self.workdir / "tests" / "data"
+        test_data_link.parent.mkdir(parents=True, exist_ok=True)
+        if not test_data_link.exists():
+            test_data_link.symlink_to(TEST_DATA_DIR.resolve())
+
     def link_fixtures(self, *paths):
         """Symlink specific fixture paths into the workdir.
 
