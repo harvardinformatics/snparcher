@@ -55,11 +55,11 @@ format = "ruff format workflow/ && snakefmt workflow/"
 
 # Setup conda envs for unit tests
 setup-test-envs = """snakemake -s workflow/Snakefile \
-    --configfile $(pwd)/tests/data/fixtures/config/config.yaml \
-    --config samples=$(pwd)/tests/data/fixtures/config/samples.csv \
+    --configfile config/config.yaml \
+    --config samples=config/samples.csv \
     --use-conda --conda-prefix $(pwd)/.snakemake/conda \
-    --conda-create-envs-only --cores 1"""
-
+    --conda-create-envs-only --cores 1 \
+    --directory $(pwd)/tests/data/fixtures"""
 # Integration tests
 test = "pytest -v tests/tests.py"
 test-dry-run = "pytest -v tests/tests.py --dry-run-only"
