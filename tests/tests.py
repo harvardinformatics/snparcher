@@ -55,14 +55,26 @@ def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
     out_path.write_text(text)
     return out_path
 
-def write_callable_sites_config(base_config, out_dir, *, coverage_enabled, mappability_enabled):
+def write_callable_sites_config(
+    base_config,
+    out_dir,
+    *,
+    generate_bed_file=True,
+    coverage_enabled,
+    mappability_enabled,
+    fraction="1.0",
+    min_coverage="auto",
+    max_coverage="auto",
+):
     """Write a config copy with callable-sites toggles overridden."""
     text = Path(base_config).read_text()
     new_block = f"""callable_sites:
-  generate_bed_file: false
+  generate_bed_file: {"true" if generate_bed_file else "false"}
   coverage:
     enabled: {"true" if coverage_enabled else "false"}
-    stdev: 2
+    fraction: {fraction}
+    min_coverage: {min_coverage}
+    max_coverage: {max_coverage}
     merge_distance: 100
   mappability:
     enabled: {"true" if mappability_enabled else "false"}
@@ -72,10 +84,12 @@ def write_callable_sites_config(base_config, out_dir, *, coverage_enabled, mappa
 """
     pattern = re.compile(
         r"callable_sites:\n"
-        r"  generate_bed_file: false\n"
+        r"  generate_bed_file: (?:true|false)\n"
         r"  coverage:\n"
         r"    enabled: (?:true|false)\n"
-        r"    stdev: 2\n"
+        r"    fraction: .*\n"
+        r"    min_coverage: .*\n"
+        r"    max_coverage: .*\n"
         r"    merge_distance: 100\n"
         r"  mappability:\n"
         r"    enabled: (?:true|false)\n"
@@ -311,20 +325,27 @@ def test_multirow_multi_library_dry_run(request):
 
 @pytest.mark.dry_run
 @pytest.mark.parametrize(
-    ("coverage_enabled", "mappability_enabled"),
+    ("generate_bed_file", "coverage_enabled", "mappability_enabled"),
     [
-        (True, True),
-        (False, True),
-        (True, False),
+        (True, True, True),
+        (True, False, True),
+        (True, True, False),
+        (False, True, True),
     ],
 )
-def test_callable_sites_target_dry_run(request, coverage_enabled, mappability_enabled):
+def test_callable_sites_target_dry_run(
+    request,
+    generate_bed_file,
+    coverage_enabled,
+    mappability_enabled,
+):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
         cfg = write_callable_sites_config(
             get_config_file(),
             tmpdir,
+            generate_bed_file=generate_bed_file,
             coverage_enabled=coverage_enabled,
             mappability_enabled=mappability_enabled,
         )
@@ -337,8 +358,120 @@ def test_callable_sites_target_dry_run(request, coverage_enabled, mappability_en
         result.assert_success()
 
         output = result.stdout + result.stderr
+        assert ("callable_coverage_thresholds" in output) == coverage_enabled
         assert ("clam_loci" in output) == coverage_enabled
+        assert ("coverage_bed" in output) == (generate_bed_file and coverage_enabled)
         assert ("mappability_bed" in output) == mappability_enabled
+        assert ("callable_sites_bed" in output) == (
+            generate_bed_file and (coverage_enabled or mappability_enabled)
+        )
+
+
+@pytest.mark.dry_run
+def test_callable_sites_disabled_sources_warn_and_skip_final_bed(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            generate_bed_file=True,
+            coverage_enabled=False,
+            mappability_enabled=False,
+        )
+
+        result = smk.dry_run(
+            target="callable_sites",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "Skipping results/callable_sites/callable_sites.bed generation" in output
+        assert "callable_sites_bed" not in output
+        assert "clam_loci" not in output
+        assert "mappability_bed" not in output
+
+
+@pytest.mark.dry_run
+def test_callable_sites_numeric_thresholds_validate(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            generate_bed_file=True,
+            coverage_enabled=True,
+            mappability_enabled=False,
+            fraction="0.75",
+            min_coverage="5",
+            max_coverage="40",
+        )
+
+        result = smk.dry_run(
+            target="callable_sites",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "coverage_bed" in output
+
+
+@pytest.mark.dry_run
+def test_callable_sites_invalid_fraction_fails_validation(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            generate_bed_file=True,
+            coverage_enabled=True,
+            mappability_enabled=False,
+            fraction="1.5",
+        )
+
+        result = smk.dry_run(
+            target="callable_sites",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "callable_sites.coverage.fraction" in output
+
+
+@pytest.mark.dry_run
+def test_clam_loci_uses_per_sample_and_thresholds(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            generate_bed_file=True,
+            coverage_enabled=True,
+            mappability_enabled=False,
+            min_coverage="5",
+            max_coverage="40",
+        )
+
+        result = smk.dry_run(
+            target="results/callable_sites/callable_loci.zarr",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "--per-sample" in output
+        assert '--min-coverage 5' in output or "min_coverage\t5" in output
+        assert '--max-coverage 40' in output or "max_coverage\t40" in output
 
 
 @pytest.mark.dry_run
@@ -467,7 +600,7 @@ def test_full_pipeline(request):
         result.assert_output_exists(
             "results/vcfs/raw.vcf.gz",
             "results/qc_metrics/qc_report.tsv",
-            "results/callable_sites/mappability.bed",
+            "results/callable_sites/callable_sites.bed",
         )
 
 
@@ -789,26 +922,26 @@ def get_postprocess_config():
 
 @pytest.mark.dry_run
 def test_postprocess_dry_run(request):
-    """Dry run postprocess basic_filter target (no callable_sites.bed dependency)."""
+    """Dry run postprocess target with callable-sites BED generation enabled."""
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
 
-        # Target filtered.vcf.gz directly — this exercises filter_individuals
-        # and basic_filter without needing callable_sites.bed (which requires
-        # the zarr→BED conversion rule not yet added).
         result = smk.dry_run(
-            target="results/postprocess/filtered.vcf.gz",
+            target="results/postprocess/clean_snps.vcf.gz",
             configfile=get_postprocess_config(),
             samples=get_samples_file(),
         )
         result.assert_success()
 
         output = result.stdout + result.stderr
+        assert "callable_sites_bed" in output
         assert "postprocess_filter_individuals" in output, \
             "Expected postprocess_filter_individuals rule in DAG"
         assert "postprocess_basic_filter" in output, \
             "Expected postprocess_basic_filter rule in DAG"
+        assert "postprocess_update_bed" in output, \
+            "Expected postprocess_update_bed rule in DAG"
 
 
 @pytest.mark.dry_run
@@ -838,7 +971,7 @@ def test_postprocess_with_metadata_dry_run(request):
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
 
         result = smk.dry_run(
-            target="results/postprocess/filtered.vcf.gz",
+            target="results/postprocess/clean_snps.vcf.gz",
             configfile=get_postprocess_config(),
             samples=get_samples_file(),
             config_overrides={
@@ -848,7 +981,33 @@ def test_postprocess_with_metadata_dry_run(request):
         result.assert_success()
 
         output = result.stdout + result.stderr
+        assert "callable_sites_bed" in output
         assert "postprocess_filter_individuals" in output
+
+
+@pytest.mark.dry_run
+def test_postprocess_warns_and_disables_without_callable_bed(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_postprocess_config(),
+            tmpdir,
+            generate_bed_file=True,
+            coverage_enabled=False,
+            mappability_enabled=False,
+        )
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "Disabling postprocess" in output
+        assert "postprocess_" not in output
 
 
 # --- QC module tests ---

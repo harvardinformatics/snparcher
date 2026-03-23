@@ -83,7 +83,9 @@ DEFAULTS = {
         "generate_bed_file": True,
         "coverage": {
             "enabled": True,
-            "stdev": 2,
+            "fraction": 1.0,
+            "min_coverage": "auto",
+            "max_coverage": "auto",
             "merge_distance": 100,
         },
         "mappability": {
@@ -477,6 +479,49 @@ if config["callable_sites"]["coverage"]["enabled"] and not SAMPLES_WITH_BAM:
         "callable_sites.coverage.enabled requires at least one BAM-backed sample. "
         "Disable callable_sites.coverage.enabled for gVCF-only workflows."
     )
+
+CALLABLE_COVERAGE_ENABLED = bool(config["callable_sites"]["coverage"]["enabled"])
+CALLABLE_MAPPABILITY_ENABLED = bool(config["callable_sites"]["mappability"]["enabled"])
+CALLABLE_GENERATE_BED_FILE = bool(config["callable_sites"]["generate_bed_file"])
+
+if CALLABLE_GENERATE_BED_FILE and not (
+    CALLABLE_COVERAGE_ENABLED or CALLABLE_MAPPABILITY_ENABLED
+):
+    logger.warning(
+        "callable_sites.generate_bed_file is true, but both "
+        "callable_sites.coverage.enabled and callable_sites.mappability.enabled are false. "
+        "Skipping results/callable_sites/callable_sites.bed generation."
+    )
+    CALLABLE_GENERATE_BED_FILE = False
+
+CALLABLE_FINAL_BED_ENABLED = CALLABLE_GENERATE_BED_FILE and (
+    CALLABLE_COVERAGE_ENABLED or CALLABLE_MAPPABILITY_ENABLED
+)
+
+POSTPROCESS_ENABLED = bool(config["modules"]["postprocess"]["enabled"])
+if POSTPROCESS_ENABLED and not CALLABLE_FINAL_BED_ENABLED:
+    logger.warning(
+        "modules.postprocess.enabled is true, but results/callable_sites/callable_sites.bed "
+        "will not be generated. Disabling postprocess."
+    )
+    POSTPROCESS_ENABLED = False
+
+CALLABLE_TARGETS = (
+    ["results/callable_sites/callable_sites.bed"]
+    if CALLABLE_FINAL_BED_ENABLED
+    else [
+        *(
+            ["results/callable_sites/callable_loci.zarr"]
+            if CALLABLE_COVERAGE_ENABLED
+            else []
+        ),
+        *(
+            ["results/callable_sites/mappability.bed"]
+            if CALLABLE_MAPPABILITY_ENABLED
+            else []
+        ),
+    ]
+)
 
 
 # --- Helper functions ---

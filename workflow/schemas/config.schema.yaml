@@ -169,10 +169,25 @@ properties:
           enabled:
             type: boolean
             default: true
-          stdev:
+          fraction:
             type: number
             minimum: 0
-            default: 2
+            maximum: 1
+            default: 1.0
+          min_coverage:
+            anyOf:
+              - type: number
+                minimum: 0
+              - type: string
+                enum: ["auto"]
+            default: "auto"
+          max_coverage:
+            anyOf:
+              - type: number
+                minimum: 0
+              - type: string
+                enum: ["auto"]
+            default: "auto"
           merge_distance:
             type: integer
             minimum: 0
