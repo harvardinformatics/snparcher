@@ -108,10 +108,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - group: core
+          - group: core-1
             filter: "not metadata and not postprocess and not qc and not mk"
+            split_group: 1
+          - group: core-2
+            filter: "not metadata and not postprocess and not qc and not mk"
+            split_group: 2
+          - group: core-3
+            filter: "not metadata and not postprocess and not qc and not mk"
+            split_group: 3
           - group: qc
             filter: "qc"
+            split_group: 0
     steps:
       - uses: actions/checkout@v4
 
@@ -131,10 +139,15 @@ jobs:
         env:
           TMPDIR: ${{ runner.temp }}
         run: |
+          SPLIT_ARGS=""
+          if [ "${{ matrix.split_group }}" != "0" ]; then
+            SPLIT_ARGS="--splits 3 --group ${{ matrix.split_group }}"
+          fi
           pixi run -e dev pytest -v tests/tests.py \
             --conda-prefix $(pwd)/.snakemake/conda \
             -m full_run \
-            -k "${{ matrix.filter }}"
+            -k "${{ matrix.filter }}" \
+            $SPLIT_ARGS
 
       - name: Upload QC dashboard
         if: matrix.group == 'qc'
