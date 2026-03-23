@@ -1,6 +1,0 @@
-sample	reads_before_filtering	reads_after_filtering	fraction_passed	total_reads	percent_mapped	num_duplicates	percent_duplicates	percent_properly_paired	mean_depth	covered_bases
-sample0	9386	9386	1.0000	9386	100.00	0	0.00	100.00	14.06	99925
-sample1	6756	6756	1.0000	6756	100.00	2	0.03	100.00	10.12	99961
-sample2	7322	7322	1.0000	7322	100.00	0	0.00	100.00	10.97	99934
-sample3	1268	1268	1.0000	1268	100.00	0	0.00	100.00	1.90	83485
-sample4	9624	9624	1.0000	9624	100.00	0	0.00	100.00	14.42	99972
