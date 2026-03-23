@@ -19,8 +19,8 @@ on:
       - ".github/workflows/*"
 
 jobs:
-  tests:
-    name: tests (${{ matrix.group }})
+  dry-run-tests:
+    name: dry-run (${{ matrix.group }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -42,12 +42,91 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
           cache: true
-          environments: dev-tools
+          environments: dev
 
-      - name: Run tests
+      - name: Run dry-run tests
+        run: pixi run -e dev pytest -v tests/tests.py --dry-run-only -k "${{ matrix.filter }}"
+
+  build-conda-envs:
+    name: build conda envs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.9.3
+        with:
+          cache: true
+          environments: dev
+
+      - name: Cache conda envs
+        id: conda-cache
+        uses: actions/cache@v4
+        with:
+          path: .snakemake/conda
+          key: conda-envs-${{ hashFiles('workflow/envs/*.yaml') }}
+
+      - name: Create conda envs
+        if: steps.conda-cache.outputs.cache-hit != 'true'
+        run: pixi run -e dev setup-test-envs
+
+  unit-tests:
+    name: unit tests
+    needs: build-conda-envs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.9.3
+        with:
+          cache: true
+          environments: dev
+
+      - name: Restore conda envs
+        uses: actions/cache/restore@v4
+        with:
+          path: .snakemake/conda
+          key: conda-envs-${{ hashFiles('workflow/envs/*.yaml') }}
+          fail-on-cache-miss: true
+
+      - name: Run unit tests
         env:
           TMPDIR: ${{ runner.temp }}
-        run: pixi run -e dev-tools pytest -v tests/tests.py -k "${{ matrix.filter }}"
+        run: pixi run -e dev unit-test
+
+  full-run-tests:
+    name: full-run (${{ matrix.group }})
+    needs: build-conda-envs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: core
+            filter: "not metadata and not postprocess and not qc and not mk"
+          - group: qc
+            filter: "qc"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.9.3
+        with:
+          cache: true
+          environments: dev
+
+      - name: Restore conda envs
+        uses: actions/cache/restore@v4
+        with:
+          path: .snakemake/conda
+          key: conda-envs-${{ hashFiles('workflow/envs/*.yaml') }}
+          fail-on-cache-miss: true
+
+      - name: Run full tests
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          pixi run -e dev pytest -v tests/tests.py \
+            --conda-prefix $(pwd)/.snakemake/conda \
+            -k "${{ matrix.filter }}"
 
       - name: Upload QC dashboard
         if: matrix.group == 'qc'

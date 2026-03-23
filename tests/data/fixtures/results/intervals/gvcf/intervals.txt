@@ -1,0 +1,1 @@
+results/intervals/gvcf/0000-scattered.interval_list

@@ -1,0 +1,31 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "clam_metadata": {
+      "contigs": [
+        {
+          "name": "chr2l",
+          "length": 100001
+        }
+      ],
+      "column_names": [
+        "default"
+      ],
+      "chunk_size": 1000000,
+      "callable_loci_type": "population_counts",
+      "populations": [
+        {
+          "name": "default",
+          "samples": [
+            "sample0",
+            "sample1",
+            "sample2",
+            "sample3",
+            "sample4"
+          ]
+        }
+      ]
+    }
+  }
+}

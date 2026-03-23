@@ -1,0 +1,11 @@
+{
+  "sample": "sample1",
+  "total_reads": 6756,
+  "num_mapped": 6756,
+  "percent_mapped": 100.0,
+  "num_duplicates": 2,
+  "percent_duplicates": 0.029603315571343988,
+  "percent_properly_paired": 100.0,
+  "mean_depth": 10.1202,
+  "covered_bases": 99961
+}
