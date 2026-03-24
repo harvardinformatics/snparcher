@@ -1,7 +1,5 @@
 def deepvariant_input(wildcards):
-    input_type = get_sample_input_type(wildcards.sample)
-
-    if input_type == "gvcf":
+    if sample_has_input_type(wildcards.sample, "gvcf"):
         raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call deepvariant")
 
     bam = get_final_bam(wildcards.sample)

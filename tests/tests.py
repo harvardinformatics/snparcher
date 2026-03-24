@@ -324,6 +324,28 @@ def test_multirow_multi_library_dry_run(request):
 
 
 @pytest.mark.dry_run
+def test_mixed_srr_and_fastq_same_sample_dry_run(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="all",
+            configfile=get_config_file(),
+            samples=SAMPLES_DIR / "local_fastqs_and_srr_same_library.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "unsupported mixed input_type values" not in output
+        assert "download_sra" in output
+        assert "merge_library_bams" in output
+        assert "library=libA" in output
+        assert "input_unit=u1" in output
+        assert "input_unit=u2" in output
+
+
+@pytest.mark.dry_run
 @pytest.mark.parametrize(
     ("generate_bed_file", "coverage_enabled", "mappability_enabled"),
     [
