@@ -1,6 +1,9 @@
 # OS files
 .DS_Store
-
+example/results
+example/logs
+example/.snakemake
+example/benchmarks
 # Editor settings
 .vscode/
 
