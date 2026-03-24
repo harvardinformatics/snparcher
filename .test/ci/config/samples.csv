@@ -1,6 +1,0 @@
-sample_id,input_type,input,library_id
-test1,srr,SRR22893406,test1lib
-test2,srr,SRR22893439,test2lib
-test3,srr,SRR22893395,test3lib
-test4,srr,SRR22893419,test4lib
-test5,srr,SRR22893436,test5lib
