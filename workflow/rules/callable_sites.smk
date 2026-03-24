@@ -1,3 +1,15 @@
+from pathlib import Path
+
+
+def get_callable_source_beds(_wildcards):
+    beds = []
+    if CALLABLE_COVERAGE_ENABLED:
+        beds.append("results/callable_sites/coverage.bed")
+    if CALLABLE_MAPPABILITY_ENABLED:
+        beds.append("results/callable_sites/mappability.bed")
+    return beds
+
+
 rule mosdepth:
     """Compute per-base coverage with mosdepth."""
     input:
@@ -47,10 +59,41 @@ rule clam_collect:
         """
 
 
+rule callable_coverage_thresholds:
+    """Calculate cohort-wide coverage thresholds for callable loci."""
+    input:
+        summaries=expand(
+            "results/callable_sites/depths/{sample}.mosdepth.summary.txt",
+            sample=SAMPLES_WITH_BAM,
+        ),
+    output:
+        tsv="results/callable_sites/coverage_thresholds.tsv",
+    params:
+        min_coverage=config["callable_sites"]["coverage"]["min_coverage"],
+        max_coverage=config["callable_sites"]["coverage"]["max_coverage"],
+        script=Path(workflow.basedir) / "scripts" / "callable_coverage_thresholds.py",
+    conda:
+        "../envs/callable_sites.yaml"
+    benchmark:
+        "benchmarks/callable_coverage_thresholds.txt"
+    log:
+        "logs/callable_coverage_thresholds.txt"
+    shell:
+        """
+        python {params.script} \
+            --min-coverage {params.min_coverage} \
+            --max-coverage {params.max_coverage} \
+            --output {output.tsv} \
+            {input.summaries} \
+            &> {log}
+        """
+
+
 rule clam_loci:
     """Identify callable loci based on coverage."""
     input:
         zarr="results/callable_sites/depths.zarr",
+        thresholds="results/callable_sites/coverage_thresholds.tsv",
     output:
         zarr=directory("results/callable_sites/callable_loci.zarr"),
     threads: 8
@@ -62,12 +105,42 @@ rule clam_loci:
         "logs/clam_loci.txt"
     shell:
         """
+        min_depth=$(awk -F '\t' 'NR==2 {{print $2}}' {input.thresholds})
+        max_depth=$(awk -F '\t' 'NR==2 {{print $3}}' {input.thresholds})
         clam loci \
             -o {output.zarr} \
             -t {threads} \
+            --per-sample \
+            -m "${{min_depth}}" \
+            -M "${{max_depth}}" \
             {input.zarr} \
             &> {log}
         """
+
+
+rule coverage_bed:
+    """Create BED of callable regions based on coverage."""
+    input:
+        zarr="results/callable_sites/callable_loci.zarr",
+    output:
+        bed="results/callable_sites/coverage.bed",
+    params:
+        fraction=config["callable_sites"]["coverage"]["fraction"],
+        merge_distance=config["callable_sites"]["coverage"]["merge_distance"],
+        script=Path(workflow.basedir) / "scripts" / "callable_zarr_to_bed.py",
+    conda:
+        "../envs/callable_sites.yaml"
+    benchmark:
+        "benchmarks/coverage_bed.txt"
+    log:
+        "logs/coverage_bed.txt"
+    shell:
+        """
+        python {params.script} {input.zarr} /dev/stdout --fraction {params.fraction} 2> {log} \
+            | bedtools sort -i - 2>> {log} \
+            | bedtools merge -d {params.merge_distance} -i - > {output.bed} 2>> {log}
+        """
+
 
 rule genmap_index:
     """Create genmap index for mappability calculation."""
@@ -140,4 +213,24 @@ rule mappability_bed:
         awk -v min={params.min_score} '$4 >= min {{print $1"\\t"$2"\\t"$3}}' {input.bg} 2> {log} \
             | bedtools sort -i - 2>> {log} \
             | bedtools merge -d {params.merge_distance} -i - > {output.bed} 2>> {log}
+        """
+
+
+rule callable_sites_bed:
+    """Combine enabled callable site sources into a final callable BED."""
+    input:
+        beds=get_callable_source_beds,
+    output:
+        bed="results/callable_sites/callable_sites.bed",
+    conda:
+        "../envs/bedtools.yaml"
+    benchmark:
+        "benchmarks/callable_sites_bed.txt"
+    log:
+        "logs/callable_sites_bed.txt"
+    shell:
+        """
+        cat {input.beds} 2> {log} \
+            | bedtools sort -i - 2>> {log} \
+            | bedtools merge -i - > {output.bed} 2>> {log}
         """

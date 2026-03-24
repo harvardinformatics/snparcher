@@ -30,7 +30,9 @@ conda = "*"
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
 snakefmt = "*"
-pytest="*"
+pytest = "*"
+pytest-xdist = "*"
+pytest-split = "*"
 pytest-dependency = ">=0.5.1,<0.6"
 
 [tool.pixi.feature.docs.dependencies]
@@ -41,17 +43,25 @@ mkdocs-material = "*"
 default = { features = [], solve-group = "default" }
 dev = { features = ["dev"], solve-group = "default" }
 docs = { features = ["docs"], solve-group = "default" }
-tools = { features = ["tools"], solve-group = "tools" }
-dev-tools = { features = ["dev", "tools"], solve-group = "tools" }
 
-# Tasks for default environment (workflow operations)
+# ============ TASKS ============
+
 [tool.pixi.tasks]
 lint-snakemake = "snakemake --lint"
 
 [tool.pixi.feature.dev.tasks]
+# Linting
 lint = "ruff check workflow/"
 format = "ruff format workflow/ && snakefmt workflow/"
-check = { depends-on = ["lint", "lint-snakemake"] }
+
+# Setup conda envs for unit tests
+setup-test-envs = """snakemake -s workflow/Snakefile \
+    --configfile config/config.yaml \
+    --config samples=config/samples.csv \
+    --use-conda --conda-prefix $(pwd)/.snakemake/conda \
+    --conda-create-envs-only --cores 1 \
+    --directory $(pwd)/tests/data/fixtures"""
+# Integration tests
 test = "pytest -v tests/tests.py"
 test-dry-run = "pytest -v tests/tests.py --dry-run-only"
 test-core = 'pytest -v tests/tests.py -k "not metadata and not postprocess and not qc and not mk"'
@@ -59,33 +69,18 @@ test-metadata = 'pytest -v tests/tests.py -k "metadata and not postprocess and n
 test-postprocess = 'pytest -v tests/tests.py -k "postprocess"'
 test-qc = 'pytest -v tests/tests.py -k "qc"'
 test-mk = 'pytest -v tests/tests.py -k "mk"'
+
+# Unit tests (stage tests)
+unit-test = "pytest -v tests/unit_tests.py --conda-prefix $(pwd)/.snakemake/conda"
+unit-test-parallel = "pytest -v tests/unit_tests.py -n auto --conda-prefix $(pwd)/.snakemake/conda"
+unit-test-debug = "pytest -v tests/unit_tests.py -s --conda-prefix $(pwd)/.snakemake/conda"
+
+# Dry run
 dry-run = "snakemake -s workflow/Snakefile --configfile tests/configs/local_genome.yaml --config samples=tests/sample_sheets/local_fastqs_no_dedup.csv -n -p all"
 
-# Tasks for docs environment
 [tool.pixi.feature.docs.tasks]
 docs-serve = "mkdocs serve"
 docs-build = "mkdocs build"
-
-[tool.pixi.feature.tools.dependencies]
-samtools = "*"
-bwa = "*"
-ncbi-datasets-cli = "*"
-htslib = "*"
-gatk4 = "*"
-picard = "*"
-bcftools = "*"
-fastp = "*"
-sra-tools = "*"
-unzip = "*"
-curl = "*"
-ffq = "*"
-sambamba = "*"
-mosdepth = "==0.3.3"
-genmap = "*"
-bedtools = "*"
-
-[tool.pixi.feature.tools.target.linux-64.dependencies]
-clam = ">=1.1.0"
 
 # ============ RUFF CONFIGURATION ============
 

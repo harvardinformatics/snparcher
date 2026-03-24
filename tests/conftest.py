@@ -1,5 +1,3 @@
-# tests/conftest.py
-
 import os
 import subprocess
 from pathlib import Path
@@ -7,58 +5,79 @@ from pathlib import Path
 import pytest
 
 WORKFLOW_DIR = Path(__file__).parent.parent / "workflow"
-CONDA_PREFIX = Path(__file__).parent / ".conda-envs"
 TEST_DATA_DIR = Path(__file__).parent / "data"
+FIXTURES_DIR = (TEST_DATA_DIR / "fixtures").resolve()
+# Default conda prefix — can be overridden via --conda-prefix
+CONDA_PREFIX = (Path(__file__).parent.parent / ".snakemake" / "conda").resolve()
 
 
 def pytest_addoption(parser):
-    parser.addoption(
-        "--no-conda",
-        action="store_true",
-        default=False,
-        help="Run without --use-conda (use system/pixi environment)",
-    )
-    parser.addoption(
-        "--dry-run-only",
-        action="store_true",
-        default=False,
-        help="Only run dry-run tests",
-    )
+    parser.addoption("--no-conda", action="store_true", default=False)
+    parser.addoption("--dry-run-only", action="store_true", default=False)
+    parser.addoption("--conda-prefix", action="store", default=None)
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "dry_run: mark test as dry-run only")
     config.addinivalue_line("markers", "full_run: mark test as requiring full execution")
+    config.addinivalue_line("markers", "unit: mark test as a unit test using fixtures")
 
 
 def pytest_collection_modifyitems(config, items):
     if config.getoption("--dry-run-only"):
-        skip_full = pytest.mark.skip(reason="--dry-run-only specified")
+        skip = pytest.mark.skip(reason="--dry-run-only specified")
         for item in items:
-            if "full_run" in [m.name for m in item.iter_markers()]:
-                item.add_marker(skip_full)
+            markers = [m.name for m in item.iter_markers()]
+            if "full_run" in markers or "unit" in markers:
+                item.add_marker(skip)
 
 
 class SnakemakeRunner:
-    """Simple runner for testing snakemake workflows."""
-
-    def __init__(self, workdir, use_conda=True, snakefile=None):
+    def __init__(self, workdir, use_conda=True, snakefile=None, conda_prefix=None):
         self.snakefile = Path(snakefile) if snakefile else WORKFLOW_DIR / "Snakefile"
         self.workdir = Path(workdir)
         self.use_conda = use_conda
-        self.conda_prefix = CONDA_PREFIX
+        if conda_prefix:
+            self.conda_prefix = Path(conda_prefix).resolve()
+        else:
+            self.conda_prefix = CONDA_PREFIX
 
-        # Symlink test data into workdir
+        # Symlink test data so sample sheets with relative paths resolve
         test_data_link = self.workdir / "tests" / "data"
         test_data_link.parent.mkdir(parents=True, exist_ok=True)
         if not test_data_link.exists():
-            test_data_link.symlink_to(TEST_DATA_DIR)
+            test_data_link.symlink_to(TEST_DATA_DIR.resolve())
 
-    def run(self, target, configfile, samples=None, extra_args=None, config_overrides=None):
+    def link_fixtures(self, *paths):
+        """Symlink specific fixture paths into the workdir.
+
+        Each path is relative to FIXTURES_DIR. Examples:
+            "config"                -> workdir/config
+            "data"                  -> workdir/data
+            "results/reference"     -> workdir/results/reference
+            "results/bams/markdup"  -> workdir/results/bams/markdup
+        """
+        for rel_path in paths:
+            src = FIXTURES_DIR / rel_path
+            if not src.exists():
+                raise FileNotFoundError(f"Fixture not found: {src}")
+
+            dest = self.workdir / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+            if dest.exists() or dest.is_symlink():
+                continue
+
+            dest.symlink_to(src.resolve())
+
+    def run(self, target, configfile=None, samples=None, extra_args=None, config_overrides=None):
         if isinstance(target, str):
             targets = [target]
         else:
             targets = list(target)
+
+        if configfile is None:
+            configfile = FIXTURES_DIR / "config" / "config.yaml"
 
         runtime_cache = self.workdir / ".snakemake-runtime-cache"
         runtime_cache.mkdir(parents=True, exist_ok=True)
@@ -67,9 +86,9 @@ class SnakemakeRunner:
             "snakemake",
             "--show-failed-logs",
             "-s",
-            str(self.snakefile),
+            str(self.snakefile.resolve()),
             "--configfile",
-            str(configfile),
+            str(Path(configfile).resolve()),
             "--cores",
             "1",
             "--directory",
@@ -80,10 +99,9 @@ class SnakemakeRunner:
             *targets,
         ]
 
-        # Build a single --config with all overrides
         config_pairs = []
         if samples:
-            config_pairs.append(f"samples={samples}")
+            config_pairs.append(f"samples={Path(samples).resolve()}")
         if config_overrides:
             for key, value in config_overrides.items():
                 config_pairs.append(f"{key}={value}")
@@ -93,11 +111,6 @@ class SnakemakeRunner:
         if self.use_conda:
             cmd.extend(["--use-conda", "--conda-prefix", str(self.conda_prefix)])
 
-        # Optional shell override for test runs (e.g. /bin/zsh).
-        shell_exec = os.environ.get("SNPARCHER_TEST_SHELL_EXECUTABLE")
-        if shell_exec:
-            cmd.extend(["--default-resources", f"shell_exec={shell_exec}"])
-
         if extra_args:
             cmd.extend(extra_args)
 
@@ -106,11 +119,10 @@ class SnakemakeRunner:
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         return SnakemakeResult(result, self.workdir)
 
-    def dry_run(self, target, configfile, samples=None, extra_args=None, config_overrides=None):
-        all_args = ["--dry-run"]
-        if extra_args:
-            all_args.extend(extra_args)
-        return self.run(target, configfile, samples, extra_args=all_args, config_overrides=config_overrides)
+    def dry_run(self, target, **kwargs):
+        extra = kwargs.pop("extra_args", None) or []
+        extra.append("--dry-run")
+        return self.run(target, extra_args=extra, **kwargs)
 
 
 class SnakemakeResult:
@@ -132,13 +144,8 @@ class SnakemakeResult:
             full_path = self.workdir / path
             assert full_path.exists(), f"Expected output not found: {path}"
 
-
-@pytest.fixture
-def temp_workdir(tmp_path):
-    return tmp_path
-
-
-@pytest.fixture
-def runner(temp_workdir, request):
-    no_conda = request.config.getoption("--no-conda")
-    return SnakemakeRunner(temp_workdir, use_conda=not no_conda)
+    def print_log(self):
+        if self.stdout:
+            print(f"\n--- stdout ---\n{self.stdout}")
+        if self.stderr:
+            print(f"\n--- stderr ---\n{self.stderr}")

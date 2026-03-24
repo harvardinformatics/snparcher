@@ -41,7 +41,9 @@ callable_sites:
   generate_bed_file: True
   coverage:
     enabled: true
-    stdev: 2
+    fraction: 1.0
+    min_coverage: auto
+    max_coverage: auto
     merge_distance: 100
   mappability:
     enabled: true

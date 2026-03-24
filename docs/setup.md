@@ -108,6 +108,7 @@ The following options in `config/config.yaml` must be set before running snpArch
 | `variant_calling.sentieon.license` | Sentieon license value/path (used when tool is `sentieon`). | `str` | `False` | `""` |
 | `intervals.enabled` | Use split-by-intervals calling workflow. | `bool` | `False` | `True` |
 | `callable_sites.coverage.enabled` | Enable coverage-based callable region filtering. | `bool` | `False` | `True` |
+| `callable_sites.generate_bed_file` | Generate `results/callable_sites/callable_sites.bed` from enabled callable-site sources. | `bool` | `False` | `True` |
 
 ### Other options
 The following options can be adjusted based on your needs and your dataset.
@@ -144,6 +145,7 @@ Parabricks HaplotypeCaller also follows `variant_calling.expected_coverage` to s
 #### Callable Sites Options
 | Option | Description | Type |
 | ---- | -------------| ------ |
+|`callable_sites.generate_bed_file`| Generate a final callable-sites BED. If both callable sources are enabled, the final BED is the union of both inputs followed by sorting and merging. | `bool`|
 |`callable_sites.mappability.min_score`| Remove regions with mappability score lower than this threshold. | `float`|
 |`callable_sites.mappability.kmer`| Kmer size used to compute mappability. | `int`|
 |`callable_sites.mappability.merge_distance`| Merge passing mappability regions within this many base pairs. | `int`|
@@ -154,8 +156,14 @@ If `callable_sites.coverage.enabled` is set to `True`, then these options contro
 
 | Option | Description | Type |
 | ---- | -------------| ------ |
-|`callable_sites.coverage.stdev`| Number of standard deviations used by coverage-based callable locus detection. | `float`|
+|`callable_sites.coverage.fraction`| Minimum fraction of BAM-backed samples that must be callable for a site to be included in the coverage BED. | `float`|
+|`callable_sites.coverage.min_coverage`| Minimum depth threshold passed to `clam loci`. Use `auto` to set it to `max(1, floor(global_mean_coverage / 2))`. | `float` or `auto`|
+|`callable_sites.coverage.max_coverage`| Maximum depth threshold passed to `clam loci`. Use `auto` to set it to `ceil(global_mean_coverage * 2)`. | `float` or `auto`|
 |`callable_sites.coverage.merge_distance`| Merge passing coverage regions within this many base pairs. | `int`|
+
+If `callable_sites.generate_bed_file` is `true` and both `callable_sites.coverage.enabled` and `callable_sites.mappability.enabled` are `false`, snpArcher warns and skips final BED generation.
+
+If postprocess is enabled but no final callable-sites BED will be produced, snpArcher warns and disables the postprocess module for that run.
 
 #### Module Options
 Please refer to the [modules page](./modules.md) for each module's options.
@@ -185,5 +193,4 @@ Other resources, such as `slurm_partition`, `runtime`, etc. can also be set here
 ```{note}
 Snakemake allows you to dynamically assign resources. We use the `attempt` keyword to specify memory. For example. `attempt * 2000` will provide 2GB on the first attempt of the rule, if the rule fails (out of memory) then on the second attempt it will be provided 4GB. This behavior requires the `-T/--retries` Snakemake option.
 ```
-
 
