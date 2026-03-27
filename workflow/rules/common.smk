@@ -399,11 +399,17 @@ else:
 
 validate(samples_df, Path(workflow.basedir, "schemas/samples.schema.yaml"))
 
+MIXED_READ_INPUT_TYPES = {"fastq", "srr"}
+SINGLE_ROW_INPUT_TYPES = {"bam", "gvcf"}
+
 for sample_id, group in samples_df.groupby("sample_id"):
-    input_types = group["input_type"].dropna().unique().tolist()
-    if len(input_types) > 1:
+    input_types = sorted(group["input_type"].dropna().unique().tolist())
+    input_type_set = set(input_types)
+
+    if len(input_type_set) > 1 and input_type_set != MIXED_READ_INPUT_TYPES:
         raise ValueError(
-            f"Sample '{sample_id}' has mixed input_type values: {input_types}"
+            f"Sample '{sample_id}' has unsupported mixed input_type values: {input_types}. "
+            "Only mixing 'srr' and 'fastq' is supported within one sample."
         )
 
     mark_dups = group["mark_duplicates"].dropna().unique().tolist()
@@ -411,12 +417,13 @@ for sample_id, group in samples_df.groupby("sample_id"):
         raise ValueError(
             f"Sample '{sample_id}' has mixed mark_duplicates values: {mark_dups}"
         )
-    
-    if input_types and input_types[0] in {"bam", "gvcf"} and len(group) > 1:
-        raise ValueError(
-            f"Sample '{sample_id}' has input_type '{input_types[0]}' but multiple rows. "
-            "Only one row is supported for bam/gvcf inputs."
-        )
+
+    for input_type in SINGLE_ROW_INPUT_TYPES:
+        if input_type in input_type_set and len(group) > 1:
+            raise ValueError(
+                f"Sample '{sample_id}' has input_type '{input_type}' but multiple rows. "
+                "Only one row is supported for bam/gvcf inputs."
+            )
 
 if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
     gvcf_samples = (
@@ -556,6 +563,17 @@ def get_sample_input_type(sample):
     return get_sample_scalar(sample, "input_type")
 
 
+def get_sample_input_types(sample):
+    """Get unique input_type values for a sample."""
+    sample_rows = get_sample_rows(sample)
+    return sample_rows["input_type"].dropna().unique().tolist()
+
+
+def sample_has_input_type(sample, input_type):
+    """Return True when a sample contains at least one row of a given input_type."""
+    return input_type in get_sample_input_types(sample)
+
+
 def get_sample_mark_duplicates(sample):
     """Get sample mark_duplicates flag."""
     return bool(get_sample_scalar(sample, "mark_duplicates"))
@@ -576,10 +594,10 @@ def get_sample_srr_records(sample):
 def get_final_bam(sample):
     """Get final BAM path for a sample."""
     sample_rows = get_sample_rows(sample)
-    input_type = get_sample_input_type(sample)
 
-    if input_type == "bam":
-        return sample_rows["input"].iloc[0]
+    if sample_has_input_type(sample, "bam"):
+        bam_rows = sample_rows[sample_rows["input_type"] == "bam"]
+        return bam_rows["input"].iloc[0]
 
     mark_dups = get_sample_mark_duplicates(sample)
 
@@ -592,10 +610,10 @@ def get_final_bam(sample):
 def get_final_gvcf(sample):
     """Get final gVCF path for a sample."""
     sample_rows = get_sample_rows(sample)
-    input_type = get_sample_input_type(sample)
 
-    if input_type == "gvcf":
-        return sample_rows["input"].iloc[0]
+    if sample_has_input_type(sample, "gvcf"):
+        gvcf_rows = sample_rows[sample_rows["input_type"] == "gvcf"]
+        return gvcf_rows["input"].iloc[0]
 
     result = f"results/gvcfs/{sample}.g.vcf.gz"
     return result

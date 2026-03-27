@@ -6,9 +6,7 @@ wildcard_constraints:
     chunk=r"\d+"
 
 def haplotype_caller_input(wildcards):
-    input_type = get_sample_input_type(wildcards.sample)
-    
-    if input_type == "gvcf":
+    if sample_has_input_type(wildcards.sample, "gvcf"):
         raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotype_caller")
     
     bam = get_final_bam(wildcards.sample)

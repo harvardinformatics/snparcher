@@ -1,0 +1,3 @@
+sample_id,input_type,input,library_id,mark_duplicates
+sample_mixed_reads,fastq,tests/data/fastq/sample1_1.fastq.gz;tests/data/fastq/sample1_2.fastq.gz,libA,true
+sample_mixed_reads,srr,SRR000001,libA,true
