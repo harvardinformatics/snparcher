@@ -198,9 +198,9 @@ def write_numeric_qc_inputs(out_dir):
     contigs = []
     with open(source_fai) as handle:
         for line in handle:
-            contig = line.split("\t", 1)[0].strip()
-            if contig:
-                contigs.append(contig)
+            fields = line.strip().split()
+            if fields:
+                contigs.append(fields[0])
     if len(contigs) < 2:
         raise AssertionError("Expected at least two contigs in QC FAI fixture")
 
@@ -208,7 +208,9 @@ def write_numeric_qc_inputs(out_dir):
 
     with open(source_fai) as src, open(out_fai, "w") as dst:
         for line in src:
-            fields = line.rstrip("\n").split("\t")
+            fields = line.strip().split()
+            if not fields:
+                continue
             fields[0] = contig_map[fields[0]]
             dst.write("\t".join(fields) + "\n")
 
@@ -247,6 +249,21 @@ def write_numeric_qc_inputs(out_dir):
         dst.write("\t".join(extra_variant) + "\n")
 
     return out_vcf, out_fai
+
+
+def get_vcf_contig_headers(path):
+    """Return contig IDs declared in the VCF header."""
+    opener = gzip.open if str(path).endswith(".gz") else open
+    contigs = []
+    pattern = re.compile(r"^##contig=<ID=([^,>]+)")
+    with opener(path, "rt") as handle:
+        for line in handle:
+            if line.startswith("#CHROM"):
+                break
+            match = pattern.match(line.rstrip())
+            if match:
+                contigs.append(match.group(1))
+    return contigs
 
 
 def write_reference_source_config(base_config, out_dir, *, source):
@@ -1324,6 +1341,26 @@ def test_qc_defaults_exclude_scaffolds_when_omitted(request):
             samples=get_samples_file(),
         )
         result.assert_success()
+
+
+def test_write_numeric_qc_inputs_rewrites_contigs():
+    """The synthetic numeric QC fixture should rewrite both header and record contigs."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        numeric_vcf, numeric_fai = write_numeric_qc_inputs(tmpdir)
+
+        headers = get_vcf_contig_headers(numeric_vcf)
+        assert "1" in headers
+        assert "2" in headers
+        assert "JAKDEW010000001.1" not in headers
+        assert "JAKDEW010000002.1" not in headers
+
+        records = list(iter_vcf_records(numeric_vcf))
+        chroms = {record[0] for record in records}
+        assert "1" in chroms
+        assert "2" in chroms
+
+        fai_lines = Path(numeric_fai).read_text().strip().splitlines()
+        assert fai_lines[:2] == ["1\t1\t3", "2\t1\t3"]
 
 
 @pytest.mark.full_run
