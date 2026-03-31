@@ -1,7 +1,0 @@
-##############################
-# Variables you need to change
-##############################
-
-samples: "config/samples.csv" # path to the sample metadata CSV
-final_prefix: "" # prefix for final output files
-trackhub_email: "email@website.com"

@@ -58,10 +58,6 @@ These are the supported v2 config keys used by the main workflow. Unknown keys a
 | `modules.postprocess.filtering.maf` | number | no | `0.01` | `0..1` |
 | `modules.postprocess.filtering.missingness` | number | no | `0.75` | `0..1` |
 | `modules.postprocess.filtering.exclude_scaffolds` | string | no | `mtDNA,Y` | Comma-separated scaffold list |
-| `modules.trackhub.enabled` | boolean | no | `false` | Trackhub block currently defined in schema/defaults |
-| `modules.trackhub.email` | string | no | `example@email.com` | Contact email |
-| `modules.mk.enabled` | boolean | no | `false` | Enable MK module |
-| `modules.mk.gff` | string | no | `""` | Required at runtime when MK enabled |
 
 ## 2) Aliases and compatibility parsing
 
@@ -74,6 +70,8 @@ These keys are explicitly parsed by code (not canonical schema fields):
 
 Legacy v1 markers (for example `final_prefix`, `trackhub_email`, `refGenome`, etc.) are detected and cause a hard error if config is not v2-shaped.
 
+Removed module blocks `modules.mk` and `modules.trackhub` are warned about and ignored when present in an otherwise valid v2 config.
+
 ## 3) Standalone module flat config keys
 
 When running module Snakefiles directly (outside the main workflow module-import mapping), these flat keys are parsed:
@@ -85,12 +83,3 @@ When running module Snakefiles directly (outside the main workflow module-import
 ### Postprocess module (`workflow/modules/postprocess/Snakefile`)
 
 `samples`, `sample_metadata`, `vcf`, `ref_fai`, `callable_sites_bed`, `contig_size`, `maf`, `missingness`, `exclude_scaffolds`
-
-### MK module (`workflow/modules/mk/Snakefile`)
-
-`samples`, `sample_metadata`, `vcf`, `ref`, `gff`
-
-### Trackhub module (`workflow/modules/trackhub/Snakefile`)
-
-The Snakefile directly reads `final_prefix` and `trackhub_email` and also passes full config into `snparcher_utils.parse_sample_sheet(config)`.
-

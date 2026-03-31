@@ -14,9 +14,10 @@ The quality control module aggregates various statistics from the workflow and p
 ### Config Options
 | Option | Description | Type |
 | ---- | -------------| ------ |
-|`nClusters`| Number of clusters for PCA| `int`|
-|`GoogleAPIKey`| Google Maps API key (optional).| `str`|
-|`min_depth`| Samples with average depth below this will be excluded for QC analysis| `int`|
+|`modules.qc.clusters`| Number of clusters for PCA visualization.| `int`|
+|`modules.qc.google_api_key`| Google Maps API key for the terrain panel (optional).| `str`|
+|`modules.qc.min_depth`| Samples with average depth below this will be excluded for QC analysis.| `int`|
+|`modules.qc.exclude_scaffolds`| Comma-separated scaffolds to exclude from QC SNP sampling.| `str`|
 
 ```{note}
 To generate the QC dashboard, you must have at least 3 samples specified in your sample sheet.
@@ -25,23 +26,17 @@ To generate the QC dashboard, you must have at least 3 samples specified in your
 The output of the QC module should not be considered a final analysis and is solely intended to direct quality control of the dataset.
 ```
 ## Postprocessing
-The postprocessing module is designed to be run after snpArcher has intially been run and you have determined if there are samples that you would like to exclude from downstream analyses. In order to trigger this module, you must add the `SampleType` column to your sample sheet, and mark samples for inclusion with the value `include` and exclusion with the value `exclude`. 
+The postprocessing module is designed to be run after the main workflow once you have decided whether any samples should be excluded from downstream analyses. To exclude samples, provide a `sample_metadata` file with an `exclude` column; samples with `exclude=true` are removed from the postprocessed outputs.
 
-This module produces a filtered VCF by filtering excluded samples as well as sites not passing default and user defined filters.
+This module produces a filtered VCF by removing excluded samples, restricting to callable regions, excluding small contigs, and applying user-defined SNP/indel filters.
 ### Config Options
 | Option | Description | Type |
 | ---- | -------------| ------ |
-|`contig_size`| SNPs on contigs this size or smaller will be excluded from 'clean' VCF | `int`|
-|`maf`| SNPs with MAF below this will be excluded from clean VCF| `float`|
-|`missingness`| SNPs with missingness below this will be excluded from clean VCF| `float`|
-|`scaffolds_to_exclude` | Comma separated, no spaces list of scaffolds/contigs to exclude from clean VCF|
+|`modules.postprocess.filtering.contig_size`| Variants on contigs this size or smaller are excluded from clean outputs.| `int`|
+|`modules.postprocess.filtering.maf`| Variants with MAF below this value are excluded.| `float`|
+|`modules.postprocess.filtering.missingness`| Variants with missingness above this value are excluded.| `float`|
+|`modules.postprocess.filtering.exclude_scaffolds` | Comma-separated scaffolds/contigs to exclude from clean outputs.| `str`|
 
 ```{hint}
-If you'd like to run the postprocessing module by default, you can add the `SampleType` column in your sample sheet, and mark all samples as `include`.
-```
-## Trackhubs
-The trackhub module generates UCSC Genome Browser track files to explore population variation data from the VCF produced by snpArcher. This module computes and generates genome browser tracks for traditional population genomic summary statistics such as windowed estimates of Tajima’s D, SNP density, Pi, Minor Allele Frequency, SNP depth. To trigger this module, you must set the [config](./setup.md#core-configuration) option to `True` and supply a email (a requirement for tracks displayed on the UCSC Genome Browser).
-
-```{warning}
-The Trackhubs module is dependent on the postprocessing module.
+If you want to keep all samples in postprocess, omit the `exclude` column or set every row to `false`.
 ```

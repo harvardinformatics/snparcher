@@ -23,6 +23,7 @@ Config keys (flat):
 """
 
 import os
+import tempfile
 import pandas as pd
 
 # When imported via `module ... config: config`, this configfile is ignored.
@@ -77,22 +78,14 @@ def _get_coords_input(wildcards):
     return {}
 
 
-def check_contig_names(fai, touch_file):
-    """
-    Check if FAI has numeric-only contig names (plink can't handle those).
-    If all contig names are numeric, do NOT create the output file.
-    If at least one is non-numeric, write a sentinel file so plink can proceed.
-    """
-    dffai = pd.read_table(fai, sep="\t", header=None)
-    all_numeric = pd.to_numeric(dffai[0], errors="coerce").notnull().all()
-    if all_numeric:
-        print(
-            "QC plots not generated because contig names are numeric "
-            "and plink does not accept numeric contig names"
-        )
-    else:
-        with open(touch_file, "w") as writer:
-            writer.write("contigs are strings")
+def _load_contig_map(path):
+    """Load the QC contig map and validate the required columns."""
+    contig_map = pd.read_table(path, sep="\t")
+    required_cols = {"original_contig", "plink_contig", "admixture_id"}
+    missing = required_cols - set(contig_map.columns)
+    if missing:
+        raise ValueError(f"Contig map is missing required column(s): {sorted(missing)}")
+    return contig_map
 
 
 # ---------- rule all (standalone entry point) --------------------------------
@@ -104,19 +97,25 @@ rule all:
 
 # ---------- Rules ------------------------------------------------------------
 
-rule check_fai:
-    """
-    Check FAI for numeric-only contig names.
-    If all numeric, output file is NOT created and downstream rules fail
-    (plink cannot handle numeric contig names).
-    """
+rule contig_map:
+    """Generate a QC-local contig map for PLINK and ADMIXTURE."""
     input:
-        vcf=config["vcf"],
         fai=config["fai"],
     output:
-        fai_result="results/qc/fai_check.txt",
+        map="results/qc/contig_map.tsv",
     run:
-        check_contig_names(input.fai, output.fai_result)
+        dffai = pd.read_table(input.fai, sep="\t", header=None, usecols=[0], names=["original_contig"])
+        if dffai.empty:
+            raise ValueError(f"Reference FAI is empty: {input.fai}")
+
+        all_numeric = pd.to_numeric(dffai["original_contig"], errors="coerce").notnull().all()
+        if all_numeric:
+            dffai["plink_contig"] = [f"qcctg{i}" for i in range(1, len(dffai) + 1)]
+        else:
+            dffai["plink_contig"] = dffai["original_contig"]
+
+        dffai["admixture_id"] = range(1, len(dffai) + 1)
+        dffai.to_csv(output.map, sep="\t", index=False)
 
 
 rule vcftools_individuals:
@@ -160,7 +159,6 @@ rule subsample_snps:
         filtered_idx=temp("results/qc/filtered.vcf.gz.csi"),
         pruned="results/qc/pruned.vcf.gz",
         snpqc="results/qc/snpqc.txt",
-        fai="results/qc/ref.fai",
     conda:
         "envs/subsample_snps.yml"
     params:
@@ -197,10 +195,54 @@ rule subsample_snps:
 
         bcftools query -f '%CHROM\\t%POS\\t%ID\\t%INFO/AF\\t%QUAL\\t%INFO/ReadPosRankSum\\t%INFO/FS\\t%INFO/SOR\\t%INFO/MQ\\t%INFO/MQRankSum\\n' \
             {output.pruned} > {output.snpqc} 2>> {log}
-
-        ## Copy FAI into QC folder for easy access by dashboard
-        cp {input.fai} {output.fai} &>> {log}
         """
+
+
+rule prepare_plink_inputs:
+    """Normalize QC-local contig labels for PLINK and copy the matching FAI."""
+    input:
+        vcf="results/qc/pruned.vcf.gz",
+        contig_map="results/qc/contig_map.tsv",
+        fai=config["fai"],
+    output:
+        vcf="results/qc/plink_input.vcf.gz",
+        vcf_idx="results/qc/plink_input.vcf.gz.csi",
+        fai="results/qc/ref.fai",
+    conda:
+        "envs/subsample_snps.yml"
+    log:
+        "logs/qc/prepare_plink_inputs.txt"
+    run:
+        contig_map = _load_contig_map(input.contig_map)
+        rename_map = dict(
+            zip(contig_map["original_contig"], contig_map["plink_contig"], strict=True)
+        )
+
+        with open(input.fai) as src, open(output.fai, "w") as dst:
+            for line in src:
+                fields = line.rstrip("\n").split("\t")
+                if fields:
+                    fields[0] = rename_map.get(fields[0], fields[0])
+                dst.write("\t".join(fields) + "\n")
+
+        with tempfile.NamedTemporaryFile(
+            "w",
+            delete=False,
+            dir=os.getcwd(),
+            suffix=".rename.tsv",
+        ) as rename_file:
+            for original, plink_name in rename_map.items():
+                rename_file.write(f"{original}\t{plink_name}\n")
+            rename_path = rename_file.name
+
+        try:
+            shell(
+                "bcftools annotate --rename-chrs {rename_path} {input.vcf} "
+                "-O z -o {output.vcf} &> {log}"
+            )
+            shell("bcftools index {output.vcf} &>> {log}")
+        finally:
+            os.unlink(rename_path)
 
 
 rule copy_qc_report:
@@ -220,8 +262,8 @@ rule copy_qc_report:
 rule plink:
     """Run PCA, distance matrix, and KING relatedness via plink."""
     input:
-        vcf="results/qc/pruned.vcf.gz",
-        fai_result="results/qc/fai_check.txt",
+        vcf="results/qc/plink_input.vcf.gz",
+        vcf_idx="results/qc/plink_input.vcf.gz.csi",
     output:
         bed="results/qc/plink.bed",
         bim="results/qc/plink.bim",
@@ -255,7 +297,7 @@ rule setup_admixture:
     """
     input:
         bim="results/qc/plink.bim",
-        fai=config["fai"],
+        contig_map="results/qc/contig_map.tsv",
     output:
         bim="results/qc/plink.bim_fixed",
         bim_back="results/qc/plink.bim.orig",
@@ -282,7 +324,7 @@ rule admixture:
         "envs/admixture.yml"
     shell:
         """
-        mv {input.bim_fixed} {input.bim} 2> {log}
+        cp {input.bim_fixed} {input.bim} 2> {log}
 
         admixture {input.bed} 2 &>> {log}
         admixture {input.bed} 3 &>> {log}
@@ -325,7 +367,6 @@ rule qc_dashboard:
         admix3="results/qc/plink.3.Q",
         admix2="results/qc/plink.2.Q",
         snpqc="results/qc/snpqc.txt",
-        fai_result="results/qc/fai_check.txt",
         bed="results/qc/plink.bed",
         bim="results/qc/plink.bim",
         fam="results/qc/plink.fam",

@@ -71,22 +71,6 @@ if config["modules"]["qc"]["enabled"]:
     use rule * from qc exclude all as qc_*
 
 
-if config["modules"]["mk"]["enabled"]:
-    _mk_config = {
-        "samples": config["samples"],
-        "sample_metadata": config.get("sample_metadata", ""),
-        "vcf": "results/postprocess/filtered.vcf.gz",
-        "ref": REF_FILES["ref"],
-        "gff": config["modules"]["mk"]["gff"],
-    }
-
-    module mk:
-        snakefile: "modules/mk/Snakefile"
-        config: _mk_config
-
-    use rule * from mk exclude all as mk_*
-
-
 # --- Default target ----------------------------------------------------------
 
 rule all:
@@ -101,8 +85,6 @@ rule all:
         "results/postprocess/clean_indels.vcf.gz" if POSTPROCESS_ENABLED else [],
         # QC dashboard (when enabled)
         "results/qc/qc_dashboard.html" if config["modules"]["qc"]["enabled"] else [],
-        # MK table (when enabled)
-        "results/mk/mk_table.tsv" if config["modules"]["mk"]["enabled"] else [],
 
 
 rule setup:

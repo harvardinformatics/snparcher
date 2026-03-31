@@ -1,13 +1,21 @@
-import sys
+import csv
 import shutil
 
 
-def generate_mapping(input_file, bim_file, output_file):
+def load_admixture_map(map_file):
     conversion_dict = {}
-    with open(input_file, "r") as f:
-        for line in f:
-            line = line.strip().split()
-            conversion_dict[line[0]] = line[1]
+    with open(map_file, "r", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        required = {"plink_contig", "admixture_id"}
+        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+            raise ValueError("contig_map.tsv must contain plink_contig and admixture_id columns")
+        for row in reader:
+            conversion_dict[row["plink_contig"]] = str(row["admixture_id"])
+    return conversion_dict
+
+
+def generate_mapping(map_file, bim_file, output_file):
+    conversion_dict = load_admixture_map(map_file)
 
     # Copy original bim file to a new file with ".orig" appended to its name
     orig_bim_file = bim_file + ".orig"
@@ -28,7 +36,7 @@ def generate_mapping(input_file, bim_file, output_file):
             f.write(line + "\n")
 
 
-input_file = snakemake.input.fai
+input_file = snakemake.input.contig_map
 bim_file = snakemake.input.bim
 output_file = snakemake.output.bim
 generate_mapping(input_file, bim_file, output_file)
