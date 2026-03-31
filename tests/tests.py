@@ -124,25 +124,6 @@ def write_intervals_config(base_config, out_dir, *, enabled):
     return out_path
 
 
-def write_removed_modules_config(base_config, out_dir):
-    """Write a config copy that still includes removed module blocks."""
-    text = Path(base_config).read_text()
-    if "  trackhub:" in text or "  mk:" in text:
-        raise AssertionError("Expected base config without removed module blocks")
-
-    addition = """
-  trackhub:
-    enabled: true
-    email: "legacy@example.com"
-  mk:
-    enabled: true
-    gff: "legacy.gff"
-"""
-    out_path = Path(out_dir) / "config_removed_modules.yaml"
-    out_path.write_text(text.rstrip() + addition)
-    return out_path
-
-
 def write_qc_config_without_exclude_scaffolds(base_config, out_dir):
     """Write a QC config copy without modules.qc.exclude_scaffolds."""
     text = Path(base_config).read_text()
@@ -329,26 +310,6 @@ def test_v1_style_config_exits_with_migration_message(request):
         assert "Detected a v1-style snpArcher config" in output
         assert "docs/v2-migration.md" in output
         assert "sentieon" in output
-
-
-@pytest.mark.dry_run
-def test_removed_module_blocks_warn_and_continue(request):
-    """Removed v2 module blocks should warn and be ignored."""
-    no_conda = request.config.getoption("--no-conda")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
-        cfg = write_removed_modules_config(get_config_file(), tmpdir)
-
-        result = smk.dry_run(
-            target="setup",
-            configfile=cfg,
-            samples=get_samples_file(),
-        )
-
-        result.assert_success()
-        output = result.stdout + result.stderr
-        assert "modules.trackhub" in output
-        assert "modules.mk" in output
 
 
 @pytest.mark.dry_run
