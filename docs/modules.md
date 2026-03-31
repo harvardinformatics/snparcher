@@ -29,6 +29,8 @@ The output of the QC module should not be considered a final analysis and is sol
 The postprocessing module is designed to be run after the main workflow once you have decided whether any samples should be excluded from downstream analyses. To exclude samples, provide a `sample_metadata` file with an `exclude` column; samples with `exclude=true` are removed from the postprocessed outputs.
 
 This module produces a filtered VCF by removing excluded samples, restricting to callable regions, excluding small contigs, and applying user-defined SNP/indel filters.
+
+For standalone runs against an existing VCF, you can use `run-postprocess.sh` as a thin wrapper around `workflow/modules/postprocess/Snakefile`.
 ### Config Options
 | Option | Description | Type |
 | ---- | -------------| ------ |
