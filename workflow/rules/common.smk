@@ -2,6 +2,7 @@ from importlib.metadata import PackageNotFoundError, version
 import os
 from pathlib import Path
 import pandas as pd
+import snakemake
 import yaml
 from jsonschema import Draft202012Validator
 from snakemake.exceptions import WorkflowError
@@ -13,10 +14,12 @@ from snakemake.utils import validate
 
 def warn_if_old_snakemake_version():
     """Warn when running on Snakemake versions older than the supported v9 series."""
-    try:
-        raw_version = version("snakemake")
-    except PackageNotFoundError:
-        return
+    raw_version = getattr(snakemake, "__version__", None)
+    if raw_version is None:
+        try:
+            raw_version = version("snakemake")
+        except PackageNotFoundError:
+            return
 
     parts = raw_version.split(".")
     try:
