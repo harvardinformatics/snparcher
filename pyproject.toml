@@ -64,11 +64,10 @@ setup-test-envs = """snakemake -s workflow/Snakefile \
 # Integration tests
 test = "pytest -v tests/tests.py"
 test-dry-run = "pytest -v tests/tests.py --dry-run-only"
-test-core = 'pytest -v tests/tests.py -k "not metadata and not postprocess and not qc and not mk"'
-test-metadata = 'pytest -v tests/tests.py -k "metadata and not postprocess and not qc and not mk"'
+test-core = 'pytest -v tests/tests.py -k "not metadata and not postprocess and not qc"'
+test-metadata = 'pytest -v tests/tests.py -k "metadata and not postprocess and not qc"'
 test-postprocess = 'pytest -v tests/tests.py -k "postprocess"'
 test-qc = 'pytest -v tests/tests.py -k "qc"'
-test-mk = 'pytest -v tests/tests.py -k "mk"'
 
 # Unit tests (stage tests)
 unit-test = "pytest -v tests/unit_tests.py --conda-prefix $(pwd)/.snakemake/conda"

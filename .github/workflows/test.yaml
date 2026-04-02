@@ -8,14 +8,18 @@ on:
       - "**/Snakefile"
       - "**/*.smk"
       - "**/*.py"
-      - "workflow/envs/*.yaml"
+      - "workflow/**/*.yml"
+      - "workflow/**/*.yaml"
+      - "pyproject.toml"
       - ".github/workflows/*"
   pull_request:
     paths:
       - "**/Snakefile"
       - "**/*.smk"
       - "**/*.py"
-      - "workflow/envs/*.yaml"
+      - "workflow/**/*.yml"
+      - "workflow/**/*.yaml"
+      - "pyproject.toml"
       - ".github/workflows/*"
 
 jobs:
@@ -27,15 +31,13 @@ jobs:
       matrix:
         include:
           - group: core
-            filter: "not metadata and not postprocess and not qc and not mk"
+            filter: "not metadata and not postprocess and not qc"
           - group: metadata
-            filter: "metadata and not postprocess and not qc and not mk"
+            filter: "metadata and not postprocess and not qc"
           - group: postprocess
             filter: "postprocess"
           - group: qc
             filter: "qc"
-          - group: mk
-            filter: "mk"
     steps:
       - uses: actions/checkout@v4
 
@@ -63,7 +65,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .snakemake/conda
-          key: conda-envs-${{ hashFiles('workflow/envs/*.yaml') }}
+          key: conda-envs-${{ hashFiles('workflow/**/*.yml', 'workflow/**/*.yaml', 'pyproject.toml') }}
 
       - name: Create conda envs
         if: steps.conda-cache.outputs.cache-hit != 'true'
@@ -89,7 +91,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .snakemake/conda
-          key: conda-envs-${{ hashFiles('workflow/envs/*.yaml') }}
+          key: conda-envs-${{ hashFiles('workflow/**/*.yml', 'workflow/**/*.yaml', 'pyproject.toml') }}
           fail-on-cache-miss: true
 
       - name: Run unit tests
@@ -109,13 +111,13 @@ jobs:
       matrix:
         include:
           - group: core-1
-            filter: "not metadata and not postprocess and not qc and not mk"
+            filter: "not metadata and not postprocess and not qc"
             split_group: 1
           - group: core-2
-            filter: "not metadata and not postprocess and not qc and not mk"
+            filter: "not metadata and not postprocess and not qc"
             split_group: 2
           - group: core-3
-            filter: "not metadata and not postprocess and not qc and not mk"
+            filter: "not metadata and not postprocess and not qc"
             split_group: 3
           - group: qc
             filter: "qc"
@@ -132,7 +134,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .snakemake/conda
-          key: conda-envs-${{ hashFiles('workflow/envs/*.yaml') }}
+          key: conda-envs-${{ hashFiles('workflow/**/*.yml', 'workflow/**/*.yaml', 'pyproject.toml') }}
           fail-on-cache-miss: true
 
       - name: Run full tests

@@ -101,6 +101,7 @@ DEFAULTS = {
             "clusters": 3,
             "min_depth": 2,
             "google_api_key": "",
+            "exclude_scaffolds": "",
         },
         "postprocess": {
             "enabled": False,
@@ -111,16 +112,10 @@ DEFAULTS = {
                 "exclude_scaffolds": "mtDNA,Y",
             },
         },
-        "trackhub": {
-            "enabled": False,
-            "email": "example@email.com",
-        },
-        "mk": {
-            "enabled": False,
-            "gff": "",
-        },
     },
 }
+
+REMOVED_MODULES = ("mk", "trackhub")
 
 V1_CONFIG_MARKERS = (
     "final_prefix",
@@ -216,6 +211,20 @@ def normalize_supported_config_aliases(cfg):
         gatk_cfg.pop("ploidy", None)
 
 
+def remove_unsupported_module_blocks(cfg):
+    """Warn about removed module blocks and drop them before validation."""
+    modules_cfg = cfg.get("modules")
+    if not isinstance(modules_cfg, dict):
+        return
+
+    for module_name in REMOVED_MODULES:
+        if module_name in modules_cfg:
+            logger.warning(
+                f"Config block 'modules.{module_name}' was removed in snpArcher v2 and will be ignored."
+            )
+            modules_cfg.pop(module_name, None)
+
+
 def _load_yaml(path):
     with open(path) as handle:
         return yaml.safe_load(handle)
@@ -294,6 +303,7 @@ if v1_markers:
     )
 
 normalize_supported_config_aliases(config)
+remove_unsupported_module_blocks(config)
 set_defaults(config, DEFAULTS)
 validate_config_with_warnings(config, CONFIG_SCHEMA_PATH)
 

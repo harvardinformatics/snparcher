@@ -124,6 +124,148 @@ def write_intervals_config(base_config, out_dir, *, enabled):
     return out_path
 
 
+def write_qc_config_without_exclude_scaffolds(base_config, out_dir):
+    """Write a QC config copy without modules.qc.exclude_scaffolds."""
+    text = Path(base_config).read_text()
+    pattern = re.compile(r"\n    exclude_scaffolds: \".*\"\n")
+    if not pattern.search(text):
+        raise AssertionError("Expected modules.qc.exclude_scaffolds line not found in config")
+
+    out_path = Path(out_dir) / "config_qc_no_exclude_scaffolds.yaml"
+    out_path.write_text(pattern.sub("\n", text, count=1))
+    return out_path
+
+
+def iter_vcf_records(path):
+    """Yield parsed VCF records from a plain-text or gzipped VCF."""
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as handle:
+        for line in handle:
+            if line.startswith("#"):
+                continue
+            yield line.rstrip().split("\t")
+
+
+def get_vcf_samples(path):
+    """Return sample names from the VCF header."""
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as handle:
+        for line in handle:
+            if line.startswith("#CHROM"):
+                return line.rstrip().split("\t")[9:]
+    raise AssertionError(f"Missing #CHROM header in {path}")
+
+
+def skip_if_arm64_packages_unavailable(result, *package_markers):
+    """Skip full-run tests on osx-arm64 when conda cannot provide required packages."""
+    if platform.machine() != "arm64":
+        return
+
+    stderr = result.stderr
+    if "PackagesNotFoundError" not in stderr or "Platform: osx-arm64" not in stderr:
+        return
+    if package_markers and not any(marker in stderr for marker in package_markers):
+        return
+
+    missing = []
+    collect_missing = False
+    for line in stderr.splitlines():
+        if line.strip().startswith("PackagesNotFoundError:"):
+            collect_missing = True
+            continue
+        if not collect_missing:
+            continue
+
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            missing.append(stripped[2:])
+            continue
+        if missing and not stripped:
+            break
+
+    details = ", ".join(missing) if missing else "required conda packages"
+    pytest.skip(f"Conda package(s) unavailable on osx-arm64: {details}")
+
+
+def write_numeric_qc_inputs(out_dir):
+    """Write numeric-only QC fixtures derived from the existing standalone QC data."""
+    source_vcf = TEST_DATA_DIR / "qc" / "raw.vcf.gz"
+    source_fai = TEST_DATA_DIR / "qc" / "ref.fai"
+    out_dir = Path(out_dir)
+    out_vcf = out_dir / "numeric_raw.vcf.gz"
+    out_fai = out_dir / "numeric_ref.fai"
+
+    contigs = []
+    with open(source_fai) as handle:
+        for line in handle:
+            fields = line.strip().split()
+            if fields:
+                contigs.append(fields[0])
+    if len(contigs) < 2:
+        raise AssertionError("Expected at least two contigs in QC FAI fixture")
+
+    contig_map = {contig: str(i) for i, contig in enumerate(contigs, start=1)}
+
+    with open(source_fai) as src, open(out_fai, "w") as dst:
+        for line in src:
+            fields = line.strip().split()
+            if not fields:
+                continue
+            fields[0] = contig_map[fields[0]]
+            dst.write("\t".join(fields) + "\n")
+
+    sample_names = None
+    contig_header_pattern = re.compile(r"^(##contig=<ID=)([^,>]+)(.*)$")
+    with gzip.open(source_vcf, "rt") as src, gzip.open(out_vcf, "wt") as dst:
+        for line in src:
+            if line.startswith("##contig=<ID="):
+                match = contig_header_pattern.match(line.rstrip("\n"))
+                if match and match.group(2) in contig_map:
+                    line = f"{match.group(1)}{contig_map[match.group(2)]}{match.group(3)}\n"
+            elif line.startswith("#CHROM"):
+                sample_names = line.rstrip().split("\t")[9:]
+            elif not line.startswith("#"):
+                fields = line.rstrip("\n").split("\t")
+                if fields[0] in contig_map:
+                    fields[0] = contig_map[fields[0]]
+                line = "\t".join(fields) + "\n"
+            dst.write(line)
+
+        if sample_names is None:
+            raise AssertionError("Missing #CHROM header in QC VCF fixture")
+
+        extra_variant = [
+            contig_map[contigs[1]],
+            "1",
+            ".",
+            "A",
+            "G",
+            "60",
+            "PASS",
+            "AF=0.0104;ReadPosRankSum=0;FS=0;SOR=0;MQ=60;MQRankSum=0",
+            "GT",
+            *(["0/1", "0/1"] + ["0/0"] * (len(sample_names) - 2)),
+        ]
+        dst.write("\t".join(extra_variant) + "\n")
+
+    return out_vcf, out_fai
+
+
+def get_vcf_contig_headers(path):
+    """Return contig IDs declared in the VCF header."""
+    opener = gzip.open if str(path).endswith(".gz") else open
+    contigs = []
+    pattern = re.compile(r"^##contig=<ID=([^,>]+)")
+    with opener(path, "rt") as handle:
+        for line in handle:
+            if line.startswith("#CHROM"):
+                break
+            match = pattern.match(line.rstrip())
+            if match:
+                contigs.append(match.group(1))
+    return contigs
+
+
 def write_reference_source_config(base_config, out_dir, *, source):
     """Write a config copy with reference.source overridden."""
     text = Path(base_config).read_text()
@@ -1032,6 +1174,55 @@ def test_postprocess_warns_and_disables_without_callable_bed(request):
         assert "postprocess_" not in output
 
 
+@pytest.mark.full_run
+def test_postprocess_standalone_full_run(request):
+    """Full execution of postprocess module against dedicated standalone fixtures."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile",
+        )
+        fixture_dir = TEST_DATA_DIR / "postprocess"
+        result = smk.run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "postprocess" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(fixture_dir / "samples.csv"),
+                "sample_metadata": str(fixture_dir / "sample_metadata.csv"),
+                "vcf": str(fixture_dir / "raw.vcf"),
+                "ref_fai": str(fixture_dir / "ref.fai"),
+                "callable_sites_bed": str(fixture_dir / "callable_sites.bed"),
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools", "bedtools")
+        result.assert_success()
+        result.assert_output_exists(
+            "results/postprocess/filtered.vcf.gz",
+            "results/postprocess/clean_snps.vcf.gz",
+            "results/postprocess/clean_indels.vcf.gz",
+        )
+
+        filtered_vcf = Path(tmpdir) / "results" / "postprocess" / "filtered.vcf.gz"
+        clean_snps_vcf = Path(tmpdir) / "results" / "postprocess" / "clean_snps.vcf.gz"
+        clean_indels_vcf = Path(tmpdir) / "results" / "postprocess" / "clean_indels.vcf.gz"
+
+        assert get_vcf_samples(filtered_vcf) == ["sample1"]
+        assert get_vcf_samples(clean_snps_vcf) == ["sample1"]
+        assert get_vcf_samples(clean_indels_vcf) == ["sample1"]
+
+        snp_records = list(iter_vcf_records(clean_snps_vcf))
+        indel_records = list(iter_vcf_records(clean_indels_vcf))
+        assert snp_records, "Expected at least one SNP record in clean_snps.vcf.gz"
+        assert indel_records, "Expected at least one indel record in clean_indels.vcf.gz"
+        assert all(len(record[3]) == 1 and all(len(alt) == 1 for alt in record[4].split(",")) for record in snp_records)
+        assert all(
+            len(record[3]) != 1 or any(len(alt) != 1 for alt in record[4].split(","))
+            for record in indel_records
+        )
+
+
 # --- QC module tests ---
 
 def get_qc_config():
@@ -1054,12 +1245,14 @@ def test_qc_dry_run(request):
         result.assert_success()
 
         output = result.stdout + result.stderr
-        assert "qc_check_fai" in output, \
-            "Expected qc_check_fai rule in DAG"
+        assert "qc_contig_map" in output, \
+            "Expected qc_contig_map rule in DAG"
         assert "qc_vcftools_individuals" in output, \
             "Expected qc_vcftools_individuals rule in DAG"
         assert "qc_subsample_snps" in output, \
             "Expected qc_subsample_snps rule in DAG"
+        assert "qc_prepare_plink_inputs" in output, \
+            "Expected qc_prepare_plink_inputs rule in DAG"
         assert "qc_plink" in output, \
             "Expected qc_plink rule in DAG"
         assert "qc_admixture" in output, \
@@ -1086,7 +1279,7 @@ def test_qc_disabled_no_rules(request):
         result.assert_success()
 
         output = result.stdout + result.stderr
-        assert "qc_check_fai" not in output, \
+        assert "qc_contig_map" not in output, \
             "QC rules should not appear when module is disabled"
         assert "qc_plink" not in output, \
             "QC rules should not appear when module is disabled"
@@ -1134,6 +1327,42 @@ def test_qc_with_coords_metadata(request):
             "generate_coords_file should run when metadata has lat/long"
 
 
+@pytest.mark.dry_run
+def test_qc_defaults_exclude_scaffolds_when_omitted(request):
+    """QC dry-run should succeed when modules.qc.exclude_scaffolds is omitted."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_qc_config_without_exclude_scaffolds(get_qc_config(), tmpdir)
+
+        result = smk.dry_run(
+            target="results/qc/qc_dashboard.html",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+
+def test_write_numeric_qc_inputs_rewrites_contigs():
+    """The synthetic numeric QC fixture should rewrite both header and record contigs."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        numeric_vcf, numeric_fai = write_numeric_qc_inputs(tmpdir)
+
+        headers = get_vcf_contig_headers(numeric_vcf)
+        assert "1" in headers
+        assert "2" in headers
+        assert "JAKDEW010000001.1" not in headers
+        assert "JAKDEW010000002.1" not in headers
+
+        records = list(iter_vcf_records(numeric_vcf))
+        chroms = {record[0] for record in records}
+        assert "1" in chroms
+        assert "2" in chroms
+
+        fai_lines = Path(numeric_fai).read_text().strip().splitlines()
+        assert fai_lines[:2] == ["1\t1\t3", "2\t1\t3"]
+
+
 @pytest.mark.full_run
 def test_qc_standalone_full_run(request):
     """Full execution of QC module as standalone workflow against test fixtures."""
@@ -1155,14 +1384,30 @@ def test_qc_standalone_full_run(request):
                 "qc_report": str(TEST_DATA_DIR / "qc" / "qc_report.tsv"),
             },
         )
+        skip_if_arm64_packages_unavailable(
+            result,
+            "admixture",
+            "plink2",
+            "plink",
+            "r-ggmap",
+            "r-ape",
+            "bioconductor-ggtree",
+        )
         result.assert_success()
         result.assert_output_exists(
             "results/qc/qc_dashboard.html",
+            "results/qc/contig_map.tsv",
             "results/qc/plink.eigenvec",
+            "results/qc/plink.bim_fixed",
             "results/qc/plink.3.Q",
             "results/qc/coords.txt",
             "results/qc/qc_report.tsv",
         )
+
+        contig_map = Path(tmpdir) / "results" / "qc" / "contig_map.tsv"
+        contig_lines = contig_map.read_text().strip().splitlines()
+        assert contig_lines[0].split("\t") == ["original_contig", "plink_contig", "admixture_id"]
+        assert [line.split("\t")[2] for line in contig_lines[1:]] == ["1", "2"]
 
         # Copy dashboard HTML out before tmpdir cleanup so CI can upload it
         artifacts_dir = Path("test-artifacts")
@@ -1172,75 +1417,54 @@ def test_qc_standalone_full_run(request):
             shutil.copy2(dashboard, artifacts_dir / "qc_dashboard.html")
 
 
-# --- MK module tests ---
-
-def get_mk_config():
-    """Config with MK module enabled."""
-    return CONFIGS_DIR / "local_genome_mk.yaml"
-
-
-@pytest.mark.dry_run
-def test_mk_dry_run(request):
-    """Dry run MK module — exercises all MK rules."""
+@pytest.mark.full_run
+def test_qc_numeric_contigs_full_run(request):
+    """QC should normalize numeric-only contig labels and still run end-to-end."""
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
-        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
-
-        result = smk.dry_run(
-            target="results/mk/mk_table.tsv",
-            configfile=get_mk_config(),
-            samples=get_samples_file(),
+        numeric_vcf, numeric_fai = write_numeric_qc_inputs(tmpdir)
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
         )
-        result.assert_success()
-
-        output = result.stdout + result.stderr
-        assert "mk_decompress_ref" in output, \
-            "Expected mk_decompress_ref rule in DAG"
-        assert "mk_split_samples" in output, \
-            "Expected mk_split_samples rule in DAG"
-        assert "mk_degenotate" in output, \
-            "Expected mk_degenotate rule in DAG"
-        assert "mk_copy_gff" in output, \
-            "Expected mk_copy_gff rule in DAG"
-
-
-@pytest.mark.dry_run
-def test_mk_disabled_no_rules(request):
-    """When MK is disabled, no MK rules appear."""
-    no_conda = request.config.getoption("--no-conda")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
-
-        result = smk.dry_run(
+        result = smk.run(
             target="all",
-            configfile=get_config_file(),
-            samples=get_samples_file(),
-        )
-        result.assert_success()
-
-        output = result.stdout + result.stderr
-        assert "mk_degenotate" not in output, \
-            "MK rules should not appear when module is disabled"
-        assert "mk_split_samples" not in output, \
-            "MK rules should not appear when module is disabled"
-
-
-@pytest.mark.dry_run
-def test_mk_with_metadata_dry_run(request):
-    """MK works with sample metadata (outgroup/exclude columns)."""
-    no_conda = request.config.getoption("--no-conda")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
-
-        result = smk.dry_run(
-            target="results/mk/mk_table.tsv",
-            configfile=get_mk_config(),
-            samples=get_samples_file(),
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
             config_overrides={
-                "sample_metadata": str(METADATA_DIR / "exclude_and_outgroup.csv"),
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "sample_metadata": str(TEST_DATA_DIR / "qc" / "sample_metadata.csv"),
+                "vcf": str(numeric_vcf),
+                "fai": str(numeric_fai),
+                "qc_report": str(TEST_DATA_DIR / "qc" / "qc_report.tsv"),
             },
         )
+        skip_if_arm64_packages_unavailable(
+            result,
+            "admixture",
+            "plink2",
+            "plink",
+            "r-ggmap",
+            "r-ape",
+            "bioconductor-ggtree",
+        )
         result.assert_success()
+        result.assert_output_exists(
+            "results/qc/contig_map.tsv",
+            "results/qc/plink_input.vcf.gz",
+            "results/qc/plink.bim_fixed",
+            "results/qc/qc_dashboard.html",
+        )
 
-        output = result.stdout + result.stderr
-        assert "mk_split_samples" in output
+        contig_map = Path(tmpdir) / "results" / "qc" / "contig_map.tsv"
+        rows = [line.split("\t") for line in contig_map.read_text().strip().splitlines()[1:]]
+        assert [row[1] for row in rows] == ["qcctg1", "qcctg2"]
+        assert [row[2] for row in rows] == ["1", "2"]
+
+        bim_fixed = Path(tmpdir) / "results" / "qc" / "plink.bim_fixed"
+        chroms = []
+        for line in bim_fixed.read_text().strip().splitlines():
+            chrom = line.split("\t", 1)[0]
+            if chrom not in chroms:
+                chroms.append(chrom)
+        assert chroms[:2] == ["1", "2"]

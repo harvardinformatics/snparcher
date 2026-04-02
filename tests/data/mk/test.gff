@@ -1,5 +1,0 @@
-##gff-version 3
-chr1	snpArcher_test	gene	1	100	.	+	.	ID=gene1;Name=test_gene
-chr1	snpArcher_test	mRNA	1	100	.	+	.	ID=mRNA1;Parent=gene1
-chr1	snpArcher_test	exon	1	50	.	+	.	ID=exon1;Parent=mRNA1
-chr1	snpArcher_test	CDS	1	50	.	+	0	ID=cds1;Parent=mRNA1

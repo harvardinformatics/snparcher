@@ -60,6 +60,3 @@ modules:
       maf: 0.01
       missingness: 0.75
       exclude_scaffolds: "mtDNA,Y"
-  trackhub:
-    enabled: false
-    email: "example@email.com"
