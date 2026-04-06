@@ -339,6 +339,8 @@ def test_mixed_srr_and_fastq_same_sample_dry_run(request):
         output = result.stdout + result.stderr
         assert "unsupported mixed input_type values" not in output
         assert "download_sra" in output
+        assert "while IFS= read -r url; do" in output
+        assert 'curl -fSL "$url"' in output
         assert "merge_library_bams" in output
         assert "library=libA" in output
         assert "input_unit=u1" in output
