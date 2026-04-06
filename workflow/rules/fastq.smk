@@ -64,7 +64,13 @@ rule download_sra:
             echo "Prefetch failed, trying ENA via ffq..." >> {log}
             ffq --ftp {wildcards.accession} 2>> {log} \
                 | jq -r '.[].url' \
-                | xargs -I {{}} curl -fSL -o {params.outdir}/$(basename {{}}) {{}} 2>> {log}
+                | while IFS= read -r url; do
+                    [[ -n "$url" ]] || continue
+                    echo "Downloading: $url" >> {log}
+                    curl -fSL "$url" \
+                        -o {params.outdir}/$(basename "$url") \
+                        >> {log} 2>&1
+                done
         fi
         
         [[ -f {output.r1} ]] && [[ -f {output.r2} ]]
