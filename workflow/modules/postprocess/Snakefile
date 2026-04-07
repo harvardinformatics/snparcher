@@ -48,13 +48,23 @@ for _k, _v in _PP_DEFAULTS.items():
 
 # ---------- Sample sheet + metadata ------------------------------------------
 
-_samples_df = pd.read_csv(config["samples"])
+_SAMPLE_SHEET_DTYPES = {
+    "sample_id": "string",
+    "library_id": "string",
+}
+
+_SAMPLE_METADATA_DTYPES = {
+    "sample_id": "string",
+}
+
+
+_samples_df = pd.read_csv(config["samples"], dtype=_SAMPLE_SHEET_DTYPES)
 _ALL_SAMPLES = _samples_df["sample_id"].unique().tolist()
 
 _metadata_df = None
 _meta_path = config.get("sample_metadata", "")
 if _meta_path:
-    _metadata_df = pd.read_csv(_meta_path)
+    _metadata_df = pd.read_csv(_meta_path, dtype=_SAMPLE_METADATA_DTYPES)
 
 
 def _parse_bool(series, col_name):

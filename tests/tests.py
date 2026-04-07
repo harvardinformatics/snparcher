@@ -291,6 +291,16 @@ def write_gvcf_sample_sheet(out_dir, *, sample_id, gvcf_path):
     return out_path
 
 
+def write_fastq_sample_sheet(out_dir, *, sample_id, library_id):
+    """Write a one-row FASTQ sample sheet with explicit sample and library IDs."""
+    out_path = Path(out_dir) / "numeric_id_fastqs.csv"
+    out_path.write_text(
+        "sample_id,input_type,input,library_id,mark_duplicates\n"
+        f"{sample_id},fastq,tests/data/fastq/sample1_1.fastq.gz;tests/data/fastq/sample1_2.fastq.gz,{library_id},true\n"
+    )
+    return out_path
+
+
 @contextmanager
 def serve_directory(directory):
     """Serve a directory over HTTP for reference URL tests."""
@@ -698,7 +708,8 @@ def test_reference_url_sources(request, compressed):
 
 @pytest.mark.full_run
 @pytest.mark.parametrize("intervals_enabled", [False, True])
-def test_create_db_mapfile_preserves_external_gvcf_sample_id(request, intervals_enabled):
+@pytest.mark.parametrize("sample_id", ["sample_gvcf", "00123"])
+def test_create_db_mapfile_preserves_external_gvcf_sample_id(request, intervals_enabled, sample_id):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
@@ -715,7 +726,7 @@ def test_create_db_mapfile_preserves_external_gvcf_sample_id(request, intervals_
         cfg = write_intervals_config(cfg, tmpdir, enabled=intervals_enabled)
         samples = write_gvcf_sample_sheet(
             tmpdir,
-            sample_id="sample_gvcf",
+            sample_id=sample_id,
             gvcf_path=gvcf_path,
         )
 
@@ -727,7 +738,26 @@ def test_create_db_mapfile_preserves_external_gvcf_sample_id(request, intervals_
         result.assert_success()
 
         mapfile = (tmp_path / "results/genomics_db/mapfile.txt").read_text().strip()
-        assert mapfile == f"sample_gvcf\t{gvcf_path}"
+        assert mapfile == f"{sample_id}\t{gvcf_path}"
+
+
+@pytest.mark.dry_run
+def test_fastq_dry_run_accepts_numeric_like_sample_and_library_ids(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        samples = write_fastq_sample_sheet(tmpdir, sample_id="00123", library_id="456")
+
+        result = smk.dry_run(
+            target=[
+                "results/filtered_fastqs/00123/456/u1_1.fastq.gz",
+                "results/filtered_fastqs/00123/456/u1_2.fastq.gz",
+            ],
+            configfile=get_config_file(),
+            samples=samples,
+        )
+
+        result.assert_success()
 
 
 @pytest.mark.full_run
