@@ -39,40 +39,61 @@ read_table_preserve_ids <- function(file = NULL, text = NULL, id_cols = characte
     stop("Provide file or text.")
   }
 
+  read_args <- list(...)
+  if (is.null(read_args$check.names)) {
+    read_args$check.names <- FALSE
+  }
+  if (is.null(read_args$stringsAsFactors)) {
+    read_args$stringsAsFactors <- FALSE
+  }
+
   first_line <- if (!is.null(file)) {
     readLines(file, n = 1)
   } else {
     strsplit(text, "\n", fixed = TRUE)[[1]][1]
   }
+  if (length(first_line) == 0 || !nzchar(first_line)) {
+    stop("Cannot infer columns from an empty table.")
+  }
 
-  header_df <- read.table(
-    text = first_line,
-    header = TRUE,
-    check.names = FALSE,
-    stringsAsFactors = FALSE
-  )
+  header <- isTRUE(read_args$header)
+  sep <- read_args$sep
+  if (is.null(sep)) {
+    sep <- ""
+  }
 
-  col_classes <- rep(NA_character_, ncol(header_df))
-  names(col_classes) <- names(header_df)
+  if (header) {
+    preview_df <- read.table(
+      text = first_line,
+      header = TRUE,
+      sep = sep,
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+    col_names <- names(preview_df)
+  } else {
+    preview_df <- read.table(
+      text = first_line,
+      header = FALSE,
+      sep = sep,
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+    col_names <- paste0("V", seq_len(ncol(preview_df)))
+  }
+
+  col_classes <- rep(NA_character_, length(col_names))
+  names(col_classes) <- col_names
   col_classes[names(col_classes) %in% id_cols] <- "character"
+  read_args$colClasses <- col_classes
 
   if (!is.null(file)) {
-    read.table(
-      file,
-      colClasses = col_classes,
-      check.names = FALSE,
-      stringsAsFactors = FALSE,
-      ...
-    )
+    read_args$file <- file
   } else {
-    read.table(
-      text = text,
-      colClasses = col_classes,
-      check.names = FALSE,
-      stringsAsFactors = FALSE,
-      ...
-    )
+    read_args$text <- text
   }
+
+  do.call(read.table, read_args)
 }
 
 ```

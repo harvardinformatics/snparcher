@@ -5,6 +5,7 @@ import platform
 import re
 import shutil
 import socket
+import subprocess
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -264,6 +265,36 @@ def get_vcf_contig_headers(path):
             if match:
                 contigs.append(match.group(1))
     return contigs
+
+
+def extract_r_function_source(path, function_name):
+    """Extract an R function body from an Rmd file by balanced braces."""
+    text = Path(path).read_text()
+    marker = f"{function_name} <- function"
+    start = text.find(marker)
+    if start == -1:
+        raise AssertionError(f"Function '{function_name}' not found in {path}")
+
+    brace_start = text.find("{", start)
+    if brace_start == -1:
+        raise AssertionError(f"Could not find opening brace for '{function_name}' in {path}")
+
+    depth = 0
+    end = None
+    for idx in range(brace_start, len(text)):
+        char = text[idx]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = idx + 1
+                break
+
+    if end is None:
+        raise AssertionError(f"Could not find closing brace for '{function_name}' in {path}")
+
+    return text[start:end]
 
 
 def write_reference_source_config(base_config, out_dir, *, source):
@@ -1393,6 +1424,50 @@ def test_write_numeric_qc_inputs_rewrites_contigs():
 
         fai_lines = Path(numeric_fai).read_text().strip().splitlines()
         assert fai_lines[:2] == ["1\t1\t3", "2\t1\t3"]
+
+
+def test_qc_dashboard_helper_preserves_numeric_like_ids():
+    """QC dashboard helper should preserve leading zeros for headered and headerless tables."""
+    if shutil.which("Rscript") is None:
+        pytest.skip("Rscript is not available")
+
+    helper_source = extract_r_function_source(
+        WORKFLOW_DIR / "modules" / "qc" / "scripts" / "qc_dashboard_interactive.Rmd",
+        "read_table_preserve_ids",
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        headerless = tmp_path / "dist.id"
+        headerless.write_text("0 000123\n0 000456\n")
+        headered = tmp_path / "depth.tsv"
+        headered.write_text("INDV\tMEAN_DEPTH\n000123\t5.2\n")
+
+        script = tmp_path / "validate_read_table_preserve_ids.R"
+        script.write_text(
+            "\n".join(
+                [
+                    "args <- commandArgs(trailingOnly = TRUE)",
+                    "headerless <- args[[1]]",
+                    "headered <- args[[2]]",
+                    helper_source,
+                    "headerless_df <- read_table_preserve_ids(headerless, id_cols = c('V1', 'V2'))",
+                    "if (!is.character(headerless_df$V1) || !is.character(headerless_df$V2)) stop('Headerless ID columns were not read as character')",
+                    "if (!identical(headerless_df$V2[[1]], '000123')) stop('Headerless leading zeros were not preserved')",
+                    "headered_df <- read_table_preserve_ids(headered, header = TRUE, sep = '\\t', id_cols = c('INDV'))",
+                    "if (!is.character(headered_df$INDV)) stop('Headered ID column was not read as character')",
+                    "if (!identical(headered_df$INDV[[1]], '000123')) stop('Headered leading zeros were not preserved')",
+                ]
+            )
+        )
+
+        result = subprocess.run(
+            ["Rscript", str(script), str(headerless), str(headered)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (result.stdout + result.stderr).strip()
 
 
 @pytest.mark.full_run
