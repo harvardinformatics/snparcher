@@ -71,6 +71,10 @@ if config["modules"]["qc"]["enabled"]:
     use rule * from qc exclude all as qc_*
 
 
+onerror:
+    print_debug_banner()
+
+
 # --- Default target ----------------------------------------------------------
 
 rule all:
