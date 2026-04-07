@@ -58,13 +58,7 @@ _SAMPLE_METADATA_DTYPES = {
 }
 
 
-def _read_csv_safe(path, dtype_map):
-    """Read a CSV, restricting dtype overrides to columns actually present."""
-    present = set(pd.read_csv(path, nrows=0).columns)
-    return pd.read_csv(path, dtype={k: v for k, v in dtype_map.items() if k in present})
-
-
-_samples_df = _read_csv_safe(config["samples"], _SAMPLE_SHEET_DTYPES)
+_samples_df = pd.read_csv(config["samples"], dtype=_SAMPLE_SHEET_DTYPES)
 _ALL_SAMPLES = _samples_df["sample_id"].unique().tolist()
 
 _metadata_df = None
