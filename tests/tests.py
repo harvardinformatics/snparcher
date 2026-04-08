@@ -1293,6 +1293,11 @@ def get_qc_config():
     return CONFIGS_DIR / "local_genome_qc.yaml"
 
 
+def get_qc_underscore_ref_config():
+    """Config with QC enabled and a local reference name containing an underscore."""
+    return CONFIGS_DIR / "local_genome_ref_name_underscore.yaml"
+
+
 @pytest.mark.dry_run
 def test_qc_dry_run(request):
     """Dry run QC dashboard target — exercises all QC rules."""
@@ -1325,6 +1330,26 @@ def test_qc_dry_run(request):
         # copy_qc_report should appear since main workflow provides qc_report
         assert "qc_copy_qc_report" in output, \
             "Expected qc_copy_qc_report rule in DAG"
+
+
+@pytest.mark.dry_run
+def test_default_target_with_qc_enabled_runs_full_pipeline(request):
+    """No explicit target should still resolve to the main workflow's all rule."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target=[],
+            configfile=get_qc_underscore_ref_config(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "rule all:" in output, "Expected the main all rule to be the default target"
+        assert "bwa_mem" in output, "Expected core mapping/variant DAG rules in the default target"
+        assert "qc_qc_dashboard" in output, "Expected the QC dashboard DAG in the default target"
 
 
 @pytest.mark.dry_run
