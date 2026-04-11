@@ -31,6 +31,71 @@ plink_prefix <- file.path(qc_dir, "plink")
 
 set.colors <- c('#1f78b4','#33a02c','#6a3d9a','#a6cee3','#b2df8a','#fb9a99','#e31a1c','#fdbf6f','#ff7f00','#cab2d6')
 
+read_table_preserve_ids <- function(file = NULL, text = NULL, id_cols = character(), ...) {
+  if (!is.null(file) && !is.null(text)) {
+    stop("Provide either file or text, not both.")
+  }
+  if (is.null(file) && is.null(text)) {
+    stop("Provide file or text.")
+  }
+
+  read_args <- list(...)
+  if (is.null(read_args$check.names)) {
+    read_args$check.names <- FALSE
+  }
+  if (is.null(read_args$stringsAsFactors)) {
+    read_args$stringsAsFactors <- FALSE
+  }
+
+  first_line <- if (!is.null(file)) {
+    readLines(file, n = 1)
+  } else {
+    strsplit(text, "\n", fixed = TRUE)[[1]][1]
+  }
+  if (length(first_line) == 0 || !nzchar(first_line)) {
+    stop("Cannot infer columns from an empty table.")
+  }
+
+  header <- isTRUE(read_args$header)
+  sep <- read_args$sep
+  if (is.null(sep)) {
+    sep <- ""
+  }
+
+  if (header) {
+    preview_df <- read.table(
+      text = first_line,
+      header = TRUE,
+      sep = sep,
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+    col_names <- names(preview_df)
+  } else {
+    preview_df <- read.table(
+      text = first_line,
+      header = FALSE,
+      sep = sep,
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+    col_names <- paste0("V", seq_len(ncol(preview_df)))
+  }
+
+  col_classes <- rep(NA_character_, length(col_names))
+  names(col_classes) <- col_names
+  col_classes[names(col_classes) %in% id_cols] <- "character"
+  read_args$colClasses <- col_classes
+
+  if (!is.null(file)) {
+    read_args$file <- file
+  } else {
+    read_args$text <- text
+  }
+
+  do.call(read.table, read_args)
+}
+
 ```
 
 
@@ -43,12 +108,12 @@ Row
 ```{r numsnps}
 #fai file for getting genome length
 fai_path <- file.path(qc_dir, "ref.fai")
-df_fai <- read.table(fai_path, header = F)
+df_fai <- read.table(fai_path, header = F, check.names = FALSE, stringsAsFactors = FALSE)
 genome_size <- sum(df_fai$V2)
 
 #summary of the unfiltered VCF
 sum_path <- paste0(vcf_prefix, ".FILTER.summary")
-df_sum <- read.table(sum_path, header =T)
+df_sum <- read.table(sum_path, header =T, check.names = FALSE, stringsAsFactors = FALSE)
 
 #total number of SNPs found by pipeline
 first_line <- df_sum %>% filter(FILTER == ".")
@@ -65,10 +130,10 @@ tot_snps <- snps_remain + fil_snps
 proj_name <- basename(qc_dir)
 
 #num SNPs in pruned data
-nums.nps <- nrow(read.table(paste0(plink_prefix, ".bim"), header = T))
+nums.nps <- nrow(read.table(paste0(plink_prefix, ".bim"), header = T, check.names = FALSE, stringsAsFactors = FALSE))
 
 #estimate watterson's theta:
-num.samples <- nrow(read.table(paste0(vcf_prefix, ".idepth"), header = T))
+num.samples <- nrow(read_table_preserve_ids(paste0(vcf_prefix, ".idepth"), header = T, id_cols = c("INDV")))
 
 #harmonic number calculation for n-1 chromosomes (2*sample size)
 Hn = 0
@@ -105,7 +170,7 @@ valueBox(div_text, icon = "fa-dna")
 ### Mean depth
 
 ```{r}
-mean.depth <- round(mean(read.table(paste0(vcf_prefix, ".idepth"), header = T)$MEAN_DEPTH), 1)
+mean.depth <- round(mean(read_table_preserve_ids(paste0(vcf_prefix, ".idepth"), header = T, id_cols = c("INDV"))$MEAN_DEPTH), 1)
 valueBox(mean.depth, icon = "fa-align-center")
 ```
 
@@ -138,14 +203,14 @@ input$GMKey <- params$GMKey
 pca.path <- paste0(plink_prefix, ".eigenvec")
 #this makes it reasonably robust to running with plink 1.9 or plink 2.0
 tmp.head <- sub("#", "", readLines(pca.path))
-df.pca <- read.table(text = tmp.head, header = TRUE)
-df.val <- read.table(paste0(plink_prefix, ".eigenval"), header = FALSE)
+df.pca <- read_table_preserve_ids(text = tmp.head, header = TRUE, id_cols = c("FID", "IID"))
+df.val <- read.table(paste0(plink_prefix, ".eigenval"), header = FALSE, check.names = FALSE, stringsAsFactors = FALSE)
 df.val$prop <- (df.val$V1 / (sum(df.val$V1))) * 100
 df.val$PC <- paste0("PC", row.names(df.val))
 
 #add depth
 depth.path <- paste0(vcf_prefix, ".idepth")
-df.depth <- read.table(depth.path, header = T)
+df.depth <- read_table_preserve_ids(depth.path, header = T, id_cols = c("INDV"))
 df.depth <- df.depth %>%  mutate_if(is.numeric, round, digits = 2)
 
 df.pca <- left_join(df.pca, df.depth, by = c("IID" = "INDV"))
@@ -229,7 +294,7 @@ Row
 # depth plot --------------------------------------------------------------
 #depth is read in the PCA chunk
 imiss.path <- paste0(vcf_prefix, ".imiss")
-df.imiss <- read.table(imiss.path, header =T)
+df.imiss <- read_table_preserve_ids(imiss.path, header =T, id_cols = c("INDV", "FID"))
 
 df.depth.miss <- inner_join(df.depth, df.imiss, by = "INDV")
 df.depth.miss <- df.depth.miss %>% 
@@ -263,7 +328,7 @@ df.depth.miss <- df.depth.miss %>%
 # bamstat plot --------------------------------------------------------------
 # v2 qc_report.tsv uses lowercase column names: sample, percent_mapped, mean_depth, etc.
 bamstat.path <- file.path(qc_dir, "qc_report.tsv")
-df.bamstat <- read.table(bamstat.path, header = T, sep = "\t")
+df.bamstat <- read_table_preserve_ids(bamstat.path, header = T, sep = "\t", id_cols = c("sample"))
 
 df.depth.miss.bamstat <- inner_join(df.depth.miss, df.bamstat, by = c("INDV" = "sample"))
 df.depth.miss.bamstat <- df.depth.miss.bamstat %>% 
@@ -291,7 +356,7 @@ cat("*Mapping rate panel skipped — no BAM summary stats provided (qc_report co
 
 ```{r, fig.width = 5, fig.height = 5}
 het.path <- paste0(vcf_prefix, ".het")
-df.het <- read.table(het.path, header =T)
+df.het <- read_table_preserve_ids(het.path, header =T, id_cols = c("INDV"))
 
 df.het <- left_join(df.het, df.pca, by = c("INDV" = "IID"))
 
@@ -339,10 +404,10 @@ Row
 
 ```{r, fig.height=12, fig.width=12}
 
-dist.id <- read.table(paste0(plink_prefix, ".dist.id"))["V2"]
+dist.id <- read_table_preserve_ids(paste0(plink_prefix, ".dist.id"), id_cols = c("V1", "V2"))["V2"]
 dist.id <- left_join(dist.id, df.pca[,c("IID","cluster")], by = c("V2" = "IID"))
 
-df.dist <- read.table(paste0(plink_prefix, ".dist"))
+df.dist <- read.table(paste0(plink_prefix, ".dist"), check.names = FALSE, stringsAsFactors = FALSE)
 
 mat.dist <- as.dist(df.dist)
 
@@ -400,7 +465,7 @@ Row
 
 ```{r,  fig.height=10, fig.width=6}
 
-df.rel <- read.table(paste0(plink_prefix, ".king"))
+df.rel <- read.table(paste0(plink_prefix, ".king"), check.names = FALSE, stringsAsFactors = FALSE)
 colnames(df.rel) <- dist.id$V2
 rownames(df.rel) <- dist.id$V2
 
@@ -465,7 +530,7 @@ Row
 coords.path <- file.path(qc_dir, "coords.txt")
 
 if((file.exists(coords.path)) & (file.size(coords.path)>0)){
-    df.coords <- read.table(coords.path)
+    df.coords <- read_table_preserve_ids(coords.path, id_cols = c("V1"))
     names(df.coords) <- c("sample.ID","long","lat")
     
     if(max(df.coords$lat < 90) & min(df.coords$lat) > 0 
@@ -537,7 +602,7 @@ coords.path <- file.path(qc_dir, "coords.txt")
 
 if(file.exists(coords.path)){
   if(!is.null(input$GMKey) && nchar(input$GMKey) > 0){
-    df.coords <- read.table(coords.path, na.strings = c("", "nan"))
+    df.coords <- read_table_preserve_ids(coords.path, na.strings = c("", "nan"), id_cols = c("V1"))
     names(df.coords) <- c("sample.ID","long","lat")
     
     df.coords <- left_join(df.pca, df.coords, by = c("IID" = "sample.ID"))
@@ -594,14 +659,14 @@ k2 <- paste0(plink_prefix, ".2.Q")
 k3 <- paste0(plink_prefix, ".3.Q")
 samps <- paste0(plink_prefix, ".fam")
 
-x <- read.table(k2, header = F)
+x <- read.table(k2, header = F, check.names = FALSE, stringsAsFactors = FALSE)
 
 struct_files <- c(k2,k3)
 cat_admx <- do.call("rbind",lapply(struct_files,
                                FUN=function(files){
-                                 x <- read.table(files, header = F)
+                                 x <- read.table(files, header = F, check.names = FALSE, stringsAsFactors = FALSE)
                                  names(x) <- gsub("V", "pop", names(x)) #rename ancestral pops
-                                 x.samps <- read.table(samps) %>% select(V2) #get sample names from .fam file
+                                 x.samps <- read_table_preserve_ids(samps, id_cols = c("V1", "V2")) %>% select(V2) #get sample names from .fam file
                                  x$sampleID <- x.samps$V2 #add sample name to df
                                  x$k <- gsub(".Q","",substr(files, nchar(files)-3+1, nchar(files)))
                                  x.long <- x %>% #pivot longer 

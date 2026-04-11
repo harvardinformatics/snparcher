@@ -32,6 +32,23 @@ else:
 include: "rules/variant_calling/hard_filters.smk"
 
 
+# --- Default target ----------------------------------------------------------
+
+rule all:
+    """Default target: full pipeline."""
+    default_target: True
+    input:
+        "results/vcfs/raw.vcf.gz",
+        "results/qc_metrics/qc_report.tsv",
+        CALLABLE_TARGETS,
+        # Postprocess outputs (when enabled)
+        "results/postprocess/filtered.vcf.gz" if POSTPROCESS_ENABLED else [],
+        "results/postprocess/clean_snps.vcf.gz" if POSTPROCESS_ENABLED else [],
+        "results/postprocess/clean_indels.vcf.gz" if POSTPROCESS_ENABLED else [],
+        # QC dashboard (when enabled)
+        "results/qc/qc_dashboard.html" if config["modules"]["qc"]["enabled"] else [],
+
+
 # --- Module imports ----------------------------------------------------------
 
 if POSTPROCESS_ENABLED:

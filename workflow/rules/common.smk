@@ -399,7 +399,17 @@ def _parse_mark_duplicates(values, default):
     return pd.Series(parsed, index=values.index, dtype=bool)
 
 
-samples_df = pd.read_csv(config["samples"])
+SAMPLE_SHEET_DTYPES = {
+    "sample_id": "string",
+    "library_id": "string",
+}
+
+SAMPLE_METADATA_DTYPES = {
+    "sample_id": "string",
+}
+
+
+samples_df = pd.read_csv(config["samples"], dtype=SAMPLE_SHEET_DTYPES)
 global_mark_duplicates = bool(config["reads"]["mark_duplicates"])
 
 if "library_id" not in samples_df.columns:
@@ -694,7 +704,10 @@ def _parse_bool_column(series, column_name):
 metadata_df = None
 
 if config.get("sample_metadata"):
-    metadata_df = pd.read_csv(config["sample_metadata"])
+    metadata_df = pd.read_csv(
+        config["sample_metadata"],
+        dtype=SAMPLE_METADATA_DTYPES,
+    )
     validate(metadata_df, Path(workflow.basedir, "schemas/sample_metadata.schema.yaml"))
 
     # Validate sample_id values exist in the main sample sheet
