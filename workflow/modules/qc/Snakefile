@@ -18,6 +18,9 @@ Config keys (flat):
     qc_report         - path to BAM summary stats TSV (optional; empty = skip mapping rate panel)
     clusters          - number of k-means clusters for PCA visualization (default 3)
     min_depth         - minimum depth to include a sample (default 2)
+    max_sample_missingness - maximum genotype missingness allowed per sample
+                            in the pruned QC SNP set before PLINK drops it
+                            (default 0.49)
     google_api_key    - Google Maps API key for terrain map (default "")
     exclude_scaffolds - comma-separated scaffolds to exclude (default "")
 """
@@ -37,6 +40,7 @@ _QC_DEFAULTS = {
     "qc_report": "",
     "clusters": 3,
     "min_depth": 2,
+    "max_sample_missingness": 0.49,
     "google_api_key": "",
     "exclude_scaffolds": "",
 }
@@ -285,6 +289,7 @@ rule plink:
         king="results/qc/plink.king",
     params:
         prefix="results/qc/plink",
+        max_sample_missingness=config["max_sample_missingness"],
     conda:
         "envs/plink.yml"
     log:
@@ -292,9 +297,11 @@ rule plink:
     shell:
         """
         plink2 --vcf {input.vcf} --pca 10 --out {params.prefix} \
+            --mind {params.max_sample_missingness} \
             --allow-extra-chr --autosome-num 95 --make-bed --make-king square \
             --const-fid --bad-freqs &> {log}
         plink --vcf {input.vcf} --out {params.prefix} \
+            --mind {params.max_sample_missingness} \
             --allow-extra-chr --autosome-num 95 --distance square \
             --const-fid &>> {log}
         """

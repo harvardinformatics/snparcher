@@ -103,6 +103,7 @@ DEFAULTS = {
             "enabled": False,
             "clusters": 3,
             "min_depth": 2,
+            "max_sample_missingness": 0.49,
             "google_api_key": "",
             "exclude_scaffolds": "",
         },

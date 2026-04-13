@@ -1495,6 +1495,33 @@ def test_qc_dashboard_helper_preserves_numeric_like_ids():
         assert result.returncode == 0, (result.stdout + result.stderr).strip()
 
 
+@pytest.mark.dry_run
+def test_qc_plink_filters_sparse_samples_before_pca(request):
+    """QC PLINK step should pass a per-sample missingness filter to avoid NaN GRMs."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.dry_run(
+            target="results/qc/plink.bed",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "sample_metadata": str(TEST_DATA_DIR / "qc" / "sample_metadata.csv"),
+                "vcf": str(TEST_DATA_DIR / "qc" / "raw.vcf.gz"),
+                "fai": str(TEST_DATA_DIR / "qc" / "ref.fai"),
+                "max_sample_missingness": "0.49",
+            },
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "--mind 0.49" in output
+
+
 @pytest.mark.full_run
 def test_qc_standalone_full_run(request):
     """Full execution of QC module as standalone workflow against test fixtures."""

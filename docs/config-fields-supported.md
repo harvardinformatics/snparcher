@@ -51,6 +51,7 @@ These are the supported v2 config keys used by the main workflow. Unknown keys a
 | `modules.qc.enabled` | boolean | no | `false` | Enable QC module |
 | `modules.qc.clusters` | integer | no | `3` | `>= 1` |
 | `modules.qc.min_depth` | number | no | `2` | `>= 0` |
+| `modules.qc.max_sample_missingness` | number | no | `0.49` | `0..1` |
 | `modules.qc.google_api_key` | string | no | `""` | Optional for map panel |
 | `modules.qc.exclude_scaffolds` | string | no | `""` | Comma-separated scaffold list |
 | `modules.postprocess.enabled` | boolean | no | `false` | Enable postprocess module |
@@ -78,7 +79,7 @@ When running module Snakefiles directly (outside the main workflow module-import
 
 ### QC module (`workflow/modules/qc/Snakefile`)
 
-`samples`, `sample_metadata`, `vcf`, `fai`, `qc_report`, `clusters`, `min_depth`, `google_api_key`, `exclude_scaffolds`
+`samples`, `sample_metadata`, `vcf`, `fai`, `qc_report`, `clusters`, `min_depth`, `max_sample_missingness`, `google_api_key`, `exclude_scaffolds`
 
 ### Postprocess module (`workflow/modules/postprocess/Snakefile`)
 

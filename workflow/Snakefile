@@ -77,6 +77,7 @@ if config["modules"]["qc"]["enabled"]:
         "qc_report": "results/qc_metrics/qc_report.tsv",
         "clusters": config["modules"]["qc"]["clusters"],
         "min_depth": config["modules"]["qc"]["min_depth"],
+        "max_sample_missingness": config["modules"]["qc"]["max_sample_missingness"],
         "google_api_key": config["modules"]["qc"]["google_api_key"],
         "exclude_scaffolds": config["modules"]["qc"]["exclude_scaffolds"],
     }

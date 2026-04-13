@@ -17,6 +17,7 @@ The quality control module aggregates various statistics from the workflow and p
 |`modules.qc.clusters`| Number of clusters for PCA visualization.| `int`|
 |`modules.qc.google_api_key`| Google Maps API key for the terrain panel (optional).| `str`|
 |`modules.qc.min_depth`| Samples with average depth below this will be excluded for QC analysis.| `int`|
+|`modules.qc.max_sample_missingness`| Samples with >49% missing genotypes in the pruned QC SNP set are excluded before PLINK PCA/GRM.| `float`|
 |`modules.qc.exclude_scaffolds`| Comma-separated scaffolds to exclude from QC SNP sampling.| `str`|
 
 ```{note}
