@@ -12,9 +12,6 @@ default-resources:
 
 # Control number of threads each rule will use.
 set-threads:
-  # Mappability
-  genmap: 1
-
   # Fastq Processing
   get_fastq_pe: 6
   fastp: 6

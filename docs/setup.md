@@ -151,6 +151,8 @@ Parabricks HaplotypeCaller also follows `variant_calling.expected_coverage` to s
 |`callable_sites.mappability.merge_distance`| Merge passing mappability regions within this many base pairs. | `int`|
 |`callable_sites.coverage.merge_distance`| Merge passing coverage regions within this many base pairs. | `int`|
 
+GenMap indexing is selected automatically from the decompressed reference FASTA size. snpArcher uses the default `divsufsort` indexer for references up to 2 GiB, switches to `-S 20` above 2 GiB to reduce RAM usage, and switches to `-A skew` above 5 GiB to favor lower-memory indexing on very large genomes.
+
 #### Coverage Filtering Options
 If `callable_sites.coverage.enabled` is set to `True`, then these options control coverage-based filtering:
 
