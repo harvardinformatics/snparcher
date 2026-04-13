@@ -1,6 +1,11 @@
 from pathlib import Path
 
 
+GENMAP_SAMPLING_THRESHOLD_BYTES = 2 * 1024 * 1024 * 1024
+GENMAP_SKEW_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024
+GENMAP_SAMPLING_VALUE = 20
+
+
 def get_callable_source_beds(_wildcards):
     beds = []
     if CALLABLE_COVERAGE_ENABLED:
@@ -150,6 +155,9 @@ rule genmap_index:
         idx=directory("results/callable_sites/genmap_index"),
     params:
         ref_decompressed=lambda wc, input: input.ref.replace(".gz", ""),
+        sampling_threshold_bytes=GENMAP_SAMPLING_THRESHOLD_BYTES,
+        skew_threshold_bytes=GENMAP_SKEW_THRESHOLD_BYTES,
+        sampling_value=GENMAP_SAMPLING_VALUE,
     conda:
         "../envs/genmap.yaml"
     benchmark:
@@ -158,9 +166,27 @@ rule genmap_index:
         "logs/genmap_index.txt"
     shell:
         """
-        gunzip -c {input.ref} > {params.ref_decompressed}
-        genmap index -F {params.ref_decompressed} -I {output.idx} &> {log}
-        rm {params.ref_decompressed}
+        set -euo pipefail
+
+        REF_FASTA="{params.ref_decompressed}"
+        trap 'rm -f "$REF_FASTA"' EXIT
+
+        gunzip -c "{input.ref}" > "$REF_FASTA"
+        SIZE_BYTES=$(wc -c < "$REF_FASTA" | tr -d '[:space:]')
+
+        : > "{log}"
+        echo "Decompressed FASTA size (bytes): $SIZE_BYTES" >> "{log}"
+
+        if (( SIZE_BYTES > {params.skew_threshold_bytes} )); then
+            echo "GenMap index mode: skew (-A skew)" >> "{log}"
+            genmap index -F "$REF_FASTA" -I "{output.idx}" -A skew >> "{log}" 2>&1
+        elif (( SIZE_BYTES > {params.sampling_threshold_bytes} )); then
+            echo "GenMap index mode: sampled (-S {params.sampling_value})" >> "{log}"
+            genmap index -F "$REF_FASTA" -I "{output.idx}" -S {params.sampling_value} >> "{log}" 2>&1
+        else
+            echo "GenMap index mode: default (divsufsort)" >> "{log}"
+            genmap index -F "$REF_FASTA" -I "{output.idx}" >> "{log}" 2>&1
+        fi
         """
 
 
