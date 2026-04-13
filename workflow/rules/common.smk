@@ -1,6 +1,15 @@
 from importlib.metadata import PackageNotFoundError, version
+import logging
 import os
+import platform
+import pwd
+import re
+import socket
+import subprocess
+import sys
+from datetime import datetime
 from pathlib import Path
+
 import pandas as pd
 import snakemake
 import yaml
@@ -748,3 +757,149 @@ def get_ingroup_samples():
     excluded = set(get_excluded_samples())
     outgroup = set(get_outgroup_samples())
     return [s for s in SAMPLES_ALL if s not in excluded and s not in outgroup]
+
+
+# --- Debug banner ---
+
+
+def _get_snparcher_version():
+    """Get snpArcher version from pyproject.toml, with optional git hash."""
+    import tomllib
+
+    ver = "unknown"
+    toml_path = Path(workflow.basedir).parent / "pyproject.toml"
+    try:
+        with open(toml_path, "rb") as f:
+            ver = tomllib.load(f)["project"]["version"]
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True,
+            cwd=Path(workflow.basedir).parent,
+        )
+        git_hash = result.stdout.strip()
+        if git_hash:
+            ver += "-" + git_hash
+    except Exception:
+        pass
+    return ver
+
+
+def print_debug_banner():
+    """Print snpArcher startup banner with environment and config info."""
+    indent = 24
+
+    # Environment info
+    username = pwd.getpwuid(os.getuid())[0]
+    hostname = socket.gethostname()
+    if platform.node() != hostname:
+        hostname += "; " + platform.node()
+
+    try:
+        conda_proc = subprocess.run(
+            ["conda", "--version"], capture_output=True, text=True
+        )
+        conda_ver = conda_proc.stdout.strip().removeprefix("conda ").strip()
+        if not conda_ver:
+            conda_ver = "n/a"
+    except Exception:
+        conda_ver = "n/a"
+
+    conda_env_name = os.environ.get("CONDA_DEFAULT_ENV", "")
+    conda_prefix = os.environ.get("CONDA_PREFIX", "")
+    if conda_env_name or conda_prefix:
+        conda_env = f"{conda_env_name} ({conda_prefix})"
+    else:
+        conda_env = "n/a"
+
+    # Command line
+    cmdline = sys.argv[0]
+    for i in range(1, len(sys.argv)):
+        if sys.argv[i].startswith("--"):
+            cmdline += "\n" + (" " * indent) + sys.argv[i]
+        else:
+            cmdline += " " + sys.argv[i]
+
+    # Profile (from --profile or --workflow-profile args)
+    profile = "none"
+    for i, arg in enumerate(sys.argv):
+        if arg in ("--profile", "--workflow-profile") and i + 1 < len(sys.argv):
+            profile = sys.argv[i + 1]
+            break
+        if arg.startswith("--profile="):
+            profile = arg.split("=", 1)[1]
+            break
+        if arg.startswith("--workflow-profile="):
+            profile = arg.split("=", 1)[1]
+            break
+
+    # Config files
+    cfgfiles = [os.path.abspath(str(cfg)) for cfg in workflow.configfiles]
+    cfgfiles_str = ("\n" + " " * indent).join(cfgfiles) if cfgfiles else "none"
+
+    # Samples summary
+    type_counts = samples_df.groupby("input_type")["sample_id"].nunique()
+    samples_summary = f"{len(SAMPLES_ALL)} total"
+    type_parts = [f"{count} {itype}" for itype, count in sorted(type_counts.items())]
+    if type_parts:
+        samples_summary += " (" + ", ".join(type_parts) + ")"
+
+    # Thread overrides
+    thread_overrides = getattr(
+        workflow.resource_settings, "_parsed_overwrite_threads", {}
+    )
+    thread_str = (
+        ", ".join(f"{k}={v}" for k, v in sorted(thread_overrides.items()))
+        if thread_overrides
+        else "none"
+    )
+
+    # Resource overrides
+    resource_overrides = getattr(
+        workflow.resource_settings, "_parsed_overwrite_resources", {}
+    )
+    resource_str = (
+        ", ".join(
+            f"{rule}: {', '.join(f'{k}={v}' for k, v in sorted(res.items()))}"
+            for rule, res in sorted(resource_overrides.items())
+        )
+        if resource_overrides
+        else "none"
+    )
+
+    logger.info("=" * 70)
+    logger.info("    snpArcher " + _get_snparcher_version())
+    logger.info("")
+    logger.info("    Date:               " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    logger.info("    Platform:           " + platform.platform())
+    logger.info("    Host:               " + hostname)
+    logger.info("    User:               " + username)
+    logger.info("    Python:             " + sys.version.split(" ")[0])
+    logger.info("    Snakemake:          " + str(snakemake.__version__))
+    logger.info("    Conda:              " + conda_ver)
+    logger.info("    Conda env:          " + conda_env)
+    logger.info("")
+    logger.info("    Base directory:     " + workflow.basedir)
+    logger.info("    Working directory:  " + os.getcwd())
+    logger.info("    Config file(s):     " + cfgfiles_str)
+    logger.info("    Command:            " + cmdline)
+    logger.info("    Profile:            " + profile)
+    logger.info("")
+    logger.info("    Reference:          " + REF_NAME + " (" + config["reference"]["source"] + ")")
+    logger.info("    Variant tool:       " + VARIANT_TOOL)
+    logger.info("    Ploidy:             " + str(config["variant_calling"]["ploidy"]))
+    logger.info("    Expected coverage:  " + str(config["variant_calling"]["expected_coverage"]))
+    logger.info("    Intervals:          " + str(config["intervals"]["enabled"]))
+    logger.info("    Modules:            " + "qc=" + str(config["modules"]["qc"]["enabled"]) + ", postprocess=" + str(config["modules"]["postprocess"]["enabled"]))
+    logger.info("    Samples:            " + samples_summary)
+    logger.info("    Thread overrides:   " + thread_str)
+    logger.info("    Resource overrides: " + resource_str)
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("")
+
+
+if workflow.is_main_process:
+    print_debug_banner()
