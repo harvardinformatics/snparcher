@@ -91,23 +91,6 @@ if config["modules"]["qc"]["enabled"]:
 onerror:
     print_debug_banner()
 
-
-# --- Default target ----------------------------------------------------------
-
-rule all:
-    """Default target: full pipeline."""
-    input:
-        "results/vcfs/raw.vcf.gz",
-        "results/qc_metrics/qc_report.tsv",
-        CALLABLE_TARGETS,
-        # Postprocess outputs (when enabled)
-        "results/postprocess/filtered.vcf.gz" if POSTPROCESS_ENABLED else [],
-        "results/postprocess/clean_snps.vcf.gz" if POSTPROCESS_ENABLED else [],
-        "results/postprocess/clean_indels.vcf.gz" if POSTPROCESS_ENABLED else [],
-        # QC dashboard (when enabled)
-        "results/qc/qc_dashboard.html" if config["modules"]["qc"]["enabled"] else [],
-
-
 rule setup:
     """
     Prepare reference, indices, and intervals.
