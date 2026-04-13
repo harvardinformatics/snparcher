@@ -235,6 +235,11 @@ properties:
             type: number
             minimum: 0
             default: 2
+          max_sample_missingness:
+            type: number
+            minimum: 0
+            maximum: 1
+            default: 0.49
           google_api_key:
             type: string
             default: ""

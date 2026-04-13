@@ -11,5 +11,6 @@ qc_report: ""                  # optional: path to BAM summary stats TSV (empty 
 
 clusters: 3                    # k-means clusters for PCA visualization
 min_depth: 2                   # minimum depth to include a sample
+max_sample_missingness: 0.49   # drop sparse samples before PLINK PCA/GRM
 google_api_key: ""             # Google Maps API key for terrain map
 exclude_scaffolds: ""          # comma-separated scaffolds to exclude
