@@ -327,6 +327,253 @@ Likely not reusable as-is:
 - postprocess missingness filtering as a default
 - the old `degenotate` module assumptions
 
+## Direct `mkado` Code Review Notes
+
+The notes above were initially based on `mkado` docs. After a direct code review of the current `mkado` source, the main conclusions are:
+
+- `mkado vcf` currently supports exactly one outgroup VCF
+- the VCF path supports one-outgroup allele-frequency polarization, but not full polarized MK with a second outgroup
+- the full polarized MK implementation exists only on the FASTA/alignment side
+- the main structural reason is that the VCF path collapses early into summary data, while the FASTA path keeps a codon-aware sequence representation much longer
+
+In practical terms:
+
+- VCF mode can determine whether the ALT or REF state is derived using one outgroup
+- VCF mode can compute standard MK, asymptotic MK, imputed MK, and `alpha_tg`
+- VCF mode does not currently expose or implement the second-outgroup lineage-assignment logic used by `polarized_mk_test`
+
+## `mkado` Internal Structure
+
+The current `mkado` internals matter for any future attempt to add polarized MK to the VCF path.
+
+### FASTA Path
+
+The FASTA side uses a codon-aware representation throughout:
+
+- `Sequence`
+- `SequenceSet`
+- `AlignedPair`
+- `PolarizedAlignedPair`
+
+This is the canonical biological logic layer in `mkado`.
+
+Key implications:
+
+- FASTA mode naturally supports codon-by-codon comparison between ingroup and outgroup
+- polarized MK works here because the code has access to a second outgroup and can assign changes to lineages before collapsing to summary statistics
+
+### VCF Path
+
+The VCF side uses a different structure:
+
+1. parse GFF3 into CDS regions
+2. query ingroup VCF, outgroup VCF, and reference FASTA per gene
+3. reconstruct enough codon context to classify variants
+4. collapse quickly into per-gene summary data
+
+That summary is essentially:
+
+- polymorphism frequencies and synonymous/non-synonymous labels
+- `dn`
+- `ds`
+- site totals
+
+This is efficient, but it loses the richer state needed for full polarized MK.
+
+## Where the FASTA and VCF Paths Diverge
+
+At a high level:
+
+- FASTA mode keeps full codon-state information long enough to support all analysis types
+- VCF mode computes codon consequences on the fly and then throws away most of the raw state
+
+This means the two paths are currently unified only at the downstream analysis/output layer, not at the underlying biological-state layer.
+
+### Shared Today
+
+The two paths are already aligned at the level of:
+
+- standard result objects
+- asymptotic summary data
+- output formatting
+- plotting/output conventions
+
+### Not Shared Today
+
+They are not aligned at the level of:
+
+- codon-state representation
+- population/outgroup allele-state handling
+- polarized lineage assignment
+
+This is the main reason polarized MK is easy on the FASTA side and absent on the VCF side.
+
+## Design Choices for Adding Polarized MK to VCF
+
+The main design choices currently look like this.
+
+### Option 1. Add a VCF-Specific Polarized Path
+
+Restatement:
+
+- keep the current VCF architecture
+- add second-outgroup VCF support
+- implement polarized counting directly in VCF extraction/worker code
+
+Pros:
+
+- smallest architectural change
+- fastest route to a working feature
+- least disruptive to the existing FASTA code
+- fits naturally with the current VCF implementation style
+
+Cons:
+
+- duplicates logic that already exists on the FASTA side
+- increases the risk that FASTA and VCF polarization behavior drift apart
+- likely requires many VCF-specific decisions about ambiguity, heterozygous outgroups, and missing data
+- makes long-term maintenance less clean
+
+When it makes sense:
+
+- if the priority is adding polarized VCF support quickly
+- if exact FASTA/VCF internal consistency is less important than feature delivery
+
+### Option 2. Reconstruct `SequenceSet`-Like Inputs from VCF
+
+Restatement:
+
+- use VCF + reference + GFF3 to reconstruct per-gene coding sequences
+- feed those reconstructed sequences into the existing FASTA-side machinery
+
+Pros:
+
+- reuses the existing polarized MK implementation directly
+- keeps one canonical place for lineage-polarization logic
+- gives the best chance of FASTA and VCF behaving identically
+
+Cons:
+
+- requires manufacturing aligned sequence representations from sparse variant data
+- heavier in CPU and memory than the current VCF extractor
+- forces VCF data into an abstraction originally designed for aligned FASTA input
+- handling missing data, heterozygotes, and genotype ambiguity becomes more complicated
+
+When it makes sense:
+
+- if maximum reuse and parity with FASTA mode matter more than implementation simplicity
+
+### Option 3. Introduce a Shared Intermediate Gene-State Object
+
+Restatement:
+
+- refactor both FASTA and VCF parsing so they produce the same richer per-gene internal structure
+- run standard, asymptotic, imputed, and polarized MK from that shared layer
+
+This should probably be a new object rather than extending `PolymorphismData`, because `PolymorphismData` is currently a summary object, not a full state object.
+
+Pros:
+
+- cleanest long-term architecture
+- does not force VCF into fake FASTA objects
+- does not keep VCF as a permanently separate special case
+- creates a natural place for future cross-input feature parity
+
+Cons:
+
+- largest design/refactor effort
+- touches more code than the other choices
+- requires careful design of the new shared representation
+- may be overkill if polarized MK is the only missing feature
+
+When it makes sense:
+
+- if long-term architecture and future extensibility matter
+- if more FASTA/VCF consistency work is likely later
+
+### Option 4. Build a Narrow VCF Codon-State Adapter
+
+Restatement:
+
+- do not reconstruct literal `SequenceSet` objects
+- do not fully refactor the whole package
+- instead, build a VCF-specific per-gene codon-state adapter that exposes enough information for polarized logic to run in a shared or nearly shared way
+
+This is a middle ground between Option 1 and Option 3.
+
+Pros:
+
+- less duplicated logic than a fully separate VCF-only implementation
+- lighter than reconstructing full FASTA-style sequences
+- smaller scope than a full package-wide refactor
+
+Cons:
+
+- still introduces extra abstraction layers
+- may become an awkward half-step if it is not clearly scoped
+- may eventually want to evolve into Option 3 anyway
+
+When it makes sense:
+
+- if a moderate architectural improvement is desired without a full redesign
+
+### Option 5. Do Not Add Polarized MK to the VCF Path
+
+Restatement:
+
+- keep full polarized MK as FASTA-only
+- treat VCF mode as standard/asymptotic/imputed/`alpha_tg` only
+
+Pros:
+
+- no implementation cost
+- avoids adding a complex feature without a clear consensus design
+- keeps the current VCF path simple and stable
+
+Cons:
+
+- VCF mode remains feature-incomplete relative to FASTA mode
+- users starting from variant calls would need an extra export/reconstruction step for full polarized MK
+
+When it makes sense:
+
+- if maintainers do not want to commit to a more complex VCF architecture yet
+
+## Current Architectural Recommendation
+
+If the goal is to get polarized MK working from VCF with minimal delay:
+
+- Option 1 or Option 4 are the most practical
+
+If the goal is to improve `mkado` architecture and make FASTA/VCF behavior more coherent long-term:
+
+- Option 3 is probably the strongest design
+
+If the goal is to maximize reuse of existing polarized logic with the least biological duplication:
+
+- Option 2 is the most direct, but likely heavier than it first appears
+
+## Discussion Notes for `mkado` Maintainers
+
+Questions worth discussing with `mkado` maintainers before any implementation work:
+
+- whether they want one canonical biological implementation shared by FASTA and VCF
+- whether VCF should remain a fast summary-extraction path or move toward a richer internal representation
+- how heterozygous and ambiguous outgroup genotypes should be treated for full polarization
+- whether a second-outgroup VCF interface is desirable at all
+- whether a new shared intermediate object would be acceptable in the package architecture
+- whether exact FASTA/VCF parity is a design goal
+
+## Updated MVP Guidance
+
+Given the current state of `mkado`, the minimum viable `snpArcher` integration should still assume:
+
+- standard MK from `mkado vcf` is supported
+- one-outgroup VCF polarization of derived allele frequency is supported
+- full polarized MK with a second outgroup is not currently available from the VCF path
+
+That means the `snpArcher` MVP should not plan around polarized MK in VCF mode unless `mkado` itself changes.
+
 ## Open Questions
 
 ### 1. Should callable BED be mandatory?
