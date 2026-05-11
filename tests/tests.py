@@ -252,6 +252,54 @@ def write_numeric_qc_inputs(out_dir):
     return out_vcf, out_fai
 
 
+def write_qc_vcf_without_gatk_annotations(out_dir):
+    """Write a small QC VCF whose header lacks GATK-specific INFO annotations."""
+    out_dir = Path(out_dir)
+    out_vcf = out_dir / "missing_gatk_annotations_raw.vcf.gz"
+    sample_names = [
+        line.strip()
+        for line in (TEST_DATA_DIR / "qc" / "samples.csv").read_text().splitlines()[1:]
+        if line.strip()
+    ]
+    with open(TEST_DATA_DIR / "qc" / "ref.fai") as handle:
+        contig = handle.readline().split()[0]
+
+    header = [
+        "##fileformat=VCFv4.2",
+        '##FILTER=<ID=PASS,Description="All filters passed">',
+        f"##contig=<ID={contig}>",
+        '##INFO=<ID=AF,Number=A,Type=Float,Description="Allele frequency">',
+        '##INFO=<ID=MQ,Number=1,Type=Float,Description="RMS mapping quality">',
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">',
+        '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read depth">',
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(sample_names),
+    ]
+    genotypes = [
+        f"{'0/1' if sample_idx < 4 else '0/0'}:10"
+        for sample_idx, _sample in enumerate(sample_names)
+    ]
+    record = [
+        contig,
+        "1",
+        ".",
+        "A",
+        "G",
+        "60",
+        "PASS",
+        "AF=0.02;MQ=50",
+        "GT:DP",
+        *genotypes,
+    ]
+
+    with gzip.open(out_vcf, "wt") as handle:
+        handle.write("\n".join(header))
+        handle.write("\n")
+        handle.write("\t".join(record))
+        handle.write("\n")
+
+    return out_vcf, sample_names
+
+
 def get_vcf_contig_headers(path):
     """Return contig IDs declared in the VCF header."""
     opener = gzip.open if str(path).endswith(".gz") else open
@@ -1330,6 +1378,7 @@ def test_qc_dry_run(request):
         # copy_qc_report should appear since main workflow provides qc_report
         assert "qc_copy_qc_report" in output, \
             "Expected qc_copy_qc_report rule in DAG"
+        assert "bcftools query --allow-undef-tags" in output
 
 
 @pytest.mark.dry_run
@@ -1520,6 +1569,54 @@ def test_qc_plink_filters_sparse_samples_before_pca(request):
 
         output = result.stdout + result.stderr
         assert "--mind 0.49" in output
+
+
+@pytest.mark.full_run
+def test_qc_subsample_snps_allows_missing_gatk_annotations(request):
+    """SNP QC export should emit dots when caller-specific annotations are absent."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        missing_annotations_vcf, sample_names = write_qc_vcf_without_gatk_annotations(tmpdir)
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        sample_filter = Path(tmpdir) / "results" / "qc" / "individuals.samps.txt"
+        sample_filter.parent.mkdir(parents=True, exist_ok=True)
+        sample_filter.write_text("\n".join(sample_names) + "\n")
+        result = smk.run(
+            target="results/qc/snpqc.txt",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "vcf": str(missing_annotations_vcf),
+                "fai": str(TEST_DATA_DIR / "qc" / "ref.fai"),
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools")
+        result.assert_success()
+        result.assert_output_exists("results/qc/snpqc.txt")
+
+        snpqc = Path(tmpdir) / "results" / "qc" / "snpqc.txt"
+        rows = [
+            line.rstrip("\n").split("\t")
+            for line in snpqc.read_text().splitlines()
+            if line.strip()
+        ]
+        assert rows, "Expected SNP QC rows"
+        assert all(len(row) == 10 for row in rows)
+
+        with open(TEST_DATA_DIR / "qc" / "ref.fai") as handle:
+            contig = handle.readline().split()[0]
+        first = rows[0]
+        assert first[0] == contig
+        assert first[1] == "1"
+        assert first[3] == "0.02"
+        assert first[4] == "60"
+        assert first[5:8] == [".", ".", "."]
+        assert first[8] == "50"
+        assert first[9] == "."
 
 
 @pytest.mark.full_run

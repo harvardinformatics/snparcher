@@ -193,7 +193,7 @@ rule subsample_snps:
                 -e 'AF==1 | AF==0 | AF<0.01 | ALT="*" | F_MISSING > 0.75 | TYPE~"indel" | ref="N"' \
                 {input.vcf} -O z -o {output.filtered} &> {log}
         fi
-        bcftools index {output.filtered} &>> {log}
+        bcftools index {output.filtered} >> {log} 2>&1
 
         # Figure out window size to get ~100k SNPs
         ALLSITES=$(bcftools query -f '%CHROM\\t%POS\\n' {output.filtered} | wc -l)
@@ -202,12 +202,12 @@ rule subsample_snps:
         # If < 150k SNPs, take all; otherwise prune
         if [[ $SITES -gt 1 ]]
         then
-            bcftools +prune -w $SITES -n 1 -N rand -O z -o {output.pruned} {output.filtered} &>> {log}
+            bcftools +prune -w $SITES -n 1 -N rand -O z -o {output.pruned} {output.filtered} >> {log} 2>&1
         else
-            bcftools view -O z -o {output.pruned} {output.filtered} &>> {log}
+            bcftools view -O z -o {output.pruned} {output.filtered} >> {log} 2>&1
         fi
 
-        bcftools query -f '%CHROM\\t%POS\\t%ID\\t%INFO/AF\\t%QUAL\\t%INFO/ReadPosRankSum\\t%INFO/FS\\t%INFO/SOR\\t%INFO/MQ\\t%INFO/MQRankSum\\n' \
+        bcftools query --allow-undef-tags -f '%CHROM\\t%POS\\t%ID\\t%INFO/AF\\t%QUAL\\t%INFO/ReadPosRankSum\\t%INFO/FS\\t%INFO/SOR\\t%INFO/MQ\\t%INFO/MQRankSum\\n' \
             {output.pruned} > {output.snpqc} 2>> {log}
         """
 
