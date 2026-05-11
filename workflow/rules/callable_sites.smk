@@ -141,9 +141,10 @@ rule coverage_bed:
         "logs/coverage_bed.txt"
     shell:
         """
-        python {params.script} {input.zarr} /dev/stdout --fraction {params.fraction} 2> {log} \
-            | bedtools sort -i - 2>> {log} \
-            | bedtools merge -d {params.merge_distance} -i - > {output.bed} 2>> {log}
+        python {params.script} {input.zarr} {output.bed} \
+            --fraction {params.fraction} \
+            --merge-distance {params.merge_distance} \
+            &> {log}
         """
 
 

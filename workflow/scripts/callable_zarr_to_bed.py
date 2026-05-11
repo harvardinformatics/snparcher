@@ -5,6 +5,7 @@ Convert a clam per-sample callable Zarr into merged BED intervals.
 Example:
     python scripts/callable_zarr_to_bed.py callable_masks.zarr callable.bed
     python scripts/callable_zarr_to_bed.py callable_masks.zarr callable.bed --fraction 0.8
+    python scripts/callable_zarr_to_bed.py callable_masks.zarr callable.bed --merge-distance 100
 """
 
 from __future__ import annotations
@@ -12,8 +13,9 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -41,6 +43,15 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="Minimum fraction of samples that must be callable at a site. Default: 1.0",
     )
+    parser.add_argument(
+        "--merge-distance",
+        type=int,
+        default=0,
+        help=(
+            "Merge passing intervals separated by no more than this many base pairs. "
+            "Default: 0"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -52,6 +63,11 @@ def die(message: str) -> int:
 def validate_fraction(fraction: float) -> None:
     if not 0.0 <= fraction <= 1.0:
         raise ValueError(f"--fraction must be between 0 and 1 inclusive, got {fraction}")
+
+
+def validate_merge_distance(merge_distance: int) -> None:
+    if merge_distance < 0:
+        raise ValueError(f"--merge-distance must be non-negative, got {merge_distance}")
 
 
 def import_zarr() -> Any:
@@ -137,7 +153,7 @@ def iter_true_runs(mask: np.ndarray) -> Iterable[tuple[int, int]]:
     starts = np.flatnonzero(transitions == 1)
     ends = np.flatnonzero(transitions == -1)
 
-    for start, end in zip(starts, ends):
+    for start, end in zip(starts, ends, strict=True):
         yield int(start), int(end)
 
 
@@ -146,6 +162,7 @@ def write_bed_intervals(
     contigs: list[dict[str, Any]],
     total_samples: int,
     min_callable_samples: int,
+    merge_distance: int,
     output_bed: Path,
 ) -> None:
     output_bed.parent.mkdir(parents=True, exist_ok=True)
@@ -191,7 +208,7 @@ def write_bed_intervals(
                     if current_start is None:
                         current_start = abs_start
                         current_end = abs_end
-                    elif abs_start == current_end:
+                    elif abs_start <= current_end + merge_distance:
                         current_end = abs_end
                     else:
                         handle.write(f"{name}\t{current_start}\t{current_end}\n")
@@ -209,8 +226,8 @@ def register_packbits_codec() -> None:
     registered by default, so we provide a compatible implementation here.
     """
     try:
-        import numpy as np
         from dataclasses import dataclass
+
         from zarr.abc.codec import ArrayBytesCodec
         from zarr.registry import register_codec
 
@@ -248,6 +265,7 @@ def main() -> int:
     register_packbits_codec()
     try:
         validate_fraction(args.fraction)
+        validate_merge_distance(args.merge_distance)
         group = open_group(args.callable_zarr)
         metadata = get_clam_metadata(group)
         contigs, column_names = validate_callable_metadata(metadata)
@@ -259,6 +277,7 @@ def main() -> int:
             contigs=contigs,
             total_samples=total_samples,
             min_callable_samples=min_callable_samples,
+            merge_distance=args.merge_distance,
             output_bed=args.output_bed,
         )
     except Exception as exc:
