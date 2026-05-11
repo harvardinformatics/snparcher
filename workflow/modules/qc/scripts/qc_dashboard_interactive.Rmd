@@ -1,11 +1,11 @@
 ---
 title: "QC Dashboard"
-output: 
+output:
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: scroll
     theme: bootstrap
-editor_options: 
+editor_options:
   chunk_output_type: console
 params:
   qc_dir: "results/qc"
@@ -96,11 +96,52 @@ read_table_preserve_ids <- function(file = NULL, text = NULL, id_cols = characte
   do.call(read.table, read_args)
 }
 
+sanitize_depth_values <- function(depth_values) {
+  depth_values <- suppressWarnings(as.numeric(depth_values))
+  depth_values[!is.finite(depth_values)] <- NA_real_
+  depth_values
+}
+
+load_depth_table <- function(depth_path) {
+  depth_df <- read_table_preserve_ids(depth_path, header = TRUE, id_cols = c("INDV"))
+  if (!"MEAN_DEPTH" %in% names(depth_df)) {
+    stop(paste("Depth table is missing MEAN_DEPTH:", depth_path))
+  }
+  depth_df$MEAN_DEPTH <- sanitize_depth_values(depth_df$MEAN_DEPTH)
+  if ("N_SITES" %in% names(depth_df)) {
+    depth_df$N_SITES <- suppressWarnings(as.numeric(depth_df$N_SITES))
+  }
+  depth_df
+}
+
+finite_depth_available <- function(depth_df) {
+  "MEAN_DEPTH" %in% names(depth_df) && any(is.finite(depth_df$MEAN_DEPTH))
+}
+
+depth_pc_r2 <- function(data) {
+  complete <- data[
+    is.finite(data$MEAN_DEPTH) & is.finite(data$value),
+    ,
+    drop = FALSE
+  ]
+  if (nrow(complete) < 2) {
+    return(NA_real_)
+  }
+  r2 <- tryCatch(
+    summary(lm(MEAN_DEPTH ~ value, data = complete))$r.squared,
+    error = function(e) NA_real_
+  )
+  if (!is.finite(r2)) {
+    return(NA_real_)
+  }
+  round(r2, 2)
+}
+
 ```
 
 
 Individuals
-===================================== 
+=====================================
 
 Row
 -----------------------------------------------------------------------
@@ -121,10 +162,10 @@ snps_remain <- first_line[1,2]
 snps_remain.m <- round(snps_remain / 1000000,1)
 
 #how many SNPs got filtered
-other_lines <- df_sum %>% 
-  filter(FILTER!=".") %>% 
+other_lines <- df_sum %>%
+  filter(FILTER!=".") %>%
   summarise(sum_snps = sum(N_VARIANTS))
-fil_snps <- other_lines[1,1]  
+fil_snps <- other_lines[1,1]
 tot_snps <- snps_remain + fil_snps
 
 proj_name <- basename(qc_dir)
@@ -133,7 +174,9 @@ proj_name <- basename(qc_dir)
 nums.nps <- nrow(read.table(paste0(plink_prefix, ".bim"), header = T, check.names = FALSE, stringsAsFactors = FALSE))
 
 #estimate watterson's theta:
-num.samples <- nrow(read_table_preserve_ids(paste0(vcf_prefix, ".idepth"), header = T, id_cols = c("INDV")))
+depth.path <- paste0(vcf_prefix, ".idepth")
+df.depth <- load_depth_table(depth.path)
+num.samples <- nrow(df.depth)
 
 #harmonic number calculation for n-1 chromosomes (2*sample size)
 Hn = 0
@@ -170,7 +213,12 @@ valueBox(div_text, icon = "fa-dna")
 ### Mean depth
 
 ```{r}
-mean.depth <- round(mean(read_table_preserve_ids(paste0(vcf_prefix, ".idepth"), header = T, id_cols = c("INDV"))$MEAN_DEPTH), 1)
+finite.depth <- df.depth$MEAN_DEPTH[is.finite(df.depth$MEAN_DEPTH)]
+mean.depth <- if (length(finite.depth) > 0) {
+  round(mean(finite.depth), 1)
+} else {
+  NA
+}
 valueBox(mean.depth, icon = "fa-align-center")
 ```
 
@@ -180,7 +228,7 @@ Column {.sidebar}
 
 This is an individual quality control report generated snpArcher for the dataset `r proj_name`. In total, `r tot_snps` SNPs were discovered before any filters were applied. The GATK best practices filters were then applied to this dataset and `r fil_snps` were removed, leaving `r snps_remain`. The approximate nucleotide diversity in the sample using the Watterson estimator is `r w_theta `%. For the purposes of this report, we apply several sensible filters including removing all indels, non-biallelic SNPs, SNPs with a minor allele frequency < 0.01, SNPs with >75% missing data, and samples with <2x sequencing depth. We then randomly selected SNPs within a set window size to end up with approximately 100k SNPs (in this report, `r nums.nps`). These are effectively an LD pruned set of SNPs. All analyses in this report are based on this set of 100k SNPs. **This should not be considered a final analyses and are solely intended to direct quality control of the dataset. **
 
-Row 
+Row
 -----------------------------------------------------------------------
 
 ```{r}
@@ -208,9 +256,6 @@ df.val <- read.table(paste0(plink_prefix, ".eigenval"), header = FALSE, check.na
 df.val$prop <- (df.val$V1 / (sum(df.val$V1))) * 100
 df.val$PC <- paste0("PC", row.names(df.val))
 
-#add depth
-depth.path <- paste0(vcf_prefix, ".idepth")
-df.depth <- read_table_preserve_ids(depth.path, header = T, id_cols = c("INDV"))
 df.depth <- df.depth %>%  mutate_if(is.numeric, round, digits = 2)
 
 df.pca <- left_join(df.pca, df.depth, by = c("IID" = "INDV"))
@@ -221,15 +266,15 @@ df.pca$cluster <- paste("cluster",k$cluster, sep = "_")
 
 
 ##PCA plot
-(ggplot(data = df.pca, aes(x = PC1, y = PC2, text = IID, fill = cluster), color = "grey90") + 
-  geom_point(alpha = 0.9, shape = 21, size = 3) + 
+(ggplot(data = df.pca, aes(x = PC1, y = PC2, text = IID, fill = cluster), color = "grey90") +
+  geom_point(alpha = 0.9, shape = 21, size = 3) +
   theme_bw() +
   theme(text = element_text(size = 14),
         legend.position = "none") +
   xlab(paste0("PC1", ": ", round(df.val[1,2],1),"% variance")) +
   ylab(paste0("PC2", ": ", round(df.val[2,2],1),"% variance")) +
-  scale_fill_manual(values = set.colors)) %>% 
-  ggplotly(tooltip=c("text","x","y")) 
+  scale_fill_manual(values = set.colors)) %>%
+  ggplotly(tooltip=c("text","x","y"))
 
 ```
 
@@ -237,112 +282,120 @@ df.pca$cluster <- paste("cluster",k$cluster, sep = "_")
 
 ### Depth and PC Correlation
 
-```{r, fig.width = 4, fig.height = 8}
+```{r, fig.width = 4, fig.height = 8, results='asis'}
 
+if (finite_depth_available(df.depth)) {
+  #pivot longer so we can plot as a facet
+  df.pca.long <- df.pca %>%
+    pivot_longer(cols = matches("^PC[0-9]+$"), names_to = "PC") %>%
+    mutate(PC = factor(PC, levels = c("PC1", "PC2", "PC3", "PC4", "PC5",
+                                      "PC6", "PC7", "PC8", "PC9", "PC10")))
 
-#pivot longer so we can plot as a facet
-df.pca.long <- df.pca %>% 
-  select(-cluster, -N_SITES) %>% 
-  pivot_longer(cols = -c("IID", "MEAN_DEPTH"), names_to = "PC") %>% 
-  mutate(PC = factor(PC, levels = c("PC1", "PC2", "PC3", "PC4", "PC5",
-                                    "PC6", "PC7", "PC8", "PC9", "PC10")))
+  #get % var expl
+  df.pca.long <- left_join(df.pca.long, df.val, by = "PC")
 
-#get % var expl
-df.pca.long <- left_join(df.pca.long, df.val, by = "PC")
+  df.pca.long <- df.pca.long %>%
+    mutate(PC.lab = paste0(PC, " (" , round(prop,0),"%)"),
+           order = as.numeric(gsub("PC","",PC)),
+           PC.lab = factor(PC.lab))
 
-df.pca.long <- df.pca.long %>% 
-  mutate(PC.lab = paste0(PC, " (" , round(prop,0),"%)"),
-         order = as.numeric(gsub("PC","",PC)),
-         PC.lab = factor(PC.lab))
+  df.pca.long$PC.lab <- reorder(df.pca.long$PC.lab, df.pca.long$order)
 
-df.pca.long$PC.lab <- reorder(df.pca.long$PC.lab, df.pca.long$order)
+  #it is easier to visualize just 6 PCs, rather than all 10
+  df.pca.long <- df.pca.long %>% filter(PC %in% c("PC1", "PC2", "PC3", "PC4", "PC5", "PC6"))
 
-#it is easier to visualize just 6 PCs, rather than all 10
-df.pca.long <- df.pca.long %>% filter(PC %in% c("PC1", "PC2", "PC3", "PC4", "PC5", "PC6")) 
+  df.r2 <- df.pca.long %>%
+    group_by(PC.lab) %>%
+    nest() %>%
+    mutate(R2 = map_dbl(data, depth_pc_r2)) %>%
+    select(PC.lab, R2) %>%
+    as.data.frame()
 
-df.r2 <- df.pca.long %>% 
-  group_by(PC.lab) %>% 
-  nest() %>% #create a tibble of dataframes
-  mutate(Mod = map(data, ~lm(MEAN_DEPTH ~ value, data = .x))) %>% #add model result to the dataframe as a list
-  mutate(R2 = map_dbl(Mod, ~round(summary(.x)$r.squared, 2))) #extract R2 from the model
-
-df.r2 <- df.r2 %>% 
-  select(PC.lab, R2) %>% 
-  as.data.frame()
-
-(df.pca.long %>% 
-  ggplot() + 
-    geom_point(aes(x = value, y = MEAN_DEPTH, text = IID)) +
-    facet_wrap(~ PC.lab, ncol = 3) +
-    geom_text(data = df.r2, aes(x = 0, y = 1,
-              label = paste("R2 = ", R2, sep = " ")),
-              color = "blue", size = 3) +
-    theme_bw() +
-    theme(axis.text.x = element_text(angle = 90)) +
-    labs(x = NULL, y = "SNP Depth")) %>% 
-  ggplotly(tooltip = c("text", "x", "y"))
+  (df.pca.long %>%
+    ggplot() +
+      geom_point(aes(x = value, y = MEAN_DEPTH, text = IID)) +
+      facet_wrap(~ PC.lab, ncol = 3) +
+      geom_text(data = df.r2, aes(x = 0, y = 1,
+                label = ifelse(is.na(R2), "R2 = NA", paste("R2 = ", R2, sep = " "))),
+                color = "blue", size = 3) +
+      theme_bw() +
+      theme(axis.text.x = element_text(angle = 90)) +
+      labs(x = NULL, y = "SNP Depth")) %>%
+    ggplotly(tooltip = c("text", "x", "y"))
+} else {
+  cat("*Depth and PC correlation panel skipped: finite per-sample SNP depth is unavailable for this VCF.*")
+}
 ```
 
 > Fig. 2: Sometimes if there are batch effects, the PCA groups will correlate with sequencing depth, which may indicate there is some technical signal in the data. An R2 value (depth ~ PC) is shown for each component and a large value here may suggest there is a technical signal in the data. The percent variance explained by each PC is also shown as the amount of variance explained by one PC out of 10 total PCs.
 
-Row 
+Row
 -----------------------------------------------------------------------
 
 ### SNP Depth
 
-```{r, fig.width = 5, fig.height = 5}
+```{r, fig.width = 5, fig.height = 5, results='asis'}
 # depth plot --------------------------------------------------------------
 #depth is read in the PCA chunk
-imiss.path <- paste0(vcf_prefix, ".imiss")
-df.imiss <- read_table_preserve_ids(imiss.path, header =T, id_cols = c("INDV", "FID"))
+df.depth.miss <- NULL
+if (finite_depth_available(df.depth)) {
+  imiss.path <- paste0(vcf_prefix, ".imiss")
+  df.imiss <- read_table_preserve_ids(imiss.path, header =T, id_cols = c("INDV", "FID"))
 
-df.depth.miss <- inner_join(df.depth, df.imiss, by = "INDV")
-df.depth.miss <- df.depth.miss %>% 
- mutate_if(is.numeric, round, digits = 5)
+  df.depth.miss <- inner_join(df.depth, df.imiss, by = "INDV")
+  df.depth.miss <- df.depth.miss %>%
+   mutate_if(is.numeric, round, digits = 5)
 
-#replace df.pca with clusters() for shiny
-#r.missing <- reactive(
-  df.depth.miss <- left_join(df.depth.miss, df.pca[,c("IID","cluster")], by = c("INDV" = "IID"))
-#)
+  #replace df.pca with clusters() for shiny
+  #r.missing <- reactive(
+    df.depth.miss <- left_join(df.depth.miss, df.pca[,c("IID","cluster")], by = c("INDV" = "IID"))
+  #)
 
-#replace df.depth.miis with r.missing for shiny
-#renderPlotly(
-  #need to wrap ggplot in () to pipe to plotly
-  (ggplot(data = df.depth.miss, aes(text = INDV)) +
-    geom_point(aes(x = MEAN_DEPTH, y = F_MISS, fill = cluster), 
-               size = 3, color = "black") +
-    theme_bw() +
-    theme(legend.position = "none") + 
-    scale_fill_manual(values = set.colors)+ 
-    labs(x = "SNP Depth", y = "Missingness")) %>% 
-    ggplotly(tooltip=c("text","x","y"))
-#)
+  #replace df.depth.miis with r.missing for shiny
+  #renderPlotly(
+    #need to wrap ggplot in () to pipe to plotly
+    (ggplot(data = df.depth.miss, aes(text = INDV)) +
+      geom_point(aes(x = MEAN_DEPTH, y = F_MISS, fill = cluster),
+                 size = 3, color = "black") +
+      theme_bw() +
+      theme(legend.position = "none") +
+      scale_fill_manual(values = set.colors)+
+      labs(x = "SNP Depth", y = "Missingness")) %>%
+      ggplotly(tooltip=c("text","x","y"))
+  #)
+} else {
+  cat("*SNP depth panel skipped: finite per-sample SNP depth is unavailable for this VCF.*")
+}
 
 ```
 
-> Fig. 3: There is typically a relationship between how much missing data there is and total sequencing depth. Use this plot to identify a potential cutoff for how strictly you want to filter your individuals by sequencing depth and/or individuals. For example, one might remove individuals with a sequencing depth < 4 if the rate of missingness per SNP is higher than seems reasonable. 
+> Fig. 3: There is typically a relationship between how much missing data there is and total sequencing depth. Use this plot to identify a potential cutoff for how strictly you want to filter your individuals by sequencing depth and/or individuals. For example, one might remove individuals with a sequencing depth < 4 if the rate of missingness per SNP is higher than seems reasonable.
 
 ### Mapping rate
 
-```{r, fig.width = 5, fig.height = 5, eval = params$has_qc_report}
+```{r, fig.width = 5, fig.height = 5, eval = params$has_qc_report, results='asis'}
 # bamstat plot --------------------------------------------------------------
 # v2 qc_report.tsv uses lowercase column names: sample, percent_mapped, mean_depth, etc.
-bamstat.path <- file.path(qc_dir, "qc_report.tsv")
-df.bamstat <- read_table_preserve_ids(bamstat.path, header = T, sep = "\t", id_cols = c("sample"))
+if (finite_depth_available(df.depth) && !is.null(df.depth.miss)) {
+  bamstat.path <- file.path(qc_dir, "qc_report.tsv")
+  df.bamstat <- read_table_preserve_ids(bamstat.path, header = T, sep = "\t", id_cols = c("sample"))
 
-df.depth.miss.bamstat <- inner_join(df.depth.miss, df.bamstat, by = c("INDV" = "sample"))
-df.depth.miss.bamstat <- df.depth.miss.bamstat %>% 
- mutate_if(is.numeric, round, digits = 5)
+  df.depth.miss.bamstat <- inner_join(df.depth.miss, df.bamstat, by = c("INDV" = "sample"))
+  df.depth.miss.bamstat <- df.depth.miss.bamstat %>%
+   mutate_if(is.numeric, round, digits = 5)
 
-  (ggplot(data = df.depth.miss.bamstat, aes(text = INDV)) +
-    geom_point(aes(x = percent_mapped, y = MEAN_DEPTH, fill = cluster), 
-               size = 3, color = "black") +
-    theme_bw() +
-    theme(legend.position = "none") + 
-    scale_fill_manual(values = set.colors) + 
-    labs(x = "% Reads Mapped", y = "SNP Depth") +
-    xlim(0,100)) %>% 
-    ggplotly(tooltip=c("text","x","y")) 
+    (ggplot(data = df.depth.miss.bamstat, aes(text = INDV)) +
+      geom_point(aes(x = percent_mapped, y = MEAN_DEPTH, fill = cluster),
+                 size = 3, color = "black") +
+      theme_bw() +
+      theme(legend.position = "none") +
+      scale_fill_manual(values = set.colors) +
+      labs(x = "% Reads Mapped", y = "SNP Depth") +
+      xlim(0,100)) %>%
+      ggplotly(tooltip=c("text","x","y"))
+} else {
+  cat("*Mapping rate versus SNP depth panel skipped: finite per-sample SNP depth is unavailable for this VCF.*")
+}
 
 ```
 
@@ -350,7 +403,7 @@ df.depth.miss.bamstat <- df.depth.miss.bamstat %>%
 cat("*Mapping rate panel skipped — no BAM summary stats provided (qc_report config key is empty).*")
 ```
 
-> Fig. 4: The percent of reads mapped is calcuated from the mapping rate to the reference genome. A lower mapping rate may indicate there are contaminants in your reads or the sample is from the wrong species. For example, a mapping rate <80% means either the sample is of the wrong species (so many reads did not map) or 20% sample comes from another species (such as bacterial contamination). 
+> Fig. 4: The percent of reads mapped is calcuated from the mapping rate to the reference genome. A lower mapping rate may indicate there are contaminants in your reads or the sample is from the wrong species. For example, a mapping rate <80% means either the sample is of the wrong species (so many reads did not map) or 20% sample comes from another species (such as bacterial contamination).
 
 ### Heterozygosity
 
@@ -360,7 +413,7 @@ df.het <- read_table_preserve_ids(het.path, header =T, id_cols = c("INDV"))
 
 df.het <- left_join(df.het, df.pca, by = c("INDV" = "IID"))
 
-(ggplot(data = df.het, aes(x = PC1, y = F, text = INDV, color = cluster)) + 
+(ggplot(data = df.het, aes(x = PC1, y = F, text = INDV, color = cluster)) +
   geom_point() +
     labs(y = "F (inbreeding coefficient)", x = "PC1") +
     theme_bw() +
@@ -377,30 +430,30 @@ df.het <- left_join(df.het, df.pca, by = c("INDV" = "IID"))
 #het.path <- paste0(vcf_prefix, ".hwe")
 #df.het <- read.table(het.path, header =T)
 #
-#biggest_chr <- df.het %>% group_by(CHR) %>% 
-#  summarise(max_pos = max(POS)) %>% 
-#  arrange(-max_pos) %>% 
+#biggest_chr <- df.het %>% group_by(CHR) %>%
+#  summarise(max_pos = max(POS)) %>%
+#  arrange(-max_pos) %>%
 #  slice_max(max_pos)
 #
-#df.het <- df.het %>% 
-#  separate(OBS.HOM1.HET.HOM2., into = c(NA,"het",NA), sep = "/") %>% 
+#df.het <- df.het %>%
+#  separate(OBS.HOM1.HET.HOM2., into = c(NA,"het",NA), sep = "/") %>%
 #  mutate(het = as.numeric(het))
 #
 #library(zoo)
-#df.het.fil  <-  df.het %>% filter(CHR == biggest_chr$CHR) 
+#df.het.fil  <-  df.het %>% filter(CHR == biggest_chr$CHR)
 #df.het.fil$het.roll <- zoo::rollmean(df.het.fil$het, 100, fill = NA)
 #
-#(ggplot(data = df.het.fil) + 
+#(ggplot(data = df.het.fil) +
 #  geom_point(aes(x = POS/1000000, y = het.roll)) +
 #  labs(y = "Rolling mean number of heterozygous sites", x = paste("Position (Mbp) on ", biggest_chr$CHR)) +
 #  theme_bw()) %>% ggplotly()
 #
 ```
 
-Row 
+Row
 -----------------------------------------------------------------------
 
-### Tree 
+### Tree
 
 ```{r, fig.height=12, fig.width=12}
 
@@ -423,10 +476,10 @@ mycol <- set.colors[factor(dist.id$cluster)]
 p.ggtree <- ggtree(nj.dist, layout="daylight", branch.length = "none")
 
 ## with ggtree labeling scheme
-# p.ggtreelabs <- p.ggtree %<+% dist.id + 
+# p.ggtreelabs <- p.ggtree %<+% dist.id +
 #   geom_tiplab(pch = 5, aes(col = cluster)) +
 #   theme(legend.position = "none") +
-#   scale_color_manual(values = set.colors) 
+#   scale_color_manual(values = set.colors)
 
 ## this tree doesnt work well because the edges get cut off
 ## due to different axes units in the tree vs text
@@ -445,7 +498,7 @@ p.ggtree.custom <- p.ggtree +
                  colour = cluster,
                  label = label), size = 3) +
   theme(legend.position = "none") +
-  scale_color_manual(values = set.colors) 
+  scale_color_manual(values = set.colors)
 
 p.ggtree.custom
 
@@ -456,7 +509,7 @@ p.ggtree.custom
 
 ```
 
-> Fig. 6: A very simple neighbor joining tree is built from a simple distance matrix among all samples in the dataset. The leaves are colored by the clusters identified in the PCA. 
+> Fig. 6: A very simple neighbor joining tree is built from a simple distance matrix among all samples in the dataset. The leaves are colored by the clusters identified in the PCA.
 
 Row
 -----------------------------------------------------------------------
@@ -482,22 +535,22 @@ if(length(l.inf)==0){
   sample.order <- order.dendrogram(rel.dendro)
   #we could also plot the dendrogram, but it is potentially confusing
   #with the already plotted NJ tree
-  
+
   #pivot does not seem to work with matrices, so reverting to melt from reshape2
   df.rel.long <- melt(as.matrix(df.rel))
   names(df.rel.long) <- c("Sample1", "Sample2", "relatedness")
-  
+
   matrix.names <- row.names(mat.rel)
-  
+
   df.rel.long$Sample2 <- factor(x = df.rel.long$Sample2,
-                                 levels = matrix.names[sample.order], 
+                                 levels = matrix.names[sample.order],
                                  ordered = TRUE)
-  
+
   df.rel.long$Sample1 <- factor(x = df.rel.long$Sample1,
-                                 levels = matrix.names[sample.order], 
+                                 levels = matrix.names[sample.order],
                                  ordered = TRUE)
-  
-  pl.1 <- (ggplot(data = df.rel.long, aes(x=Sample1, y=Sample2, fill=relatedness)) + 
+
+  pl.1 <- (ggplot(data = df.rel.long, aes(x=Sample1, y=Sample2, fill=relatedness)) +
     geom_tile() +
     theme(
       axis.text.x = element_text(angle = 90),
@@ -506,10 +559,10 @@ if(length(l.inf)==0){
       legend.position = "top"
     ) +
      scale_fill_gradient2(low = "blue", high = "red", mid = "white",
-                          midpoint = mean(df.rel.long$relatedness),  
-                          name="relatedness")) %>% 
+                          midpoint = mean(df.rel.long$relatedness),
+                          name="relatedness")) %>%
     ggplotly(tooltip=c("relatedness","x","y"))
-  
+
   pl.1
 
 }else{
@@ -518,7 +571,7 @@ if(length(l.inf)==0){
 
 ```
 
-> Fig. 7: We build a king relatedness matrix using Plink to evaluate if there are closely related samples. Samples with a relatedness of 0.5 indicate they are identical, values close to 0.25 indicate parent-child or sibling relatedness, and second degree relatedness are ~0.125. You may want to remove samples with > 0.354 if you want to remove very closely related sample which can bias population genomic estimates. 
+> Fig. 7: We build a king relatedness matrix using Plink to evaluate if there are closely related samples. Samples with a relatedness of 0.5 indicate they are identical, values close to 0.25 indicate parent-child or sibling relatedness, and second degree relatedness are ~0.125. You may want to remove samples with > 0.354 if you want to remove very closely related sample which can bias population genomic estimates.
 
 Row
 -----------------------------------------------------------------------
@@ -532,12 +585,12 @@ coords.path <- file.path(qc_dir, "coords.txt")
 if((file.exists(coords.path)) & (file.size(coords.path)>0)){
     df.coords <- read_table_preserve_ids(coords.path, id_cols = c("V1"))
     names(df.coords) <- c("sample.ID","long","lat")
-    
-    if(max(df.coords$lat < 90) & min(df.coords$lat) > 0 
+
+    if(max(df.coords$lat < 90) & min(df.coords$lat) > 0
            & max(df.coords$long < -35) & min(df.coords$long > -180)){
       map_type = "north america"
     } else { map_type = "world"}
-    
+
     g <- list(
       scope = map_type,
       showland = TRUE,
@@ -565,31 +618,31 @@ if((file.exists(coords.path)) & (file.size(coords.path)>0)){
        dtick = 5
      )
    )
-   
+
     df.coords <- left_join(df.pca, df.coords, by = c("IID" = "sample.ID"))
-      
+
     df.coords$color <- set.colors[factor(dist.id$cluster)]
-    
+
     mycol <- set.colors[factor(df.coords$cluster)]
-    
+
     df.coords$long.jit <- jitter(as.numeric(df.coords$long), 4)
     df.coords$lat.jit <- jitter(as.numeric(df.coords$lat), 4)
-    
-    plot_geo(df.coords, lat = ~lat.jit, lon = ~long.jit) %>% 
-      layout(legend = list(orientation = 'h'), geo = g) %>% 
+
+    plot_geo(df.coords, lat = ~lat.jit, lon = ~long.jit) %>%
+      layout(legend = list(orientation = 'h'), geo = g) %>%
       add_markers(
         text = ~paste(IID, cluster, PC1, PC2, sep = "<br />"),
-        color = ~cluster, symbol = I("circle"), size = I(60), 
+        color = ~cluster, symbol = I("circle"), size = I(60),
         hoverinfo = "text", colors = set.colors[1:input$clusters],
-      ) %>% 
-     colorbar(title = "cluster")   
+      ) %>%
+     colorbar(title = "cluster")
   }else{
     print("a map will appear here if you provide sample metadata with lat/long columns")
 }
 
 ```
 
-> Fig. 8: Here, an interactive map is produced if there is a coordinate file available with latitude and longitude in decimal degrees. See the project README for how to setup this file for analysis. 
+> Fig. 8: Here, an interactive map is produced if there is a coordinate file available with latitude and longitude in decimal degrees. See the project README for how to setup this file for analysis.
 
 Row
 -----------------------------------------------------------------------
@@ -604,16 +657,16 @@ if(file.exists(coords.path)){
   if(!is.null(input$GMKey) && nchar(input$GMKey) > 0){
     df.coords <- read_table_preserve_ids(coords.path, na.strings = c("", "nan"), id_cols = c("V1"))
     names(df.coords) <- c("sample.ID","long","lat")
-    
+
     df.coords <- left_join(df.pca, df.coords, by = c("IID" = "sample.ID"))
 
     df.coords <- df.coords %>% filter(!is.na(long))
-    num.missing <- df.coords %>% filter(is.na(long)) %>% nrow() 
+    num.missing <- df.coords %>% filter(is.na(long)) %>% nrow()
 
     df.coords$color <- set.colors[factor(df.coords$cluster)]
-    
+
     mycol <- set.colors[factor(df.coords$cluster)]
-    
+
     #jitter points
     df.coords$Longitude <- jitter(as.numeric(df.coords$long), 8)
     df.coords$Latitude <- jitter(as.numeric(df.coords$lat), 8)
@@ -624,21 +677,21 @@ if(file.exists(coords.path)){
 
     cal.map <- get_googlemap("California", zoom = 6, maptype = "terrain", scale = 4, size = c(640, 640))
 
-    terrain.map <- cal.map %>% 
-      ggmap() + 
+    terrain.map <- cal.map %>%
+      ggmap() +
         geom_point(data = df.coords, aes(x = Longitude, y = Latitude,
                    color = cluster, size = 2.5, label = IID), alpha = 0.8) +
-        theme_bw() + 
+        theme_bw() +
         labs(x = NULL, y = NULL) +
       scale_color_manual(values = set.colors) +
       theme(legend.position = "none")
 
     ggplotly(terrain.map, tooltip=c("IID","Longitude", "Latitude"))
-  
+
   }else{
-    print("a terrain map will appear here if you provide a google API key in the config file") 
+    print("a terrain map will appear here if you provide a google API key in the config file")
   }
- 
+
 }else{
   print("a map will appear here if you provide sample metadata with lat/long columns")
 }
@@ -669,17 +722,17 @@ cat_admx <- do.call("rbind",lapply(struct_files,
                                  x.samps <- read_table_preserve_ids(samps, id_cols = c("V1", "V2")) %>% select(V2) #get sample names from .fam file
                                  x$sampleID <- x.samps$V2 #add sample name to df
                                  x$k <- gsub(".Q","",substr(files, nchar(files)-3+1, nchar(files)))
-                                 x.long <- x %>% #pivot longer 
+                                 x.long <- x %>% #pivot longer
                                    pivot_longer(names_to = "popGroup", values_to = "prob", cols = -c(sampleID, k))
                                  x.long
                                }))
 
-cat_admx.wide <- cat_admx %>% 
-  filter(k == 2) %>% 
-  select(sampleID, k, popGroup, prob) %>% 
-  pivot_wider(names_from = "popGroup", values_from = "prob") %>% 
-  arrange(pop1, pop2) %>% 
-  mutate(sample_order = 1:n()) %>% 
+cat_admx.wide <- cat_admx %>%
+  filter(k == 2) %>%
+  select(sampleID, k, popGroup, prob) %>%
+  pivot_wider(names_from = "popGroup", values_from = "prob") %>%
+  arrange(pop1, pop2) %>%
+  mutate(sample_order = 1:n()) %>%
   ungroup()
 sample.order <- cat_admx.wide %>% select(sampleID, sample_order)
 cat_admx <- left_join(cat_admx, sample.order, by = c("sampleID"))
@@ -687,8 +740,8 @@ cat_admx <- left_join(cat_admx, sample.order, by = c("sampleID"))
 
 ##############################
 
-p.k23 <- cat_admx %>% 
-  filter(k == 2 | k == 3) %>% 
+p.k23 <- cat_admx %>%
+  filter(k == 2 | k == 3) %>%
   ggplot(aes(x = fct_reorder(sampleID, sample_order), y = prob, fill = factor(popGroup), text = sampleID)) +
   geom_col(aes(fill = factor(popGroup)), size = 0.1) +
   facet_grid(rows = vars(k), switch = "x", scales = "free", space = "free") +
@@ -712,7 +765,7 @@ pl.admix <- ggplotly(p.k23, tooltip=c("text", "y"))
 pl.admix
 ```
 
-> Fig. 10: Admixture was run on the dataset for k = 2 and k = 3. These are arbitrarily selected and no cross validation is done. Because these groupings are made seperate from the clusters in the PCA, they are colored by the admixture assignments and not the PCA groupings. 
+> Fig. 10: Admixture was run on the dataset for k = 2 and k = 3. These are arbitrarily selected and no cross validation is done. Because these groupings are made seperate from the clusters in the PCA, they are colored by the admixture assignments and not the PCA groupings.
 
 Row
 -----------------------------------------------------------------------

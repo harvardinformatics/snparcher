@@ -149,14 +149,165 @@ rule vcftools_individuals:
         min_depth=config["min_depth"],
     log:
         "logs/qc/vcftools_individuals.txt",
-    shell:
-        """
-        vcftools --gzvcf {input.vcf} --FILTER-summary --out {params.prefix} &> {log}
-        vcftools --gzvcf {input.vcf} --out {params.prefix} --depth &>> {log}
-        vcftools --gzvcf {input.vcf} --out {params.prefix} --het &>> {log}
-        vcftools --gzvcf {input.vcf} --out {params.prefix} --missing-indv &>> {log}
-        tail -n +2 {output.depth} | awk '$3>{params.min_depth} {{print $1}}' > {output.samps} 2>> {log}
-        """
+    run:
+        import gzip
+        import math
+
+        def _open_vcf_text(path):
+            if str(path).endswith(".gz"):
+                return gzip.open(path, "rt")
+            return open(path)
+
+        def _read_vcf_header(path):
+            format_ids = set()
+            samples = []
+            with _open_vcf_text(path) as handle:
+                for line in handle:
+                    if line.startswith("##FORMAT=<ID="):
+                        format_id = line.split("##FORMAT=<ID=", 1)[1].split(",", 1)[0]
+                        format_ids.add(format_id)
+                    elif line.startswith("#CHROM"):
+                        samples = line.rstrip("\n").split("\t")[9:]
+                        break
+            if not samples:
+                raise ValueError(f"Missing #CHROM header or sample columns in VCF: {path}")
+            return format_ids, samples
+
+        def _finite_float(value):
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(number):
+                return None
+            return number
+
+        def _normalize_depth_file(path):
+            rows = []
+            with open(path) as handle:
+                header = handle.readline().rstrip("\n").split()
+                required = {"INDV", "N_SITES", "MEAN_DEPTH"}
+                if not required.issubset(set(header)):
+                    raise ValueError(f"Depth file is missing required columns: {path}")
+                indv_i = header.index("INDV")
+                nsites_i = header.index("N_SITES")
+                mean_i = header.index("MEAN_DEPTH")
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    fields = line.rstrip("\n").split()
+                    mean_depth = _finite_float(fields[mean_i]) if len(fields) > mean_i else None
+                    rows.append((
+                        fields[indv_i],
+                        fields[nsites_i],
+                        "NA" if mean_depth is None else f"{mean_depth:.6g}",
+                    ))
+            with open(path, "w") as handle:
+                handle.write("INDV\tN_SITES\tMEAN_DEPTH\n")
+                for indv, nsites, mean_depth in rows:
+                    handle.write(f"{indv}\t{nsites}\t{mean_depth}\n")
+
+        def _ad_depth(ad_value):
+            if ad_value in {"", "."}:
+                return None
+            values = ad_value.split(",")
+            if not values:
+                return None
+            depths = []
+            for value in values:
+                depth = _finite_float(value)
+                if depth is None:
+                    return None
+                depths.append(depth)
+            return sum(depths)
+
+        def _write_ad_depth(vcf_path, depth_path, samples):
+            sums = {sample: 0.0 for sample in samples}
+            counts = {sample: 0 for sample in samples}
+            with _open_vcf_text(vcf_path) as handle:
+                for line in handle:
+                    if line.startswith("#"):
+                        continue
+                    fields = line.rstrip("\n").split("\t")
+                    if len(fields) < 10:
+                        continue
+                    format_fields = fields[8].split(":")
+                    if "AD" not in format_fields:
+                        continue
+                    ad_i = format_fields.index("AD")
+                    for sample, genotype in zip(samples, fields[9:]):
+                        genotype_fields = genotype.split(":")
+                        if len(genotype_fields) <= ad_i:
+                            continue
+                        depth = _ad_depth(genotype_fields[ad_i])
+                        if depth is None:
+                            continue
+                        sums[sample] += depth
+                        counts[sample] += 1
+            with open(depth_path, "w") as handle:
+                handle.write("INDV\tN_SITES\tMEAN_DEPTH\n")
+                for sample in samples:
+                    if counts[sample] == 0:
+                        handle.write(f"{sample}\t0\tNA\n")
+                    else:
+                        handle.write(f"{sample}\t{counts[sample]}\t{sums[sample] / counts[sample]:.6g}\n")
+
+        def _write_empty_depth(depth_path, samples):
+            with open(depth_path, "w") as handle:
+                handle.write("INDV\tN_SITES\tMEAN_DEPTH\n")
+                for sample in samples:
+                    handle.write(f"{sample}\t0\tNA\n")
+
+        def _write_sample_filter(depth_path, samples, samps_path, min_depth, log_path):
+            passing = []
+            finite_depths = 0
+            with open(depth_path) as handle:
+                header = handle.readline().rstrip("\n").split("\t")
+                indv_i = header.index("INDV")
+                mean_i = header.index("MEAN_DEPTH")
+                for line in handle:
+                    fields = line.rstrip("\n").split("\t")
+                    if len(fields) <= mean_i:
+                        continue
+                    depth = _finite_float(fields[mean_i])
+                    if depth is None:
+                        continue
+                    finite_depths += 1
+                    if depth > float(min_depth):
+                        passing.append(fields[indv_i])
+            if finite_depths == 0:
+                passing = list(samples)
+                with open(log_path, "a") as handle:
+                    handle.write(
+                        "No finite per-sample SNP depth values were available; "
+                        "skipping min_depth sample filter and retaining all VCF samples.\n"
+                    )
+            with open(samps_path, "w") as handle:
+                for sample in passing:
+                    handle.write(f"{sample}\n")
+
+        os.makedirs(os.path.dirname(output.depth), exist_ok=True)
+        format_ids, samples = _read_vcf_header(input.vcf)
+        log_path = str(log[0])
+
+        shell("vcftools --gzvcf {input.vcf} --FILTER-summary --out {params.prefix} > {log} 2>&1")
+        if "DP" in format_ids:
+            with open(log_path, "a") as handle:
+                handle.write("FORMAT/DP found; computing per-sample SNP depth with vcftools --depth.\n")
+            shell("vcftools --gzvcf {input.vcf} --out {params.prefix} --depth >> {log} 2>&1")
+            _normalize_depth_file(output.depth)
+        elif "AD" in format_ids:
+            with open(log_path, "a") as handle:
+                handle.write("FORMAT/DP absent and FORMAT/AD found; computing per-sample SNP depth from summed AD values.\n")
+            _write_ad_depth(input.vcf, output.depth, samples)
+        else:
+            with open(log_path, "a") as handle:
+                handle.write("FORMAT/DP and FORMAT/AD absent; writing unavailable per-sample SNP depth values.\n")
+            _write_empty_depth(output.depth, samples)
+
+        shell("vcftools --gzvcf {input.vcf} --out {params.prefix} --het >> {log} 2>&1")
+        shell("vcftools --gzvcf {input.vcf} --out {params.prefix} --missing-indv >> {log} 2>&1")
+        _write_sample_filter(output.depth, samples, output.samps, params.min_depth, log_path)
 
 
 rule subsample_snps:
@@ -193,7 +344,7 @@ rule subsample_snps:
                 -e 'AF==1 | AF==0 | AF<0.01 | ALT="*" | F_MISSING > 0.75 | TYPE~"indel" | ref="N"' \
                 {input.vcf} -O z -o {output.filtered} &> {log}
         fi
-        bcftools index {output.filtered} &>> {log}
+        bcftools index {output.filtered} >> {log} 2>&1
 
         # Figure out window size to get ~100k SNPs
         ALLSITES=$(bcftools query -f '%CHROM\\t%POS\\n' {output.filtered} | wc -l)
@@ -202,12 +353,12 @@ rule subsample_snps:
         # If < 150k SNPs, take all; otherwise prune
         if [[ $SITES -gt 1 ]]
         then
-            bcftools +prune -w $SITES -n 1 -N rand -O z -o {output.pruned} {output.filtered} &>> {log}
+            bcftools +prune -w $SITES -n 1 -N rand -O z -o {output.pruned} {output.filtered} >> {log} 2>&1
         else
-            bcftools view -O z -o {output.pruned} {output.filtered} &>> {log}
+            bcftools view -O z -o {output.pruned} {output.filtered} >> {log} 2>&1
         fi
 
-        bcftools query -f '%CHROM\\t%POS\\t%ID\\t%INFO/AF\\t%QUAL\\t%INFO/ReadPosRankSum\\t%INFO/FS\\t%INFO/SOR\\t%INFO/MQ\\t%INFO/MQRankSum\\n' \
+        bcftools query --allow-undef-tags -f '%CHROM\\t%POS\\t%ID\\t%INFO/AF\\t%QUAL\\t%INFO/ReadPosRankSum\\t%INFO/FS\\t%INFO/SOR\\t%INFO/MQ\\t%INFO/MQRankSum\\n' \
             {output.pruned} > {output.snpqc} 2>> {log}
         """
 
