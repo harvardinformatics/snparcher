@@ -90,6 +90,9 @@ DEFAULTS = {
         "min_nmer": 500,
         "num_gvcf_intervals": 50,
         "db_scatter_factor": 0.15,
+        "min_contig_length": 0,
+        "db_max_intervals_per_shard": 200,
+        "db_max_contigs_per_shard": 200,
     },
     "callable_sites": {
         "generate_bed_file": True,

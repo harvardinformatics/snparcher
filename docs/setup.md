@@ -118,7 +118,10 @@ The following options can be adjusted based on your needs and your dataset.
 | ---- | -------------| ------ |
 |`intervals.min_nmer`| Minimum span of Ns used to split reference for interval generation. | `int`|
 |`intervals.num_gvcf_intervals` | Maximum number of GVCF intervals to create. | `int`|
-|`intervals.db_scatter_factor` | Used to calculate number of DB intervals (`num_db_intervals = scatter_factor * num_samples * num_gvcf_intervals`). | `float`|
+|`intervals.db_scatter_factor` | Used to calculate the target number of DB intervals before complexity-aware post-processing (`num_db_intervals = scatter_factor * num_samples * num_gvcf_intervals`). | `float`|
+|`intervals.db_max_intervals_per_shard` | Maximum interval records allowed in each final DB shard; set to `0` to disable this cap. | `int`|
+|`intervals.db_max_contigs_per_shard` | Maximum unique contigs allowed in each final DB shard; set to `0` to disable this cap. | `int`|
+|`intervals.min_contig_length` | Exclude interval records on contigs shorter than this length; `0` keeps all contigs. This changes called regions but does not filter the reference used for mapping. | `int`|
 | `variant_calling.expected_coverage` | Coverage profile used to set caller tuning (`low` or `high`). | `str` |
 | `variant_calling.ploidy` | Ploidy for variant calling step. | `int` |
 | `variant_calling.gatk.het_prior` | Heterozygosity prior passed to GATK GenotypeGVCFs. | `float` |

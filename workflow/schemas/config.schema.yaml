@@ -152,6 +152,18 @@ properties:
         type: number
         minimum: 0
         default: 0.15
+      min_contig_length:
+        type: integer
+        minimum: 0
+        default: 0
+      db_max_intervals_per_shard:
+        type: integer
+        minimum: 0
+        default: 200
+      db_max_contigs_per_shard:
+        type: integer
+        minimum: 0
+        default: 200
 
   callable_sites:
     type: object

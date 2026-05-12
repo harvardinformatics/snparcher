@@ -6,19 +6,20 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-
-from conftest import SnakemakeRunner, WORKFLOW_DIR, TEST_DATA_DIR
+from conftest import TEST_DATA_DIR, WORKFLOW_DIR, SnakemakeRunner
 
 TEST_DIR = Path(__file__).parent
 CONFIGS_DIR = TEST_DIR / "configs"
 SAMPLES_DIR = TEST_DIR / "sample_sheets"
 METADATA_DIR = TEST_DIR / "sample_metadata"
+INTERVAL_LIST_TOOLS = WORKFLOW_DIR / "scripts" / "interval_list_tools.py"
 
 
 def get_samples_file():
@@ -39,6 +40,171 @@ def get_multistage_config_file():
     if platform.machine() == "arm64":
         return CONFIGS_DIR / "local_genome_no_clam_multistage.yaml"
     return CONFIGS_DIR / "local_genome_multistage.yaml"
+
+
+def write_interval_list(path, contig_lengths, records):
+    """Write a small Picard/GATK interval_list for script tests."""
+    lines = ["@HD\tVN:1.6\n"]
+    lines.extend(f"@SQ\tSN:{contig}\tLN:{length}\n" for contig, length in contig_lengths.items())
+    lines.extend(f"{contig}\t{start}\t{end}\t+\tACGTmer\n" for contig, start, end in records)
+    path.write_text("".join(lines))
+
+
+def read_interval_records(path):
+    return [
+        line
+        for line in path.read_text().splitlines()
+        if line and not line.startswith("@")
+    ]
+
+
+def read_interval_header(path):
+    return [line for line in path.read_text().splitlines() if line.startswith("@")]
+
+
+def run_interval_list_tool(*args):
+    result = subprocess.run(
+        [sys.executable, str(INTERVAL_LIST_TOOLS), *map(str, args)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    return result
+
+
+def write_interval_complexity_config(base_config, out_dir):
+    """Write a config copy with the new interval complexity keys explicitly set."""
+    text = Path(base_config).read_text()
+    pattern = re.compile(
+        r"(intervals:\n"
+        r"  enabled: (?:true|false)\n"
+        r"  min_nmer: \d+\n"
+        r"  num_gvcf_intervals: \d+\n"
+        r"  db_scatter_factor: [0-9.]+\n)"
+    )
+    if not pattern.search(text):
+        raise AssertionError("Expected intervals block not found in config")
+
+    out_path = Path(out_dir) / "config_interval_complexity.yaml"
+    out_path.write_text(
+        pattern.sub(
+            r"\1"
+            "  min_contig_length: 1000\n"
+            "  db_max_intervals_per_shard: 200\n"
+            "  db_max_contigs_per_shard: 200\n",
+            text,
+            count=1,
+        )
+    )
+    return out_path
+
+
+def test_db_interval_split_caps_fragmented_tail(tmp_path):
+    raw_dir = tmp_path / "raw"
+    out_dir = tmp_path / "out"
+    raw_dir.mkdir()
+    contig_lengths = {f"ctg{i:04d}": 1000 for i in range(1005)}
+    records = [(contig, 1, length) for contig, length in contig_lengths.items()]
+    raw_path = raw_dir / "0591-scattered.interval_list"
+    write_interval_list(raw_path, contig_lengths, records)
+
+    run_interval_list_tool(
+        "split-db",
+        "--input-dir",
+        raw_dir,
+        "--output-dir",
+        out_dir,
+        "--fof",
+        out_dir / "intervals.txt",
+        "--max-intervals-per-shard",
+        200,
+        "--max-contigs-per-shard",
+        200,
+    )
+
+    shard_paths = [Path(line) for line in (out_dir / "intervals.txt").read_text().splitlines()]
+    assert len(shard_paths) == 6
+
+    combined_records = []
+    expected_header = read_interval_header(raw_path)
+    for shard_path in shard_paths:
+        shard_records = read_interval_records(shard_path)
+        shard_contigs = {record.split("\t", 1)[0] for record in shard_records}
+        assert len(shard_records) <= 200
+        assert len(shard_contigs) <= 200
+        assert read_interval_header(shard_path) == expected_header
+        combined_records.extend(shard_records)
+
+    assert combined_records == read_interval_records(raw_path)
+
+
+def test_interval_filter_uses_contig_length_not_interval_length(tmp_path):
+    input_path = tmp_path / "input.interval_list"
+    output_path = tmp_path / "filtered.interval_list"
+    contig_lengths = {"short_contig": 900, "long_contig": 4000}
+    records = [
+        ("short_contig", 1, 900),
+        ("long_contig", 1, 50),
+        ("long_contig", 1000, 2000),
+    ]
+    write_interval_list(input_path, contig_lengths, records)
+
+    run_interval_list_tool(
+        "filter",
+        "--input",
+        input_path,
+        "--output",
+        output_path,
+        "--min-contig-length",
+        1000,
+    )
+
+    assert read_interval_header(output_path) == read_interval_header(input_path)
+    assert read_interval_records(output_path) == [
+        "long_contig\t1\t50\t+\tACGTmer",
+        "long_contig\t1000\t2000\t+\tACGTmer",
+    ]
+
+
+def test_db_interval_split_disabled_preserves_raw_shard_contents(tmp_path):
+    raw_dir = tmp_path / "raw"
+    out_dir = tmp_path / "out"
+    raw_dir.mkdir()
+
+    first_path = raw_dir / "0010-scattered.interval_list"
+    second_path = raw_dir / "0020-scattered.interval_list"
+    write_interval_list(
+        first_path,
+        {"ctg1": 1000, "ctg2": 1000},
+        [("ctg1", 1, 1000), ("ctg2", 1, 1000)],
+    )
+    write_interval_list(
+        second_path,
+        {"ctg3": 1000},
+        [("ctg3", 1, 1000)],
+    )
+
+    run_interval_list_tool(
+        "split-db",
+        "--input-dir",
+        raw_dir,
+        "--output-dir",
+        out_dir,
+        "--fof",
+        out_dir / "intervals.txt",
+        "--max-intervals-per-shard",
+        0,
+        "--max-contigs-per-shard",
+        0,
+    )
+
+    shard_paths = [Path(line) for line in (out_dir / "intervals.txt").read_text().splitlines()]
+    assert [path.name for path in shard_paths] == [
+        "0000-scattered.interval_list",
+        "0001-scattered.interval_list",
+    ]
+    assert shard_paths[0].read_text() == first_path.read_text()
+    assert shard_paths[1].read_text() == second_path.read_text()
 
 
 def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
@@ -426,12 +592,31 @@ def test_setup_dry_run(request):
             "prepare_reference",
             "index_reference",
             "picard_intervals",
+            "filter_picard_intervals",
             "create_gvcf_intervals",
             "create_db_intervals",
         ]
         output = result.stdout + result.stderr
         for rule in expected_rules:
             assert rule in output, f"Expected rule '{rule}' not found"
+
+
+@pytest.mark.dry_run
+def test_setup_dry_run_accepts_interval_complexity_config(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_interval_complexity_config(get_config_file(), tmpdir)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "filter_picard_intervals" in output
 
 
 @pytest.mark.dry_run

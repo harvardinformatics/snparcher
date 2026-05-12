@@ -38,6 +38,9 @@ These are the supported v2 config keys used by the main workflow. Unknown keys a
 | `intervals.min_nmer` | integer | no | `500` | `>= 1` |
 | `intervals.num_gvcf_intervals` | integer | no | `50` | `>= 1` |
 | `intervals.db_scatter_factor` | number | no | `0.15` | `>= 0` |
+| `intervals.min_contig_length` | integer | no | `0` | `>= 0`; excludes interval records on shorter contigs when nonzero |
+| `intervals.db_max_intervals_per_shard` | integer | no | `200` | `>= 0`; `0` disables cap |
+| `intervals.db_max_contigs_per_shard` | integer | no | `200` | `>= 0`; `0` disables cap |
 | `callable_sites.generate_bed_file` | boolean | no | `true` | Controls final callable BED target |
 | `callable_sites.coverage.enabled` | boolean | no | `true` | Requires BAM-backed samples if true |
 | `callable_sites.coverage.fraction` | number | no | `1.0` | `0..1` |
