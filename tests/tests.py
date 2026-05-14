@@ -207,6 +207,96 @@ def test_db_interval_split_disabled_preserves_raw_shard_contents(tmp_path):
     assert shard_paths[1].read_text() == second_path.read_text()
 
 
+def test_db_interval_split_rewrites_pathological_contig_shards(tmp_path):
+    raw_dir = tmp_path / "raw"
+    out_dir = tmp_path / "out"
+    raw_dir.mkdir()
+    input_path = raw_dir / "0000-scattered.interval_list"
+    write_interval_list(
+        input_path,
+        {"ctg1": 1000, "ctg2": 2000, "ctg3": 3000},
+        [
+            ("ctg1", 10, 100),
+            ("ctg1", 500, 900),
+            ("ctg2", 20, 200),
+            ("ctg3", 30, 300),
+        ],
+    )
+
+    run_interval_list_tool(
+        "split-db",
+        "--input-dir",
+        raw_dir,
+        "--output-dir",
+        out_dir,
+        "--fof",
+        out_dir / "intervals.txt",
+        "--max-intervals-per-shard",
+        0,
+        "--max-contigs-per-shard",
+        3,
+        "--merge-contigs-threshold",
+        2,
+    )
+
+    shard_paths = [Path(line) for line in (out_dir / "intervals.txt").read_text().splitlines()]
+    assert [path.name for path in shard_paths] == [
+        "0000-scattered.interval_list",
+    ]
+    assert read_interval_records(shard_paths[0]) == [
+        "ctg1\t1\t1000\t+\tctg1",
+        "ctg2\t1\t2000\t+\tctg2",
+        "ctg3\t1\t3000\t+\tctg3",
+    ]
+    assert read_interval_header(shard_paths[0]) == read_interval_header(input_path)
+
+
+def test_genomicsdb_merge_contigs_arg_only_for_whole_contig_pathology(tmp_path):
+    whole_path = tmp_path / "whole.interval_list"
+    partial_path = tmp_path / "partial.interval_list"
+    fai_path = tmp_path / "ref.fa.fai"
+    contig_lengths = {"ctg1": 1000, "ctg2": 2000, "ctg3": 3000}
+    write_interval_list(
+        whole_path,
+        contig_lengths,
+        [("ctg1", 1, 1000), ("ctg2", 1, 2000), ("ctg3", 1, 3000)],
+    )
+    write_interval_list(
+        partial_path,
+        contig_lengths,
+        [("ctg1", 1, 1000), ("ctg2", 20, 200), ("ctg3", 1, 3000)],
+    )
+
+    result = run_interval_list_tool(
+        "genomicsdb-merge-contigs-arg",
+        "--input",
+        whole_path,
+        "--threshold",
+        2,
+    )
+    assert result.stdout.strip() == "--merge-contigs-into-num-partitions 2"
+
+    result = run_interval_list_tool(
+        "genomicsdb-merge-contigs-arg",
+        "--input",
+        partial_path,
+        "--threshold",
+        2,
+    )
+    assert result.stdout.strip() == ""
+    assert "not all records are whole-contig intervals" in result.stderr
+
+    fai_path.write_text("ctg1\t1000\t0\t80\t81\nctg2\t2000\t1020\t80\t81\nctg3\t3000\t3040\t80\t81\n")
+    result = run_interval_list_tool(
+        "genomicsdb-merge-contigs-arg",
+        "--input",
+        fai_path,
+        "--threshold",
+        2,
+    )
+    assert result.stdout.strip() == "--merge-contigs-into-num-partitions 2"
+
+
 def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
     """Write a config copy with variant_calling.tool overridden."""
     text = Path(base_config).read_text()
@@ -883,6 +973,26 @@ def test_gatk_without_intervals_dry_run(request):
         output = result.stdout + result.stderr
         assert "gatk_haplotypecaller" in output
         assert "joint_genomics_db_import" in output
+
+
+@pytest.mark.dry_run
+def test_genomicsdb_import_dry_run_uses_internal_memory_and_contig_merge_guard(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_intervals_config(get_config_file(), tmpdir, enabled=False)
+
+        result = smk.dry_run(
+            target="call_variants",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "--java-options '-Xmx3072m'" in output
+        assert "genomicsdb-merge-contigs-arg" in output
+        assert "--threshold 50" in output
 
 
 @pytest.mark.full_run

@@ -105,6 +105,7 @@ checkpoint create_db_intervals:
         interval_tools=INTERVAL_LIST_TOOLS,
         max_intervals=config["intervals"]["db_max_intervals_per_shard"],
         max_contigs=config["intervals"]["db_max_contigs_per_shard"],
+        merge_contig_threshold=GENOMICSDB_MERGE_CONTIG_THRESHOLD,
     resources:
         mem_mb=4096,
     conda:
@@ -132,5 +133,6 @@ checkpoint create_db_intervals:
             --fof {output.fof} \
             --max-intervals-per-shard {params.max_intervals} \
             --max-contigs-per-shard {params.max_contigs} \
+            --merge-contigs-threshold {params.merge_contig_threshold} \
             >> {log} 2>&1
         """

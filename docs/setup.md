@@ -141,6 +141,7 @@ When `variant_calling.tool` is `bcftools`, `deepvariant`, or `parabricks`, sampl
 
 `intervals.enabled` controls interval-split HaplotypeCaller for the GATK backend.
 Parabricks uses interval-split joint genotyping (GenomicsDBImport/GenotypeGVCFs) regardless of `intervals.enabled`.
+snpArcher automatically reserves native memory for GenomicsDBImport and applies GATK contig merging to DB shards with many whole-contig intervals.
 
 Parabricks execution expects NVIDIA GPUs and an Apptainer/Singularity image path in `variant_calling.parabricks.container_image`.
 Parabricks HaplotypeCaller also follows `variant_calling.expected_coverage` to set `--min-pruning` and `--min-dangling-branch-length`.

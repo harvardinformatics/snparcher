@@ -14,6 +14,8 @@ from pathlib import Path
 class IntervalRecord:
     raw: str
     contig: str
+    start: int
+    end: int
 
 
 @dataclass(frozen=True)
@@ -57,9 +59,54 @@ def parse_interval_list(path: Path) -> IntervalList:
             fields = stripped.split("\t")
             if len(fields) < 3:
                 raise ValueError(f"Invalid interval record in {path}: {stripped}")
-            records.append(IntervalRecord(raw=line, contig=fields[0]))
+            try:
+                start = int(fields[1])
+                end = int(fields[2])
+            except ValueError as err:
+                raise ValueError(f"Invalid interval record in {path}: {stripped}") from err
+            records.append(
+                IntervalRecord(raw=line, contig=fields[0], start=start, end=end)
+            )
 
     return IntervalList(header=header, records=records, contig_lengths=contig_lengths)
+
+
+def parse_fai(path: Path) -> IntervalList:
+    records: list[IntervalRecord] = []
+    contig_lengths: dict[str, int] = {}
+
+    with path.open() as handle:
+        for line in handle:
+            stripped = line.rstrip("\n")
+            if not stripped:
+                continue
+
+            fields = stripped.split("\t")
+            if len(fields) < 2:
+                raise ValueError(f"Invalid FAI record in {path}: {stripped}")
+            try:
+                length = int(fields[1])
+            except ValueError as err:
+                raise ValueError(f"Invalid FAI length in {path}: {stripped}") from err
+
+            contig = fields[0]
+            contig_lengths[contig] = length
+            records.append(
+                IntervalRecord(
+                    raw=f"{contig}\t1\t{length}\t+\t{contig}\n",
+                    contig=contig,
+                    start=1,
+                    end=length,
+                )
+            )
+
+    return IntervalList(header=[], records=records, contig_lengths=contig_lengths)
+
+
+def parse_interval_source(path: Path) -> IntervalList:
+    if path.suffix == ".fai":
+        return parse_fai(path)
+    return parse_interval_list(path)
 
 
 def write_interval_list(path: Path, header: list[str], records: list[IntervalRecord]) -> None:
@@ -158,6 +205,68 @@ def remove_existing_final_shards(output_dir: Path, fof: Path) -> None:
         fof.unlink()
 
 
+def count_unique_contigs(records: list[IntervalRecord]) -> int:
+    return len({record.contig for record in records})
+
+
+def whole_contig_records(
+    records: list[IntervalRecord],
+    contig_lengths: dict[str, int],
+    path: Path,
+) -> list[IntervalRecord]:
+    whole_records: list[IntervalRecord] = []
+    seen: set[str] = set()
+
+    for record in records:
+        if record.contig in seen:
+            continue
+        if record.contig not in contig_lengths:
+            raise ValueError(
+                f"Cannot create whole-contig DB interval for {record.contig!r} "
+                f"from {path}: contig has no @SQ LN entry"
+            )
+
+        length = contig_lengths[record.contig]
+        whole_records.append(
+            IntervalRecord(
+                raw=f"{record.contig}\t1\t{length}\t+\t{record.contig}\n",
+                contig=record.contig,
+                start=1,
+                end=length,
+            )
+        )
+        seen.add(record.contig)
+
+    return whole_records
+
+
+def maybe_rewrite_pathological_contig_chunk(
+    records: list[IntervalRecord],
+    contig_lengths: dict[str, int],
+    path: Path,
+    threshold: int,
+) -> list[IntervalRecord]:
+    if threshold <= 0 or count_unique_contigs(records) <= threshold:
+        return records
+    return whole_contig_records(records, contig_lengths, path)
+
+
+def records_are_whole_contigs(
+    records: list[IntervalRecord],
+    contig_lengths: dict[str, int],
+) -> bool:
+    seen: set[str] = set()
+    for record in records:
+        if record.contig in seen:
+            return False
+        if record.contig not in contig_lengths:
+            return False
+        if record.start != 1 or record.end != contig_lengths[record.contig]:
+            return False
+        seen.add(record.contig)
+    return True
+
+
 def split_db_intervals(args: argparse.Namespace) -> int:
     input_files = sorted(args.input_dir.glob("*-scattered.interval_list"))
     if not input_files:
@@ -175,6 +284,12 @@ def split_db_intervals(args: argparse.Namespace) -> int:
             args.max_intervals_per_shard,
             args.max_contigs_per_shard,
         ):
+            chunk = maybe_rewrite_pathological_contig_chunk(
+                chunk,
+                interval_list.contig_lengths,
+                path,
+                args.merge_contigs_threshold,
+            )
             output_chunks.append((interval_list.header, chunk))
 
     if not output_chunks:
@@ -196,6 +311,24 @@ def split_db_intervals(args: argparse.Namespace) -> int:
     print(
         f"Wrote {len(output_paths)} DB interval shard(s) from {len(input_files)} "
         f"GATK shard(s) and {total_records} interval record(s)"
+    )
+    return 0
+
+
+def genomicsdb_merge_contigs_arg(args: argparse.Namespace) -> int:
+    interval_list = parse_interval_source(args.input)
+    contigs = count_unique_contigs(interval_list.records)
+    if contigs <= args.threshold:
+        return 0
+
+    if records_are_whole_contigs(interval_list.records, interval_list.contig_lengths):
+        print(f"--merge-contigs-into-num-partitions {args.threshold}")
+        return 0
+
+    print(
+        f"WARNING: {args.input} has {contigs} contigs, but not all records are "
+        "whole-contig intervals; not enabling --merge-contigs-into-num-partitions",
+        file=sys.stderr,
     )
     return 0
 
@@ -225,7 +358,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-intervals-per-shard", type=nonnegative_int, required=True
     )
     split_parser.add_argument("--max-contigs-per-shard", type=nonnegative_int, required=True)
+    split_parser.add_argument("--merge-contigs-threshold", type=nonnegative_int, default=0)
     split_parser.set_defaults(func=split_db_intervals)
+
+    merge_parser = subparsers.add_parser("genomicsdb-merge-contigs-arg")
+    merge_parser.add_argument("--input", type=Path, required=True)
+    merge_parser.add_argument("--threshold", type=nonnegative_int, required=True)
+    merge_parser.set_defaults(func=genomicsdb_merge_contigs_arg)
 
     return parser
 
