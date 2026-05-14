@@ -35,7 +35,9 @@ rule joint_genomics_db_import:
         db=temp(directory("results/gatk_genomics_db")),
         tar="results/gatk_genomics_db.tar",
     params:
-        java_opts=lambda wildcards, resources: _java_opts_from_resources(resources),
+        java_opts=lambda wildcards, resources: get_gatk_genomicsdb_import_java_opts(resources),
+        interval_tools=INTERVAL_LIST_TOOLS,
+        merge_contig_threshold=GENOMICSDB_MERGE_CONTIG_THRESHOLD,
     threads: 1
     conda:
         "../../envs/gatk.yaml"
@@ -45,18 +47,22 @@ rule joint_genomics_db_import:
         "logs/joint_genomics_db_import.txt"
     shell:
         """
+        : > {log}
         export TILEDB_DISABLE_FILE_LOCKING=1
+        MERGE_CONTIGS_ARG=$(python {params.interval_tools} genomicsdb-merge-contigs-arg \
+            --input {input.ref_fai} \
+            --threshold {params.merge_contig_threshold} 2>> {log})
         gatk GenomicsDBImport \
             --java-options '{params.java_opts}' \
             --genomicsdb-shared-posixfs-optimizations true \
             --batch-size 25 \
             --genomicsdb-workspace-path {output.db} \
-            --merge-input-intervals \
+            --merge-input-intervals $MERGE_CONTIGS_ARG \
             --reader-threads {threads} \
             -L {input.ref_fai} \
             --tmp-dir {resources.tmpdir} \
             --sample-name-map {input.db_mapfile} \
-            &> {log}
+            &>> {log}
         tar -cf {output.tar} {output.db} >> {log} 2>&1
         """
 

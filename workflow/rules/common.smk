@@ -90,6 +90,9 @@ DEFAULTS = {
         "min_nmer": 500,
         "num_gvcf_intervals": 50,
         "db_scatter_factor": 0.15,
+        "min_contig_length": 0,
+        "db_max_intervals_per_shard": 200,
+        "db_max_contigs_per_shard": 200,
     },
     "callable_sites": {
         "generate_bed_file": True,
@@ -127,6 +130,24 @@ DEFAULTS = {
         },
     },
 }
+
+
+GENOMICSDB_IMPORT_HEAP_FRACTION = 0.75
+GENOMICSDB_MERGE_CONTIG_THRESHOLD = 50
+
+
+def _coerce_resource_mem_mb(resources, default_mem_mb=4096):
+    mem_mb = getattr(resources, "mem_mb", default_mem_mb)
+    try:
+        return int(float(mem_mb))
+    except (TypeError, ValueError):
+        return default_mem_mb
+
+
+def get_gatk_genomicsdb_import_java_opts(resources, default_mem_mb=4096):
+    mem_mb = _coerce_resource_mem_mb(resources, default_mem_mb)
+    return f"-Xmx{max(1, int(mem_mb * GENOMICSDB_IMPORT_HEAP_FRACTION))}m"
+
 
 REMOVED_MODULES = ("mk", "trackhub")
 
