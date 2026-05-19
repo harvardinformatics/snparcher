@@ -534,30 +534,51 @@ SAMPLES_WITH_BAM = samples_df[
 SAMPLES_WITH_FASTQ = samples_df[
     samples_df["input_type"].isin(["srr", "fastq"])
 ]["sample_id"].unique().tolist()
+SAMPLES_WITH_GVCF = samples_df[
+    samples_df["input_type"] == "gvcf"
+]["sample_id"].unique().tolist()
 
-if config["callable_sites"]["coverage"]["enabled"] and not SAMPLES_WITH_BAM:
-    raise ValueError(
-        "callable_sites.coverage.enabled requires at least one BAM-backed sample. "
-        "Disable callable_sites.coverage.enabled for gVCF-only workflows."
-    )
-
-CALLABLE_COVERAGE_ENABLED = bool(config["callable_sites"]["coverage"]["enabled"])
+CALLABLE_COVERAGE_REQUESTED = bool(config["callable_sites"]["coverage"]["enabled"])
+CALLABLE_COVERAGE_STATS_ENABLED = CALLABLE_COVERAGE_REQUESTED and bool(SAMPLES_WITH_BAM)
+CALLABLE_COVERAGE_BED_ENABLED = (
+    CALLABLE_COVERAGE_STATS_ENABLED and not bool(SAMPLES_WITH_GVCF)
+)
 CALLABLE_MAPPABILITY_ENABLED = bool(config["callable_sites"]["mappability"]["enabled"])
 CALLABLE_GENERATE_BED_FILE = bool(config["callable_sites"]["generate_bed_file"])
 
-if CALLABLE_GENERATE_BED_FILE and not (
-    CALLABLE_COVERAGE_ENABLED or CALLABLE_MAPPABILITY_ENABLED
-):
+if CALLABLE_COVERAGE_REQUESTED and SAMPLES_WITH_GVCF:
+    gvcf_summary = ", ".join(SAMPLES_WITH_GVCF)
+    if CALLABLE_COVERAGE_STATS_ENABLED:
+        logger.warning(
+            "callable_sites.coverage.enabled is true, but sample sheet contains "
+            f"gVCF input sample(s): {gvcf_summary}. Coverage statistics will be "
+            "computed only for BAM-backed samples; coverage BED generation is "
+            "disabled so callable-sites BED outputs are not based on a partial cohort."
+        )
+    else:
+        logger.warning(
+            "callable_sites.coverage.enabled is true, but sample sheet contains only "
+            f"gVCF input sample(s): {gvcf_summary}. Coverage statistics and coverage "
+            "BED generation are disabled because gVCF inputs do not provide per-base "
+            "coverage."
+        )
+elif CALLABLE_COVERAGE_REQUESTED and not SAMPLES_WITH_BAM:
     logger.warning(
-        "callable_sites.generate_bed_file is true, but both "
-        "callable_sites.coverage.enabled and callable_sites.mappability.enabled are false. "
+        "callable_sites.coverage.enabled is true, but no BAM-backed samples are "
+        "available. Skipping coverage statistics and coverage BED generation."
+    )
+
+CALLABLE_BED_SOURCE_ENABLED = CALLABLE_COVERAGE_BED_ENABLED or CALLABLE_MAPPABILITY_ENABLED
+
+if CALLABLE_GENERATE_BED_FILE and not CALLABLE_BED_SOURCE_ENABLED:
+    logger.warning(
+        "callable_sites.generate_bed_file is true, but no callable-sites BED sources "
+        "are enabled for this cohort. "
         "Skipping results/callable_sites/callable_sites.bed generation."
     )
     CALLABLE_GENERATE_BED_FILE = False
 
-CALLABLE_FINAL_BED_ENABLED = CALLABLE_GENERATE_BED_FILE and (
-    CALLABLE_COVERAGE_ENABLED or CALLABLE_MAPPABILITY_ENABLED
-)
+CALLABLE_FINAL_BED_ENABLED = CALLABLE_GENERATE_BED_FILE and CALLABLE_BED_SOURCE_ENABLED
 
 POSTPROCESS_ENABLED = bool(config["modules"]["postprocess"]["enabled"])
 if POSTPROCESS_ENABLED and not CALLABLE_FINAL_BED_ENABLED:
@@ -567,22 +588,22 @@ if POSTPROCESS_ENABLED and not CALLABLE_FINAL_BED_ENABLED:
     )
     POSTPROCESS_ENABLED = False
 
-CALLABLE_TARGETS = (
-    ["results/callable_sites/callable_sites.bed"]
-    if CALLABLE_FINAL_BED_ENABLED
-    else [
-        *(
-            ["results/callable_sites/callable_loci.zarr"]
-            if CALLABLE_COVERAGE_ENABLED
-            else []
-        ),
-        *(
-            ["results/callable_sites/mappability.bed"]
-            if CALLABLE_MAPPABILITY_ENABLED
-            else []
-        ),
-    ]
-)
+CALLABLE_TARGETS = []
+
+if CALLABLE_FINAL_BED_ENABLED:
+    CALLABLE_TARGETS.append("results/callable_sites/callable_sites.bed")
+else:
+    if CALLABLE_COVERAGE_STATS_ENABLED:
+        CALLABLE_TARGETS.append("results/callable_sites/callable_loci.zarr")
+    if CALLABLE_MAPPABILITY_ENABLED:
+        CALLABLE_TARGETS.append("results/callable_sites/mappability.bed")
+
+if (
+    CALLABLE_FINAL_BED_ENABLED
+    and CALLABLE_COVERAGE_STATS_ENABLED
+    and not CALLABLE_COVERAGE_BED_ENABLED
+):
+    CALLABLE_TARGETS.append("results/callable_sites/callable_loci.zarr")
 
 
 # --- Helper functions ---

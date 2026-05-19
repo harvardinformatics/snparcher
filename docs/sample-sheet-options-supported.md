@@ -31,6 +31,7 @@ Additional runtime compatibility:
 
 - `gvcf` samples are rejected when `variant_calling.tool` is `bcftools`, `deepvariant`, or `parabricks`.
 - `gvcf` samples are supported with `gatk` and `sentieon`.
+- When any `gvcf` samples are present, coverage statistics are computed only for BAM-backed samples and coverage BED generation is disabled with a warning.
 
 ## 3) `mark_duplicates` parsing behavior
 
@@ -60,4 +61,3 @@ Parsed columns used by code include:
 - `exclude` (boolean-like parser)
 - `outgroup` (boolean-like parser)
 - `lat`, `long` (used by QC map logic if present and non-null)
-
