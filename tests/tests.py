@@ -1246,6 +1246,7 @@ def test_deepvariant_dry_run(request):
 
         output = result.stdout + result.stderr
         assert "deepvariant_call" in output
+        assert "/opt/deepvariant/bin/run_deepvariant" in output
         assert "glnexus_joint" in output
 
 
