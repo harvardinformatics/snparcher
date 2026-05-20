@@ -42,7 +42,7 @@ These are the supported v2 config keys used by the main workflow. Unknown keys a
 | `intervals.db_max_intervals_per_shard` | integer | no | `200` | `>= 0`; `0` disables cap |
 | `intervals.db_max_contigs_per_shard` | integer | no | `200` | `>= 0`; `0` disables cap |
 | `callable_sites.generate_bed_file` | boolean | no | `true` | Controls final callable BED target |
-| `callable_sites.coverage.enabled` | boolean | no | `true` | Requires BAM-backed samples if true |
+| `callable_sites.coverage.enabled` | boolean | no | `true` | Computes coverage stats for BAM-backed samples; coverage BED generation is disabled when any gVCF inputs are present |
 | `callable_sites.coverage.fraction` | number | no | `1.0` | `0..1` |
 | `callable_sites.coverage.min_coverage` | number or string | no | `auto` | `>= 0` or `auto` |
 | `callable_sites.coverage.max_coverage` | number or string | no | `auto` | `>= 0` or `auto` |

@@ -1,8 +1,0 @@
-name: deepvariant
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - deepvariant>=1.9
-  - bcftools>=1.19
-  - htslib>=1.19

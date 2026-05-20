@@ -143,6 +143,8 @@ When `variant_calling.tool` is `bcftools`, `deepvariant`, or `parabricks`, sampl
 Parabricks uses interval-split joint genotyping (GenomicsDBImport/GenotypeGVCFs) regardless of `intervals.enabled`.
 snpArcher automatically reserves native memory for GenomicsDBImport and applies GATK contig merging to DB shards with many whole-contig intervals.
 
+DeepVariant execution uses Snakemake's native `container:` support with `docker://google/deepvariant:1.9.0`. When running with `variant_calling.tool: "deepvariant"`, enable container execution with `--use-apptainer` or `--software-deployment-method conda apptainer`.
+
 Parabricks execution expects NVIDIA GPUs and an Apptainer/Singularity image path in `variant_calling.parabricks.container_image`.
 Parabricks HaplotypeCaller also follows `variant_calling.expected_coverage` to set `--min-pruning` and `--min-dangling-branch-length`.
 
@@ -167,7 +169,9 @@ If `callable_sites.coverage.enabled` is set to `True`, then these options contro
 |`callable_sites.coverage.max_coverage`| Maximum depth threshold passed to `clam loci`. Use `auto` to set it to `ceil(global_mean_coverage * 2)`. | `float` or `auto`|
 |`callable_sites.coverage.merge_distance`| Merge passing coverage regions within this many base pairs. | `int`|
 
-If `callable_sites.generate_bed_file` is `true` and both `callable_sites.coverage.enabled` and `callable_sites.mappability.enabled` are `false`, snpArcher warns and skips final BED generation.
+When any samples use `input_type: gvcf`, snpArcher can still compute coverage statistics for BAM-backed samples, but it will not create `results/callable_sites/coverage.bed`. This avoids producing a coverage BED from only the non-gVCF subset of a mixed cohort. If mappability is enabled, the final callable-sites BED uses mappability only; otherwise snpArcher warns and skips final BED generation.
+
+If `callable_sites.generate_bed_file` is `true` and no callable-sites BED sources are enabled for the cohort, snpArcher warns and skips final BED generation.
 
 If postprocess is enabled but no final callable-sites BED will be produced, snpArcher warns and disables the postprocess module for that run.
 

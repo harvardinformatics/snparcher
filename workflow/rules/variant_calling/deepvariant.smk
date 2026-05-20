@@ -29,8 +29,8 @@ rule deepvariant_call:
     params:
         model_type=config["variant_calling"]["deepvariant"]["model_type"],
     threads: config["variant_calling"]["deepvariant"]["num_shards"]
-    conda:
-        "../../envs/deepvariant.yaml"
+    container:
+        "docker://google/deepvariant:1.9.0"
     benchmark:
         "benchmarks/deepvariant_call/{sample}.txt"
     log:
@@ -38,7 +38,7 @@ rule deepvariant_call:
     shell:
         """
         mkdir -p results/deepvariant/{wildcards.sample}
-        run_deepvariant \
+        /opt/deepvariant/bin/run_deepvariant \
             --ref {input.ref} \
             --reads {input.bam} \
             --output_vcf {output.vcf} \

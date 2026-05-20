@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from conftest import TEST_DATA_DIR, WORKFLOW_DIR, SnakemakeRunner
+from conftest import FIXTURES_DIR, TEST_DATA_DIR, WORKFLOW_DIR, SnakemakeRunner
 
 TEST_DIR = Path(__file__).parent
 CONFIGS_DIR = TEST_DIR / "configs"
@@ -662,6 +662,17 @@ def write_gvcf_sample_sheet(out_dir, *, sample_id, gvcf_path):
     return out_path
 
 
+def write_mixed_bam_gvcf_sample_sheet(out_dir, *, bam_path, gvcf_path):
+    """Write a sample sheet with one BAM-backed sample and one external gVCF sample."""
+    out_path = Path(out_dir) / "mixed_bam_gvcf_samples.csv"
+    out_path.write_text(
+        "sample_id,input_type,input\n"
+        f"sample_bam,bam,{bam_path}\n"
+        f"sample_gvcf,gvcf,{gvcf_path}\n"
+    )
+    return out_path
+
+
 def write_fastq_sample_sheet(out_dir, *, sample_id, library_id):
     """Write a one-row FASTQ sample sheet with explicit sample and library IDs."""
     out_path = Path(out_dir) / "numeric_id_fastqs.csv"
@@ -961,6 +972,114 @@ def test_callable_sites_disabled_sources_warn_and_skip_final_bed(request):
 
 
 @pytest.mark.dry_run
+def test_callable_sites_mixed_bam_gvcf_warns_and_skips_coverage_bed(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        gvcf_path = tmp_path / "external_name.g.vcf.gz"
+        samples = write_mixed_bam_gvcf_sample_sheet(
+            tmpdir,
+            bam_path=FIXTURES_DIR / "results/bams/markdup/sample0.bam",
+            gvcf_path=gvcf_path,
+        )
+        smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            generate_bed_file=True,
+            coverage_enabled=True,
+            mappability_enabled=True,
+        )
+
+        result = smk.dry_run(
+            target="callable_sites",
+            configfile=cfg,
+            samples=samples,
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "gVCF input sample(s): sample_gvcf" in output
+        assert "Coverage statistics will be computed only for BAM-backed samples" in output
+        assert "coverage BED generation is disabled" in output
+        assert "callable_coverage_thresholds" in output
+        assert "clam_loci" in output
+        assert "coverage_bed" not in output
+        assert "mappability_bed" in output
+        assert "callable_sites_bed" in output
+
+
+@pytest.mark.dry_run
+def test_callable_sites_mixed_bam_gvcf_coverage_only_targets_stats(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        gvcf_path = tmp_path / "external_name.g.vcf.gz"
+        samples = write_mixed_bam_gvcf_sample_sheet(
+            tmpdir,
+            bam_path=FIXTURES_DIR / "results/bams/markdup/sample0.bam",
+            gvcf_path=gvcf_path,
+        )
+        smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            generate_bed_file=True,
+            coverage_enabled=True,
+            mappability_enabled=False,
+        )
+
+        result = smk.dry_run(
+            target="callable_sites",
+            configfile=cfg,
+            samples=samples,
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "gVCF input sample(s): sample_gvcf" in output
+        assert "Coverage statistics will be computed only for BAM-backed samples" in output
+        assert "no callable-sites BED sources are enabled for this cohort" in output
+        assert "callable_coverage_thresholds" in output
+        assert "clam_loci" in output
+        assert "coverage_bed" not in output
+        assert "mappability_bed" not in output
+        assert "callable_sites_bed" not in output
+
+
+@pytest.mark.dry_run
+def test_coverage_bed_rejected_for_mixed_gvcf_inputs(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        gvcf_path = tmp_path / "external_name.g.vcf.gz"
+        samples = write_mixed_bam_gvcf_sample_sheet(
+            tmpdir,
+            bam_path=FIXTURES_DIR / "results/bams/markdup/sample0.bam",
+            gvcf_path=gvcf_path,
+        )
+        smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            generate_bed_file=True,
+            coverage_enabled=True,
+            mappability_enabled=False,
+        )
+
+        result = smk.dry_run(
+            target="results/callable_sites/coverage.bed",
+            configfile=cfg,
+            samples=samples,
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "Cannot create results/callable_sites/coverage.bed" in output
+        assert "contains gVCF inputs" in output
+
+
+@pytest.mark.dry_run
 def test_callable_sites_numeric_thresholds_validate(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1246,6 +1365,7 @@ def test_deepvariant_dry_run(request):
 
         output = result.stdout + result.stderr
         assert "deepvariant_call" in output
+        assert "/opt/deepvariant/bin/run_deepvariant" in output
         assert "glnexus_joint" in output
 
 
@@ -1288,7 +1408,7 @@ def test_gvcf_input_rejected_for_new_callers(request, tool):
 
 
 @pytest.mark.dry_run
-def test_callable_sites_coverage_rejected_for_gvcf_only_inputs(request):
+def test_callable_sites_coverage_warns_for_gvcf_only_inputs(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
@@ -1300,14 +1420,20 @@ def test_callable_sites_coverage_rejected_for_gvcf_only_inputs(request):
         )
 
         result = smk.dry_run(
-            target="all",
+            target="callable_sites",
             configfile=cfg,
             samples=SAMPLES_DIR / "local_gvcf.csv",
         )
 
-        assert not result.succeeded
+        result.assert_success()
         output = result.stdout + result.stderr
-        assert "callable_sites.coverage.enabled requires at least one BAM-backed sample" in output
+        assert "sample sheet contains only gVCF input sample(s): sample_gvcf" in output
+        assert "Coverage statistics and coverage BED generation are disabled" in output
+        assert "callable_coverage_thresholds" not in output
+        assert "clam_loci" not in output
+        assert "coverage_bed" not in output
+        assert "mappability_bed" in output
+        assert "callable_sites_bed" in output
 
 
 @pytest.mark.dry_run

@@ -8,11 +8,28 @@ GENMAP_SAMPLING_VALUE = 20
 
 def get_callable_source_beds(_wildcards):
     beds = []
-    if CALLABLE_COVERAGE_ENABLED:
+    if CALLABLE_COVERAGE_BED_ENABLED:
         beds.append("results/callable_sites/coverage.bed")
     if CALLABLE_MAPPABILITY_ENABLED:
         beds.append("results/callable_sites/mappability.bed")
     return beds
+
+
+def get_coverage_bed_zarr_input(_wildcards):
+    if CALLABLE_COVERAGE_BED_ENABLED:
+        return "results/callable_sites/callable_loci.zarr"
+
+    if SAMPLES_WITH_GVCF:
+        raise ValueError(
+            "Cannot create results/callable_sites/coverage.bed when the sample sheet "
+            "contains gVCF inputs, because coverage is unavailable for those samples. "
+            "Coverage statistics can still be computed for BAM-backed samples."
+        )
+
+    raise ValueError(
+        "Cannot create results/callable_sites/coverage.bed because "
+        "callable_sites.coverage.enabled is false or no BAM-backed samples are available."
+    )
 
 
 rule mosdepth:
@@ -126,7 +143,7 @@ rule clam_loci:
 rule coverage_bed:
     """Create BED of callable regions based on coverage."""
     input:
-        zarr="results/callable_sites/callable_loci.zarr",
+        zarr=get_coverage_bed_zarr_input,
     output:
         bed="results/callable_sites/coverage.bed",
     params:
