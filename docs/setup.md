@@ -181,7 +181,7 @@ Please refer to the [modules page](./modules.md) for each module's options.
 ### Resources
 Compute resources (threads, memory, etc.) as well as Snakemake arguments are set by the workflow profile located in `workflow-profiles/default/config.yaml`. This profile is used by default when running Snakemake. To specify a different profile, use the `--workflow-profile` option in your Snakemake command.
 
-In the profile you can set resources to be applied to all rules via the `default-resources` key. You can override this default per-rule by uncommenting that rule under the `set-threads` and/or `set-resources` key.
+In the profile you can set resources to be applied to all rules via the `default-resources` key. You can override this default per-rule by editing or adding entries under the `set-threads` and/or `set-resources` key.
 
 To configure temporary file location for the entire workflow, set `default-resources.tmpdir` in the workflow profile.
 
@@ -190,16 +190,26 @@ We recommend you use `--workflow-profile` to set resources for the workflow run.
 ```
 
 #### Threads
-The profile controls how many `threads` (or CPU cores) a rule can use via the `set-thread` key. We have provided reasonable defaults, though you may need to adjust depending on the resources available on your system/cluster.
+The profile controls how many `threads` (or CPU cores) a rule can use via the `set-threads` key. We have provided reasonable defaults, though you may need to adjust depending on the resources available on your system/cluster.
 ```{note}
 Many rules can only use 1 thread, and providing more threads **will not** decrease runtime or improve performance. Please refer to the `profiles/default/config.yaml` for details.
 ``` 
 
 #### Memory and other resources
-The profile controls how much memory and what other resources a rule can use via the `set-resources` key. When executing snpArcher on a cluster or the cloud, specifying memory is important as these environments will typically kill jobs that use more memory than they requested. 
+The profile controls how much memory and what other resources a rule can use via the `default-resources` and `set-resources` keys. snpArcher does not hard-code GATK memory in the rules; the workflow profile is the source of truth for scheduler memory requests and Java heap sizes. When executing snpArcher on a cluster or the cloud, specifying memory is important as these environments will typically kill jobs that use more memory than they requested.
 
 Other resources, such as `slurm_partition`, `runtime`, etc. can also be set here if they are required by your cluster. We have provided a SLURM profile `profiles/slurm` that has the most common SLURM resources.
 
 ```{note}
-Snakemake allows you to dynamically assign resources. We use the `attempt` keyword to specify memory. For example. `attempt * 2000` will provide 2GB on the first attempt of the rule, if the rule fails (out of memory) then on the second attempt it will be provided 4GB. This behavior requires the `-T/--retries` Snakemake option.
+Snakemake allows you to dynamically assign resources. We use the `attempt` keyword to specify memory. For example, `attempt * 16000` will provide 16 GB on the first attempt of the rule, and 32 GB on the second attempt if the job is retried. This behavior requires the `-T/--retries` Snakemake option.
+```
+
+For GATK and Picard rules, set both `mem_mb` and `mem_mb_reduced`. `mem_mb` is the scheduler request. `mem_mb_reduced` is passed directly to Java `-Xmx`, so it should be an integer number of MB and lower than `mem_mb` to leave room for native memory and process overhead.
+
+```yaml
+set-resources:
+  gatk_genomics_db_import:
+    mem_mb: attempt * 32000
+    mem_mb_reduced: attempt * 24000
+    runtime: 240
 ```

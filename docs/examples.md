@@ -105,7 +105,7 @@ Snakemake uses profile YAML files to specify commonly used command line argument
 cp -r snpArcher/workflow-profiles projects/secretarybird_reseq
 ```
 
-The profile also enables you to specify the compute resources any of snpArcher's rules can use. This is done via the YAML keys `default-resources`, `set-resources`, and `set-threads`. `default-resources` will apply to all rules, and `set-resources` can be applied to indiviudal rules, overriding what the default was set to. There is no way to set a default thread value. 
+The profile also enables you to specify the compute resources any of snpArcher's rules can use. This is done via the YAML keys `default-resources`, `set-resources`, and `set-threads`. `default-resources` will apply to all rules, and `set-resources` can be applied to individual rules, overriding what the default was set to. There is no way to set a default thread value.
 
 First, we will specify how many threads each rule can use. This is the same using the default or SLURM profile. Both profiles come with reasonable default thread values, but you may need to adjust based on your system or cluster. 
 
@@ -113,7 +113,7 @@ Let's say we wanted the alignment step (bwa mem) to use more threads:
 ```
 # ...
 set-threads:
-  bwa_map: 16 # Changed from 8 to 16.
+  bwa_mem: 16 # Changed from 8 to 16.
 # ...
 ```
 Next, we will specify memory and other resources. This step only applies if you are running on a SLURM cluster.
@@ -123,21 +123,21 @@ In our example cluster, we have two compute partitions, "short" and "long". So w
 First, lets specify the default resources:
 ```
 default-resources:
-  mem_mb: attempt * 2000
-  mem_mb_reduced: (attempt * 2000) * 0.9 # Mem allocated to java for GATK rules (tries to prevent OOM errors)
+  mem_mb: attempt * 16000
+  mem_mb_reduced: attempt * 14400 # Java -Xmx for GATK/Picard rules.
   slurm_partition: "short" # This line was changed
   slurm_account: # Same as sbatch -A. Not all clusters use this.
   runtime: 60 # In minutes 
 ```
-Then, lets modify the specific resources for the GATK HaplotypeCaller step:
+Then, lets modify the specific resources for the intervalized GATK HaplotypeCaller step:
 ```
 set-resources:
-# ... other rules
-   bam2gvcf: # HaplotypeCaller <--- This line was uncommented
-#     mem_mb: attempt * 2000
-#     mem_mb_reduced: (attempt * 2000) * 0.9 # Mem allocated to java (tries to prevent OOM errors)
-     slurm_partition: "long" # This line was changed
-     runtime: 600 # This line was changed
+  # ... other rules
+  gatk_haplotypecaller_interval:
+    mem_mb: attempt * 16000
+    mem_mb_reduced: attempt * 14400
+    slurm_partition: "long" # This line was changed
+    runtime: 600 # This line was changed
 ```
 
 ## Running the workflow
