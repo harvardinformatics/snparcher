@@ -92,10 +92,20 @@ def assert_profile_resource(profile_dir, rule, key, value):
     assert f"    {key}: {value}\n" in block
 
 
+def assert_profile_resource_scales_by_attempt(profile_dir, rule, key):
+    block = profile_resource_block(profile_dir, rule)
+    assert re.search(rf"^    {re.escape(key)}: attempt\s*\*\s*\d+\n", block, re.M)
+
+
 def assert_gatk_rule_uses_profile_heap(source):
     assert "--java-options '-Xmx{resources.mem_mb_reduced}m'" in source
     assert "-Xmx3072m" not in source
     assert "mem_mb=4096" not in source
+
+
+def assert_glnexus_rule_uses_profile_memory(source):
+    assert "--mem-gbytes {params.mem_gbytes}" in source
+    assert "resources.mem_mb_reduced" in source
 
 
 def get_multistage_config_file():
@@ -1511,6 +1521,19 @@ def test_deepvariant_dry_run(request):
         assert "deepvariant_call" in output
         assert "/opt/deepvariant/bin/run_deepvariant" in output
         assert "glnexus_joint" in output
+
+        source = workflow_source("rules", "variant_calling", "deepvariant.smk")
+        assert_glnexus_rule_uses_profile_memory(source)
+        assert_profile_resource_scales_by_attempt(
+            WORKFLOW_PROFILE_DIR,
+            "glnexus_joint",
+            "mem_mb",
+        )
+        assert_profile_resource_scales_by_attempt(
+            WORKFLOW_PROFILE_DIR,
+            "glnexus_joint",
+            "mem_mb_reduced",
+        )
 
 
 @pytest.mark.dry_run

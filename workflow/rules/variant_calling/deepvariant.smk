@@ -18,6 +18,10 @@ def glnexus_joint_input(wc):
     }
 
 
+def glnexus_mem_gbytes(wildcards, resources):
+    return max(1, int(resources.mem_mb_reduced) // 1024)
+
+
 rule deepvariant_call:
     input:
         unpack(deepvariant_input),
@@ -59,6 +63,7 @@ rule glnexus_joint:
         tbi=temp("results/vcfs/raw.vcf.gz.tbi"),
     params:
         db="results/vcfs/GLnexus.DB",
+        mem_gbytes=glnexus_mem_gbytes,
     threads: 1
     conda:
         "../../envs/glnexus.yaml"
@@ -72,7 +77,7 @@ rule glnexus_joint:
         rm -rf "$glnexus_db"
         trap 'rm -rf "$glnexus_db"' EXIT
 
-        glnexus_cli --dir "$glnexus_db" --config DeepVariant --threads {threads} {input.gvcfs} 2> {log} \
+        glnexus_cli --dir "$glnexus_db" --mem-gbytes {params.mem_gbytes} --config DeepVariant --threads {threads} {input.gvcfs} 2> {log} \
             | bcftools view -Oz -o {output.vcf} - 2>> {log}
         tabix -p vcf {output.vcf} 2>> {log}
         """
