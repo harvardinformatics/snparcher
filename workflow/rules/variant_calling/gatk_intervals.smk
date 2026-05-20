@@ -237,13 +237,10 @@ rule gatk_haplotypecaller_interval:
         gvcf=temp("results/interval_gvcfs/{sample}/{interval}.g.vcf.gz"),
         tbi=temp("results/interval_gvcfs/{sample}/{interval}.g.vcf.gz.tbi"),
     params:
-        java_mem=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
         ploidy=config["variant_calling"]["ploidy"],
         min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
         min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
     threads: 1
-    resources:
-        mem_mb=4096,
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -253,7 +250,7 @@ rule gatk_haplotypecaller_interval:
     shell:
         """
         gatk HaplotypeCaller \
-        --java-options {params.java_mem} \
+        --java-options '-Xmx{resources.mem_mb_reduced}m' \
         -R {input.ref} \
         -I {input.bam} \
         -O {output.gvcf} \
@@ -319,12 +316,9 @@ rule gatk_genomics_db_import:
         db=temp(directory("results/gatk_genomics_db/L{interval}")),
         tar="results/gatk_genomics_db/L{interval}.tar",
     params:
-        java_mem=lambda wildcards, resources: get_gatk_genomicsdb_import_java_opts(resources),
         interval_tools=INTERVAL_LIST_TOOLS,
         merge_contig_threshold=GENOMICSDB_MERGE_CONTIG_THRESHOLD,
     threads: 1
-    resources:
-        mem_mb=4096,
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -339,7 +333,7 @@ rule gatk_genomics_db_import:
             --input {input.interval} \
             --threshold {params.merge_contig_threshold} 2>> {log})
         gatk GenomicsDBImport \
-            --java-options '{params.java_mem}' \
+            --java-options '-Xmx{resources.mem_mb_reduced}m' \
             --genomicsdb-shared-posixfs-optimizations true \
             --batch-size 25 \
             --genomicsdb-workspace-path {output.db} \
@@ -360,11 +354,8 @@ rule gatk_genotype_gvcfs:
         vcf=temp("results/vcfs/intervals/L{interval}.vcf.gz"),
         tbi=temp("results/vcfs/intervals/L{interval}.vcf.gz.tbi"),
     params:
-        java_opts=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb * 0.9)}m",
         het_prior=config["variant_calling"]["gatk"]["het_prior"],
         db_rel=subpath(input.db, strip_suffix=".tar"),
-    resources:
-        mem_mb=4096,
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -377,7 +368,7 @@ rule gatk_genotype_gvcfs:
         trap 'rm -rf "$EXTRACT_DIR"' EXIT
         tar -xf {input.db} -C "$EXTRACT_DIR"
         gatk GenotypeGVCFs \
-            --java-options '{params.java_opts}' \
+            --java-options '-Xmx{resources.mem_mb_reduced}m' \
             -R {input.ref} \
             --heterozygosity {params.het_prior} \
             --genomicsdb-shared-posixfs-optimizations true \

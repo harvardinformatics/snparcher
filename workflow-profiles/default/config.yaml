@@ -1,9 +1,9 @@
 use-conda: True
 
-# These resources will be applied to all rules. Can be overriden on a per-rule basis below.
+# These resources will be applied to all rules. Can be overridden on a per-rule basis below.
 default-resources:
   mem_mb: attempt * 16000
-  mem_mb_reduced: (attempt * 16000) * 0.9 # Mem allocated to java for GATK rules (tries to prevent OOM errors)
+  mem_mb_reduced: attempt * 14400 # Mem allocated to Java for GATK rules.
   tmpdir: system_tmpdir # Replace with an absolute path to force a custom temp directory for the whole run.
   # Uncomment and edit following options for slurm execution:
   # slurm_partition: ""
@@ -13,11 +13,12 @@ default-resources:
 # Control number of threads each rule will use.
 set-threads:
   # Fastq Processing
-  get_fastq_pe: 6
+  download_sra: 6
   fastp: 6
+
   # Alignment
-  bwa_map: 16
-  dedup: 16
+  bwa_mem: 16
+  markdup_library: 16
 
   # GATK Variant Calling
   gatk_haplotypecaller: 1
@@ -26,12 +27,13 @@ set-threads:
   gatk_genomics_db_import: 1
 
   # Callable Bed
-  compute_d4: 6
+  mosdepth: 6
+  clam_collect: 6
   clam_loci: 6
 
   # Sentieon Tools
   sentieon_map: 16
-  sentieon_dedup: 16
+  sentieon_dedup_library: 16
   sentieon_haplotyper: 32
   sentieon_combine_gvcf: 32
 
@@ -40,23 +42,55 @@ set-threads:
   deepvariant_call: 8
   glnexus_joint: 4
   parabricks_haplotypecaller: 16
+
 # Control/overwrite resources per rule.
-# To use this feature, uncomment "set-resources:" below and add rules you want to customize.
-# Examples:
-#
-# set-resources:
-#   # Example 1: Increase memory for gatk_haplotypecaller rule
-#   gatk_haplotypecaller:
-#     mem_mb: attempt * 64000  # Customize memory allocation
-#     mem_mb_reduced: (attempt * 64000) * 0.9  # Customize Java memory allocation
-#
-#   # Example 2: Set slurm parameters for a resource-intensive rule
-#   sentieon_haplotyper:
-#     mem_mb: attempt * 8000
-#     mem_mb_reduced: (attempt * 8000) * 0.9
-#     slurm_partition: high-mem
-#     runtime: "24:00:00"
-#     cpus_per_task: 32
-#
-# To customize a rule, copy one of the example blocks above, paste it under "set-resources:",
-# replace the rule name with your target rule, and adjust the resource parameters as needed.
+# mem_mb controls the scheduler request. mem_mb_reduced controls Java -Xmx
+# for GATK/Picard rules and should be an integer number of MB.
+set-resources:
+  # Alignment
+  bwa_mem:
+    mem_mb: attempt * 16000
+    runtime: 2880
+  markdup_library:
+    mem_mb: attempt * 8000
+
+  # Interval generation
+  picard_intervals:
+    mem_mb: attempt * 8000
+    mem_mb_reduced: attempt * 7200
+  create_gvcf_intervals:
+    mem_mb: attempt * 8000
+    mem_mb_reduced: attempt * 7200
+  create_db_intervals:
+    mem_mb: attempt * 8000
+    mem_mb_reduced: attempt * 7200
+
+  # GATK Variant Calling
+  gatk_haplotypecaller_interval:
+    mem_mb: attempt * 16000
+    mem_mb_reduced: attempt * 14400
+    runtime: 720
+  gatk_genomics_db_import:
+    mem_mb: attempt * 32000
+    mem_mb_reduced: attempt * 24000
+    runtime: 240
+  gatk_genotype_gvcfs:
+    mem_mb: attempt * 8000
+    mem_mb_reduced: attempt * 7200
+    runtime: 240
+  joint_genomics_db_import:
+    mem_mb: attempt * 64000
+    mem_mb_reduced: attempt * 48000
+    runtime: 1440
+  joint_genotype_gvcfs:
+    mem_mb: attempt * 16000
+    mem_mb_reduced: attempt * 14400
+    runtime: 240
+
+  # Example: Set slurm parameters for a resource-intensive rule.
+  # sentieon_haplotyper:
+  #   mem_mb: attempt * 8000
+  #   mem_mb_reduced: attempt * 7200
+  #   slurm_partition: high-mem
+  #   runtime: 1440
+  #   cpus_per_task: 32

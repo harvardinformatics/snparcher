@@ -5,10 +5,12 @@ from pathlib import Path
 import pytest
 
 WORKFLOW_DIR = Path(__file__).parent.parent / "workflow"
+WORKFLOW_PROFILE_DIR = Path(__file__).parent.parent / "workflow-profiles" / "default"
 TEST_DATA_DIR = Path(__file__).parent / "data"
 FIXTURES_DIR = (TEST_DATA_DIR / "fixtures").resolve()
 # Default conda prefix — can be overridden via --conda-prefix
 CONDA_PREFIX = (Path(__file__).parent.parent / ".snakemake" / "conda").resolve()
+DEFAULT_WORKFLOW_PROFILE = object()
 
 
 def pytest_addoption(parser):
@@ -33,10 +35,21 @@ def pytest_collection_modifyitems(config, items):
 
 
 class SnakemakeRunner:
-    def __init__(self, workdir, use_conda=True, snakefile=None, conda_prefix=None):
+    def __init__(
+        self,
+        workdir,
+        use_conda=True,
+        snakefile=None,
+        conda_prefix=None,
+        workflow_profile=DEFAULT_WORKFLOW_PROFILE,
+    ):
         self.snakefile = Path(snakefile) if snakefile else WORKFLOW_DIR / "Snakefile"
         self.workdir = Path(workdir)
         self.use_conda = use_conda
+        if workflow_profile is DEFAULT_WORKFLOW_PROFILE:
+            self.workflow_profile = WORKFLOW_PROFILE_DIR if snakefile is None else None
+        else:
+            self.workflow_profile = Path(workflow_profile) if workflow_profile else None
         if conda_prefix:
             self.conda_prefix = Path(conda_prefix).resolve()
         else:
@@ -70,7 +83,14 @@ class SnakemakeRunner:
 
             dest.symlink_to(src.resolve())
 
-    def run(self, target, configfile=None, samples=None, extra_args=None, config_overrides=None):
+    def run(
+        self,
+        target,
+        configfile=None,
+        samples=None,
+        extra_args=None,
+        config_overrides=None,
+    ):
         if isinstance(target, str):
             targets = [target]
         else:
@@ -107,6 +127,9 @@ class SnakemakeRunner:
                 config_pairs.append(f"{key}={value}")
         if config_pairs:
             cmd.extend(["--config"] + config_pairs)
+
+        if self.workflow_profile:
+            cmd.extend(["--workflow-profile", str(self.workflow_profile.resolve())])
 
         if self.use_conda:
             cmd.extend(["--use-conda", "--conda-prefix", str(self.conda_prefix)])

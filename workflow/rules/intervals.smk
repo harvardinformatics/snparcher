@@ -18,9 +18,6 @@ rule picard_intervals:
         "../envs/gatk.yaml"
     params:
         min_nmer=config["intervals"]["min_nmer"],
-        java_opts=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb*0.9)}m",
-    resources:
-        mem_mb=4096,
     benchmark:
         "benchmarks/intervals_picard.txt"
     log:
@@ -28,7 +25,7 @@ rule picard_intervals:
     shell:
         """
         picard ScatterIntervalsByNs \
-            {params.java_opts} \
+            -Xmx{resources.mem_mb_reduced}m \
             REFERENCE={input.ref} \
             OUTPUT={output.intervals} \
             MAX_TO_MERGE={params.min_nmer} \
@@ -67,10 +64,7 @@ checkpoint create_gvcf_intervals:
         fof="results/intervals/gvcf/intervals.txt",
         out_dir=directory("results/intervals/gvcf"),
     params:
-        java_opts=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb*0.9)}m",
         scatter=config["intervals"]["num_gvcf_intervals"],
-    resources:
-        mem_mb=4096,
     conda:
         "../envs/gatk.yaml"
     benchmark:
@@ -80,7 +74,7 @@ checkpoint create_gvcf_intervals:
     shell:
         """
         gatk SplitIntervals \
-            --java-options '{params.java_opts}' \
+            --java-options '-Xmx{resources.mem_mb_reduced}m' \
             -R {input.ref} \
             -L {input.intervals} \
             -O {output.out_dir} \
@@ -100,14 +94,11 @@ checkpoint create_db_intervals:
         fof="results/intervals/db/intervals.txt",
         out_dir=directory("results/intervals/db"),
     params:
-        java_opts=lambda wildcards, resources: f"-Xmx{int(resources.mem_mb*0.9)}m",
         scatter=get_db_interval_count,
         interval_tools=INTERVAL_LIST_TOOLS,
         max_intervals=config["intervals"]["db_max_intervals_per_shard"],
         max_contigs=config["intervals"]["db_max_contigs_per_shard"],
         merge_contig_threshold=GENOMICSDB_MERGE_CONTIG_THRESHOLD,
-    resources:
-        mem_mb=4096,
     conda:
         "../envs/gatk.yaml"
     benchmark:
@@ -119,7 +110,7 @@ checkpoint create_db_intervals:
         mkdir -p {output.out_dir}
         raw_dir=$(mktemp -d {output.out_dir}/gatk_split_raw.XXXXXX)
         gatk SplitIntervals \
-            --java-options '{params.java_opts}' \
+            --java-options '-Xmx{resources.mem_mb_reduced}m' \
             -R {input.ref} \
             -L {input.intervals} \
             -O "$raw_dir" \

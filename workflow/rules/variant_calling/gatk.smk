@@ -1,12 +1,3 @@
-def _java_opts_from_resources(resources, default_mem_mb=4096):
-    mem_mb = getattr(resources, "mem_mb", default_mem_mb)
-    try:
-        mem_mb = int(float(mem_mb))
-    except (TypeError, ValueError):
-        mem_mb = default_mem_mb
-    return f"-Xmx{int(mem_mb * 0.9)}m"
-
-
 def haplotype_caller_input(wildcards):
     if sample_has_input_type(wildcards.sample, "gvcf"):
         raise ValueError(
@@ -28,7 +19,6 @@ rule gatk_haplotypecaller:
         gvcf="results/gvcfs/{sample}.g.vcf.gz",
         tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
     params:
-        java_opts=lambda wildcards, resources: _java_opts_from_resources(resources),
         ploidy=config["variant_calling"]["ploidy"],
         min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
         min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
@@ -42,7 +32,7 @@ rule gatk_haplotypecaller:
     shell:
         """
         gatk HaplotypeCaller \
-            --java-options '{params.java_opts}' \
+            --java-options '-Xmx{resources.mem_mb_reduced}m' \
             -R {input.ref} \
             -I {input.bam} \
             -O {output.gvcf} \

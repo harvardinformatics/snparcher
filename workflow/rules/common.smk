@@ -132,21 +132,7 @@ DEFAULTS = {
 }
 
 
-GENOMICSDB_IMPORT_HEAP_FRACTION = 0.75
 GENOMICSDB_MERGE_CONTIG_THRESHOLD = 50
-
-
-def _coerce_resource_mem_mb(resources, default_mem_mb=4096):
-    mem_mb = getattr(resources, "mem_mb", default_mem_mb)
-    try:
-        return int(float(mem_mb))
-    except (TypeError, ValueError):
-        return default_mem_mb
-
-
-def get_gatk_genomicsdb_import_java_opts(resources, default_mem_mb=4096):
-    mem_mb = _coerce_resource_mem_mb(resources, default_mem_mb)
-    return f"-Xmx{max(1, int(mem_mb * GENOMICSDB_IMPORT_HEAP_FRACTION))}m"
 
 
 REMOVED_MODULES = ("mk", "trackhub")

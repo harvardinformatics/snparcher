@@ -14,7 +14,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from conftest import FIXTURES_DIR, TEST_DATA_DIR, WORKFLOW_DIR, SnakemakeRunner
+from conftest import (
+    FIXTURES_DIR,
+    TEST_DATA_DIR,
+    WORKFLOW_DIR,
+    WORKFLOW_PROFILE_DIR,
+    SnakemakeRunner,
+)
 
 TEST_DIR = Path(__file__).parent
 CONFIGS_DIR = TEST_DIR / "configs"
@@ -29,11 +35,41 @@ def get_samples_file():
         return SAMPLES_DIR / "local_fastqs_no_dedup.csv"
     return SAMPLES_DIR / "local_fastqs.csv"
 
+
 def get_config_file():
     """Get appropriate sample sheet based on platform."""
     if platform.machine() == "arm64":
         return CONFIGS_DIR / "local_genome_no_clam.yaml"
     return CONFIGS_DIR / "local_genome.yaml"
+
+
+def write_profile_with_genomicsdb_heap_override(out_dir, mem_mb_reduced):
+    """Copy the default profile and override intervalized GenomicsDB Java heap."""
+    profile_dir = Path(out_dir) / "workflow-profile"
+    shutil.copytree(WORKFLOW_PROFILE_DIR, profile_dir)
+
+    config_path = profile_dir / "config.yaml"
+    old = (
+        "  gatk_genomics_db_import:\n"
+        "    mem_mb: attempt * 32000\n"
+        "    mem_mb_reduced: attempt * 24000\n"
+        "    runtime: 240\n"
+    )
+    new = (
+        "  gatk_genomics_db_import:\n"
+        "    mem_mb: attempt * 32000\n"
+        f"    mem_mb_reduced: {mem_mb_reduced}\n"
+        "    runtime: 240\n"
+    )
+    profile_config = config_path.read_text()
+    if old not in profile_config:
+        raise AssertionError("Expected gatk_genomics_db_import resource block not found")
+    config_path.write_text(profile_config.replace(old, new))
+    return profile_dir
+
+
+def scheduled_rule_present(output, rule):
+    return f"rule {rule}:" in output or f"checkpoint {rule}:" in output
 
 
 def get_multistage_config_file():
@@ -756,9 +792,9 @@ def test_global_mark_duplicates_config_default_is_respected(request):
 
         result.assert_success()
         output = result.stdout + result.stderr
-        assert "merge_library_level_bams" in output
-        assert "markdup_library" not in output
-        assert "merge_dedup_libraries" not in output
+        assert scheduled_rule_present(output, "merge_library_level_bams")
+        assert not scheduled_rule_present(output, "markdup_library")
+        assert not scheduled_rule_present(output, "merge_dedup_libraries")
 
 @pytest.mark.dry_run
 def test_setup_dry_run(request):
@@ -935,11 +971,16 @@ def test_callable_sites_target_dry_run(
         result.assert_success()
 
         output = result.stdout + result.stderr
-        assert ("callable_coverage_thresholds" in output) == coverage_enabled
-        assert ("clam_loci" in output) == coverage_enabled
-        assert ("coverage_bed" in output) == (generate_bed_file and coverage_enabled)
-        assert ("mappability_bed" in output) == mappability_enabled
-        assert ("callable_sites_bed" in output) == (
+        assert (
+            scheduled_rule_present(output, "callable_coverage_thresholds")
+            == coverage_enabled
+        )
+        assert scheduled_rule_present(output, "clam_loci") == coverage_enabled
+        assert scheduled_rule_present(output, "coverage_bed") == (
+            generate_bed_file and coverage_enabled
+        )
+        assert scheduled_rule_present(output, "mappability_bed") == mappability_enabled
+        assert scheduled_rule_present(output, "callable_sites_bed") == (
             generate_bed_file and (coverage_enabled or mappability_enabled)
         )
 
@@ -966,9 +1007,9 @@ def test_callable_sites_disabled_sources_warn_and_skip_final_bed(request):
 
         output = result.stdout + result.stderr
         assert "Skipping results/callable_sites/callable_sites.bed generation" in output
-        assert "callable_sites_bed" not in output
-        assert "clam_loci" not in output
-        assert "mappability_bed" not in output
+        assert not scheduled_rule_present(output, "callable_sites_bed")
+        assert not scheduled_rule_present(output, "clam_loci")
+        assert not scheduled_rule_present(output, "mappability_bed")
 
 
 @pytest.mark.dry_run
@@ -1179,7 +1220,7 @@ def test_gatk_without_intervals_dry_run(request):
 
 
 @pytest.mark.dry_run
-def test_genomicsdb_import_dry_run_uses_internal_memory_and_contig_merge_guard(request):
+def test_joint_genomicsdb_import_dry_run_uses_profile_heap_and_contig_merge_guard(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
@@ -1193,9 +1234,62 @@ def test_genomicsdb_import_dry_run_uses_internal_memory_and_contig_merge_guard(r
         result.assert_success()
 
         output = result.stdout + result.stderr
-        assert "--java-options '-Xmx3072m'" in output
+        assert "--java-options '-Xmx48000m'" in output
+        assert "-Xmx3072m" not in output
         assert "genomicsdb-merge-contigs-arg" in output
         assert "--threshold 50" in output
+
+
+@pytest.mark.dry_run
+def test_interval_genomicsdb_import_dry_run_uses_profile_heap(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals",
+            "results/gvcfs",
+            "results/genomics_db",
+        )
+
+        result = smk.dry_run(target="results/gatk_genomics_db/L0000.tar")
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "--java-options '-Xmx24000m'" in output
+        assert "-Xmx3072m" not in output
+        assert "genomicsdb-merge-contigs-arg" in output
+        assert "--threshold 50" in output
+
+
+@pytest.mark.dry_run
+def test_interval_genomicsdb_import_profile_heap_override_is_authoritative(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        profile_dir = write_profile_with_genomicsdb_heap_override(
+            tmpdir, mem_mb_reduced=12345
+        )
+        smk = SnakemakeRunner(
+            Path(tmpdir), use_conda=not no_conda, workflow_profile=profile_dir
+        )
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals",
+            "results/gvcfs",
+            "results/genomics_db",
+        )
+
+        result = smk.dry_run(target="results/gatk_genomics_db/L0000.tar")
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "--java-options '-Xmx12345m'" in output
+        assert "--java-options '-Xmx24000m'" not in output
+        assert "-Xmx3072m" not in output
 
 
 @pytest.mark.full_run

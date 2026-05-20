@@ -1,15 +1,6 @@
 localrules: create_db_mapfile
 
 
-def _java_opts_from_resources(resources, default_mem_mb=4096):
-    mem_mb = getattr(resources, "mem_mb", default_mem_mb)
-    try:
-        mem_mb = int(float(mem_mb))
-    except (TypeError, ValueError):
-        mem_mb = default_mem_mb
-    return f"-Xmx{int(mem_mb * 0.9)}m"
-
-
 def get_gvcfs_for_db(wc):
     return {
         "gvcfs": get_joint_gvcf_paths(),
@@ -35,7 +26,6 @@ rule joint_genomics_db_import:
         db=temp(directory("results/gatk_genomics_db")),
         tar="results/gatk_genomics_db.tar",
     params:
-        java_opts=lambda wildcards, resources: get_gatk_genomicsdb_import_java_opts(resources),
         interval_tools=INTERVAL_LIST_TOOLS,
         merge_contig_threshold=GENOMICSDB_MERGE_CONTIG_THRESHOLD,
     threads: 1
@@ -53,7 +43,7 @@ rule joint_genomics_db_import:
             --input {input.ref_fai} \
             --threshold {params.merge_contig_threshold} 2>> {log})
         gatk GenomicsDBImport \
-            --java-options '{params.java_opts}' \
+            --java-options '-Xmx{resources.mem_mb_reduced}m' \
             --genomicsdb-shared-posixfs-optimizations true \
             --batch-size 25 \
             --genomicsdb-workspace-path {output.db} \
@@ -75,7 +65,6 @@ rule joint_genotype_gvcfs:
         vcf=temp("results/vcfs/raw.vcf.gz"),
         tbi=temp("results/vcfs/raw.vcf.gz.tbi"),
     params:
-        java_opts=lambda wildcards, resources: _java_opts_from_resources(resources),
         het_prior=config["variant_calling"]["gatk"]["het_prior"],
         db_rel=lambda wc, input: subpath(input.db, strip_suffix=".tar"),
     conda:
@@ -90,7 +79,7 @@ rule joint_genotype_gvcfs:
         trap 'rm -rf "$EXTRACT_DIR"' EXIT
         tar -xf {input.db} -C "$EXTRACT_DIR"
         gatk GenotypeGVCFs \
-            --java-options '{params.java_opts}' \
+            --java-options '-Xmx{resources.mem_mb_reduced}m' \
             -R {input.ref} \
             --heterozygosity {params.het_prior} \
             --genomicsdb-shared-posixfs-optimizations true \
