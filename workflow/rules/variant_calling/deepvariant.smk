@@ -30,7 +30,7 @@ rule deepvariant_call:
         model_type=config["variant_calling"]["deepvariant"]["model_type"],
     threads: config["variant_calling"]["deepvariant"]["num_shards"]
     container:
-        "docker://google/deepvariant:1.9.0"
+        "docker://google/deepvariant:1.10.0"
     benchmark:
         "benchmarks/deepvariant_call/{sample}.txt"
     log:

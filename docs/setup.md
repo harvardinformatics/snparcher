@@ -143,7 +143,7 @@ When `variant_calling.tool` is `bcftools`, `deepvariant`, or `parabricks`, sampl
 Parabricks uses interval-split joint genotyping (GenomicsDBImport/GenotypeGVCFs) regardless of `intervals.enabled`.
 snpArcher automatically reserves native memory for GenomicsDBImport and applies GATK contig merging to DB shards with many whole-contig intervals.
 
-DeepVariant execution uses Snakemake's native `container:` support with `docker://google/deepvariant:1.9.0`. When running with `variant_calling.tool: "deepvariant"`, enable container execution with `--use-apptainer` or `--software-deployment-method conda apptainer`.
+DeepVariant execution uses Snakemake's native `container:` support with `docker://google/deepvariant:1.10.0`. When running with `variant_calling.tool: "deepvariant"`, enable container execution with `--use-apptainer` or `--software-deployment-method conda apptainer`.
 
 Parabricks execution expects NVIDIA GPUs and an Apptainer/Singularity image path in `variant_calling.parabricks.container_image`.
 Parabricks HaplotypeCaller also follows `variant_calling.expected_coverage` to set `--min-pruning` and `--min-dangling-branch-length`.
