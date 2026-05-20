@@ -102,8 +102,8 @@ def assert_gatk_rule_uses_profile_heap(source):
 
 
 def assert_glnexus_rule_uses_profile_memory(source):
-    assert "--mem-gbytes {params.mem_gbytes}" in source
-    assert "resources.mem_mb_reduced" in source
+    assert "glnexus_mem_gbytes=$(( {resources.mem_mb_reduced} / 1024 ))" in source
+    assert '--mem-gbytes "$glnexus_mem_gbytes"' in source
 
 
 def get_multistage_config_file():
