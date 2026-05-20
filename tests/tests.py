@@ -72,6 +72,32 @@ def scheduled_rule_present(output, rule):
     return f"rule {rule}:" in output or f"checkpoint {rule}:" in output
 
 
+def workflow_source(*parts):
+    return (WORKFLOW_DIR.joinpath(*parts)).read_text()
+
+
+def profile_resource_block(profile_dir, rule):
+    config_path = Path(profile_dir) / "config.yaml"
+    match = re.search(
+        rf"(?ms)^  {re.escape(rule)}:\n(?P<block>(?:    .+\n)+)",
+        config_path.read_text(),
+    )
+    if not match:
+        raise AssertionError(f"Expected resource block for {rule} in {config_path}")
+    return match.group("block")
+
+
+def assert_profile_resource(profile_dir, rule, key, value):
+    block = profile_resource_block(profile_dir, rule)
+    assert f"    {key}: {value}\n" in block
+
+
+def assert_gatk_rule_uses_profile_heap(source):
+    assert "--java-options '-Xmx{resources.mem_mb_reduced}m'" in source
+    assert "-Xmx3072m" not in source
+    assert "mem_mb=4096" not in source
+
+
 def get_multistage_config_file():
     """Get multistage concat config file based on platform."""
     if platform.machine() == "arm64":
@@ -1234,10 +1260,20 @@ def test_joint_genomicsdb_import_dry_run_uses_profile_heap_and_contig_merge_guar
         result.assert_success()
 
         output = result.stdout + result.stderr
-        assert "--java-options '-Xmx48000m'" in output
+        assert scheduled_rule_present(output, "joint_genomics_db_import")
+        assert scheduled_rule_present(output, "joint_genotype_gvcfs")
         assert "-Xmx3072m" not in output
-        assert "genomicsdb-merge-contigs-arg" in output
-        assert "--threshold 50" in output
+
+        source = workflow_source("rules", "variant_calling", "joint_gvcf.smk")
+        assert_gatk_rule_uses_profile_heap(source)
+        assert "genomicsdb-merge-contigs-arg" in source
+        assert "--threshold {params.merge_contig_threshold}" in source
+        assert_profile_resource(
+            WORKFLOW_PROFILE_DIR,
+            "joint_genomics_db_import",
+            "mem_mb_reduced",
+            "attempt * 48000",
+        )
 
 
 @pytest.mark.dry_run
@@ -1258,10 +1294,19 @@ def test_interval_genomicsdb_import_dry_run_uses_profile_heap(request):
         result.assert_success()
 
         output = result.stdout + result.stderr
-        assert "--java-options '-Xmx24000m'" in output
+        assert scheduled_rule_present(output, "gatk_genomics_db_import")
         assert "-Xmx3072m" not in output
-        assert "genomicsdb-merge-contigs-arg" in output
-        assert "--threshold 50" in output
+
+        source = workflow_source("rules", "variant_calling", "gatk_intervals.smk")
+        assert_gatk_rule_uses_profile_heap(source)
+        assert "genomicsdb-merge-contigs-arg" in source
+        assert "--threshold {params.merge_contig_threshold}" in source
+        assert_profile_resource(
+            WORKFLOW_PROFILE_DIR,
+            "gatk_genomics_db_import",
+            "mem_mb_reduced",
+            "attempt * 24000",
+        )
 
 
 @pytest.mark.dry_run
@@ -1287,9 +1332,14 @@ def test_interval_genomicsdb_import_profile_heap_override_is_authoritative(reque
         result.assert_success()
 
         output = result.stdout + result.stderr
-        assert "--java-options '-Xmx12345m'" in output
-        assert "--java-options '-Xmx24000m'" not in output
+        assert scheduled_rule_present(output, "gatk_genomics_db_import")
         assert "-Xmx3072m" not in output
+        assert_profile_resource(
+            profile_dir,
+            "gatk_genomics_db_import",
+            "mem_mb_reduced",
+            "12345",
+        )
 
 
 @pytest.mark.full_run
@@ -1523,11 +1573,11 @@ def test_callable_sites_coverage_warns_for_gvcf_only_inputs(request):
         output = result.stdout + result.stderr
         assert "sample sheet contains only gVCF input sample(s): sample_gvcf" in output
         assert "Coverage statistics and coverage BED generation are disabled" in output
-        assert "callable_coverage_thresholds" not in output
-        assert "clam_loci" not in output
-        assert "coverage_bed" not in output
-        assert "mappability_bed" in output
-        assert "callable_sites_bed" in output
+        assert not scheduled_rule_present(output, "callable_coverage_thresholds")
+        assert not scheduled_rule_present(output, "clam_loci")
+        assert not scheduled_rule_present(output, "coverage_bed")
+        assert scheduled_rule_present(output, "mappability_bed")
+        assert scheduled_rule_present(output, "callable_sites_bed")
 
 
 @pytest.mark.dry_run
