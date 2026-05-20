@@ -57,6 +57,8 @@ rule glnexus_joint:
     output:
         vcf=temp("results/vcfs/raw.vcf.gz"),
         tbi=temp("results/vcfs/raw.vcf.gz.tbi"),
+    params:
+        db="results/vcfs/GLnexus.DB",
     threads: 1
     conda:
         "../../envs/glnexus.yaml"
@@ -66,7 +68,11 @@ rule glnexus_joint:
         "logs/glnexus_joint.txt"
     shell:
         """
-        glnexus_cli --config DeepVariant --threads {threads} {input.gvcfs} 2> {log} \
+        glnexus_db="{params.db}"
+        rm -rf "$glnexus_db"
+        trap 'rm -rf "$glnexus_db"' EXIT
+
+        glnexus_cli --dir "$glnexus_db" --config DeepVariant --threads {threads} {input.gvcfs} 2> {log} \
             | bcftools view -Oz -o {output.vcf} - 2>> {log}
         tabix -p vcf {output.vcf} 2>> {log}
         """
