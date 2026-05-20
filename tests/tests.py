@@ -53,13 +53,11 @@ def write_profile_with_genomicsdb_heap_override(out_dir, mem_mb_reduced):
         "  gatk_genomics_db_import:\n"
         "    mem_mb: attempt * 32000\n"
         "    mem_mb_reduced: attempt * 24000\n"
-        "    runtime: 240\n"
     )
     new = (
         "  gatk_genomics_db_import:\n"
         "    mem_mb: attempt * 32000\n"
         f"    mem_mb_reduced: {mem_mb_reduced}\n"
-        "    runtime: 240\n"
     )
     profile_config = config_path.read_text()
     if old not in profile_config:

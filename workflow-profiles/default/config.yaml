@@ -69,15 +69,12 @@ set-resources:
   gatk_haplotypecaller_interval:
     mem_mb: attempt * 16000
     mem_mb_reduced: attempt * 14400
-    runtime: 720
   gatk_genomics_db_import:
     mem_mb: attempt * 32000
     mem_mb_reduced: attempt * 24000
-    runtime: 240
   gatk_genotype_gvcfs:
     mem_mb: attempt * 8000
     mem_mb_reduced: attempt * 7200
-    runtime: 240
   joint_genomics_db_import:
     mem_mb: attempt * 64000
     mem_mb_reduced: attempt * 48000
@@ -85,7 +82,6 @@ set-resources:
   joint_genotype_gvcfs:
     mem_mb: attempt * 16000
     mem_mb_reduced: attempt * 14400
-    runtime: 240
 
   # DeepVariant joint calling
   glnexus_joint:
