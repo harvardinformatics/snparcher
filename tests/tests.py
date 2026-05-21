@@ -579,6 +579,33 @@ def write_numeric_qc_inputs(out_dir):
     return out_vcf, out_fai
 
 
+def write_qc_vcf_with_half_call(out_dir):
+    """Write a QC VCF fixture with one GT half-call for PLINK import tests."""
+    source_vcf = TEST_DATA_DIR / "qc" / "raw.vcf.gz"
+    out_vcf = Path(out_dir) / "half_call_raw.vcf.gz"
+    changed = False
+
+    with gzip.open(source_vcf, "rt") as src, gzip.open(out_vcf, "wt") as dst:
+        for line in src:
+            if changed or line.startswith("#"):
+                dst.write(line)
+                continue
+
+            fields = line.rstrip("\n").split("\t")
+            format_fields = fields[8].split(":")
+            gt_i = format_fields.index("GT")
+            sample_fields = fields[9].split(":")
+            sample_fields[gt_i] = "0/."
+            fields[9] = ":".join(sample_fields)
+            dst.write("\t".join(fields) + "\n")
+            changed = True
+
+    if not changed:
+        raise AssertionError("Expected at least one variant in QC VCF fixture")
+
+    return out_vcf
+
+
 def write_qc_vcf_without_gatk_annotations(out_dir):
     """Write a small QC VCF whose header lacks GATK-specific INFO annotations."""
     out_dir = Path(out_dir)
@@ -2230,6 +2257,37 @@ def test_qc_plink_filters_sparse_samples_before_pca(request):
 
         output = result.stdout + result.stderr
         assert "--mind 0.49" in output
+        assert "--vcf-half-call missing" in output
+
+
+@pytest.mark.full_run
+def test_qc_plink_accepts_half_call_genotypes(request):
+    """QC PLINK import should treat VCF half-calls as missing genotypes."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        half_call_vcf = write_qc_vcf_with_half_call(tmpdir)
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.run(
+            target="results/qc/plink.bed",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "sample_metadata": str(TEST_DATA_DIR / "qc" / "sample_metadata.csv"),
+                "vcf": str(half_call_vcf),
+                "fai": str(TEST_DATA_DIR / "qc" / "ref.fai"),
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools", "vcftools", "plink2", "plink")
+        result.assert_success()
+        result.assert_output_exists(
+            "results/qc/plink.bed",
+            "results/qc/plink.bim",
+            "results/qc/plink.fam",
+        )
 
 
 @pytest.mark.full_run
