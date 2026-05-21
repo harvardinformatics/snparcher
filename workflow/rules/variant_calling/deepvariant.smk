@@ -30,7 +30,7 @@ rule deepvariant_call:
         model_type=config["variant_calling"]["deepvariant"]["model_type"],
     threads: config["variant_calling"]["deepvariant"]["num_shards"]
     container:
-        "docker://google/deepvariant:1.9.0"
+        "docker://google/deepvariant:1.10.0"
     benchmark:
         "benchmarks/deepvariant_call/{sample}.txt"
     log:
@@ -47,8 +47,7 @@ rule deepvariant_call:
             --num_shards {threads} \
             --intermediate_results_dir results/deepvariant/{wildcards.sample} \
             &> {log}
-        tabix -p vcf {output.vcf} 2>> {log}
-        tabix -p vcf {output.gvcf} 2>> {log}
+
         """
 
 
@@ -58,6 +57,8 @@ rule glnexus_joint:
     output:
         vcf=temp("results/vcfs/raw.vcf.gz"),
         tbi=temp("results/vcfs/raw.vcf.gz.tbi"),
+    params:
+        db="results/vcfs/GLnexus.DB",
     threads: 1
     conda:
         "../../envs/glnexus.yaml"
@@ -67,7 +68,16 @@ rule glnexus_joint:
         "logs/glnexus_joint.txt"
     shell:
         """
-        glnexus_cli --config DeepVariant --threads {threads} {input.gvcfs} 2> {log} \
+        glnexus_db="{params.db}"
+        rm -rf "$glnexus_db"
+        trap 'rm -rf "$glnexus_db"' EXIT
+
+        glnexus_mem_gbytes=$(( {resources.mem_mb_reduced} / 1024 ))
+        if [ "$glnexus_mem_gbytes" -lt 1 ]; then
+            glnexus_mem_gbytes=1
+        fi
+
+        glnexus_cli --dir "$glnexus_db" --mem-gbytes "$glnexus_mem_gbytes" --config DeepVariant --threads {threads} {input.gvcfs} 2> {log} \
             | bcftools view -Oz -o {output.vcf} - 2>> {log}
         tabix -p vcf {output.vcf} 2>> {log}
         """

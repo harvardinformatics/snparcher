@@ -448,10 +448,12 @@ rule plink:
     shell:
         """
         plink2 --vcf {input.vcf} --pca 10 --out {params.prefix} \
+            --vcf-half-call missing \
             --mind {params.max_sample_missingness} \
             --allow-extra-chr --autosome-num 95 --make-bed --make-king square \
             --const-fid --bad-freqs &> {log}
         plink --vcf {input.vcf} --out {params.prefix} \
+            --vcf-half-call missing \
             --mind {params.max_sample_missingness} \
             --allow-extra-chr --autosome-num 95 --distance square \
             --const-fid &>> {log}

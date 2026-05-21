@@ -2,8 +2,8 @@ use-conda: True
 
 # These resources will be applied to all rules. Can be overridden on a per-rule basis below.
 default-resources:
-  mem_mb: attempt * 16000
-  mem_mb_reduced: attempt * 14400 # Mem allocated to Java for GATK rules.
+  mem_mb: attempt * 8000
+  mem_mb_reduced: attempt * 7000 # Mem allocated to Java for GATK rules.
   tmpdir: system_tmpdir # Replace with an absolute path to force a custom temp directory for the whole run.
   # Uncomment and edit following options for slurm execution:
   # slurm_partition: ""
@@ -44,8 +44,8 @@ set-threads:
   parabricks_haplotypecaller: 16
 
 # Control/overwrite resources per rule.
-# mem_mb controls the scheduler request. mem_mb_reduced controls Java -Xmx
-# for GATK/Picard rules and should be an integer number of MB.
+# mem_mb controls the scheduler request. mem_mb_reduced controls tool memory
+# budgets below the scheduler limit and should be an integer number of MB.
 set-resources:
   # Alignment
   bwa_mem:
@@ -69,15 +69,12 @@ set-resources:
   gatk_haplotypecaller_interval:
     mem_mb: attempt * 16000
     mem_mb_reduced: attempt * 14400
-    runtime: 720
   gatk_genomics_db_import:
     mem_mb: attempt * 32000
     mem_mb_reduced: attempt * 24000
-    runtime: 240
   gatk_genotype_gvcfs:
     mem_mb: attempt * 8000
     mem_mb_reduced: attempt * 7200
-    runtime: 240
   joint_genomics_db_import:
     mem_mb: attempt * 64000
     mem_mb_reduced: attempt * 48000
@@ -85,7 +82,11 @@ set-resources:
   joint_genotype_gvcfs:
     mem_mb: attempt * 16000
     mem_mb_reduced: attempt * 14400
-    runtime: 240
+
+  # DeepVariant joint calling
+  glnexus_joint:
+    mem_mb: attempt * 32000
+    mem_mb_reduced: attempt * 28000
 
   # Example: Set slurm parameters for a resource-intensive rule.
   # sentieon_haplotyper:

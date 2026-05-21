@@ -53,13 +53,11 @@ def write_profile_with_genomicsdb_heap_override(out_dir, mem_mb_reduced):
         "  gatk_genomics_db_import:\n"
         "    mem_mb: attempt * 32000\n"
         "    mem_mb_reduced: attempt * 24000\n"
-        "    runtime: 240\n"
     )
     new = (
         "  gatk_genomics_db_import:\n"
         "    mem_mb: attempt * 32000\n"
         f"    mem_mb_reduced: {mem_mb_reduced}\n"
-        "    runtime: 240\n"
     )
     profile_config = config_path.read_text()
     if old not in profile_config:
@@ -92,10 +90,20 @@ def assert_profile_resource(profile_dir, rule, key, value):
     assert f"    {key}: {value}\n" in block
 
 
+def assert_profile_resource_scales_by_attempt(profile_dir, rule, key):
+    block = profile_resource_block(profile_dir, rule)
+    assert re.search(rf"^    {re.escape(key)}: attempt\s*\*\s*\d+\n", block, re.M)
+
+
 def assert_gatk_rule_uses_profile_heap(source):
     assert "--java-options '-Xmx{resources.mem_mb_reduced}m'" in source
     assert "-Xmx3072m" not in source
     assert "mem_mb=4096" not in source
+
+
+def assert_glnexus_rule_uses_profile_memory(source):
+    assert "glnexus_mem_gbytes=$(( {resources.mem_mb_reduced} / 1024 ))" in source
+    assert '--mem-gbytes "$glnexus_mem_gbytes"' in source
 
 
 def get_multistage_config_file():
@@ -569,6 +577,33 @@ def write_numeric_qc_inputs(out_dir):
         dst.write("\t".join(extra_variant) + "\n")
 
     return out_vcf, out_fai
+
+
+def write_qc_vcf_with_half_call(out_dir):
+    """Write a QC VCF fixture with one GT half-call for PLINK import tests."""
+    source_vcf = TEST_DATA_DIR / "qc" / "raw.vcf.gz"
+    out_vcf = Path(out_dir) / "half_call_raw.vcf.gz"
+    changed = False
+
+    with gzip.open(source_vcf, "rt") as src, gzip.open(out_vcf, "wt") as dst:
+        for line in src:
+            if changed or line.startswith("#"):
+                dst.write(line)
+                continue
+
+            fields = line.rstrip("\n").split("\t")
+            format_fields = fields[8].split(":")
+            gt_i = format_fields.index("GT")
+            sample_fields = fields[9].split(":")
+            sample_fields[gt_i] = "0/."
+            fields[9] = ":".join(sample_fields)
+            dst.write("\t".join(fields) + "\n")
+            changed = True
+
+    if not changed:
+        raise AssertionError("Expected at least one variant in QC VCF fixture")
+
+    return out_vcf
 
 
 def write_qc_vcf_without_gatk_annotations(out_dir):
@@ -1512,6 +1547,19 @@ def test_deepvariant_dry_run(request):
         assert "/opt/deepvariant/bin/run_deepvariant" in output
         assert "glnexus_joint" in output
 
+        source = workflow_source("rules", "variant_calling", "deepvariant.smk")
+        assert_glnexus_rule_uses_profile_memory(source)
+        assert_profile_resource_scales_by_attempt(
+            WORKFLOW_PROFILE_DIR,
+            "glnexus_joint",
+            "mem_mb",
+        )
+        assert_profile_resource_scales_by_attempt(
+            WORKFLOW_PROFILE_DIR,
+            "glnexus_joint",
+            "mem_mb_reduced",
+        )
+
 
 @pytest.mark.dry_run
 def test_parabricks_dry_run(request):
@@ -2209,6 +2257,37 @@ def test_qc_plink_filters_sparse_samples_before_pca(request):
 
         output = result.stdout + result.stderr
         assert "--mind 0.49" in output
+        assert "--vcf-half-call missing" in output
+
+
+@pytest.mark.full_run
+def test_qc_plink_accepts_half_call_genotypes(request):
+    """QC PLINK import should treat VCF half-calls as missing genotypes."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        half_call_vcf = write_qc_vcf_with_half_call(tmpdir)
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.run(
+            target="results/qc/plink.bed",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "sample_metadata": str(TEST_DATA_DIR / "qc" / "sample_metadata.csv"),
+                "vcf": str(half_call_vcf),
+                "fai": str(TEST_DATA_DIR / "qc" / "ref.fai"),
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools", "vcftools", "plink2", "plink")
+        result.assert_success()
+        result.assert_output_exists(
+            "results/qc/plink.bed",
+            "results/qc/plink.bim",
+            "results/qc/plink.fam",
+        )
 
 
 @pytest.mark.full_run
