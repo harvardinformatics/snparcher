@@ -33,6 +33,7 @@ rule gatk_haplotypecaller:
             --java-options '-Xmx{resources.mem_mb_reduced}m' \
             -R {input.ref} \
             -I {input.bam} \
+            --read-index {input.bam_index} \
             -O {output.gvcf} \
             -ploidy {params.ploidy} \
             --native-pair-hmm-threads {threads} \

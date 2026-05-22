@@ -251,6 +251,7 @@ rule gatk_haplotypecaller_interval:
         --java-options '-Xmx{resources.mem_mb_reduced}m' \
         -R {input.ref} \
         -I {input.bam} \
+        --read-index {input.bam_index} \
         -O {output.gvcf} \
         -L {input.interval} \
         -ploidy {params.ploidy} \
