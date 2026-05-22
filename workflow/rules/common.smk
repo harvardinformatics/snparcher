@@ -652,13 +652,27 @@ def get_sample_srr_records(sample):
     return rows[["sample_id", "library_id", "input_unit", "input"]].to_dict("records")
 
 
+BAM_INDEX_SUFFIX = ".csi"
+
+
+def get_bam_index(bam):
+    """Return the workflow-managed CSI index path for a BAM."""
+    return f"{bam}{BAM_INDEX_SUFFIX}"
+
+
+def get_external_bam(sample):
+    """Get the original sample-sheet BAM path for an external BAM sample."""
+    sample_rows = get_sample_rows(sample)
+    bam_rows = sample_rows[sample_rows["input_type"] == "bam"]
+    if bam_rows.empty:
+        raise ValueError(f"Sample '{sample}' does not have input_type 'bam'")
+    return bam_rows["input"].iloc[0]
+
+
 def get_final_bam(sample):
     """Get final BAM path for a sample."""
-    sample_rows = get_sample_rows(sample)
-
     if sample_has_input_type(sample, "bam"):
-        bam_rows = sample_rows[sample_rows["input_type"] == "bam"]
-        return bam_rows["input"].iloc[0]
+        return f"results/bams/input/{sample}.bam"
 
     mark_dups = get_sample_mark_duplicates(sample)
 
@@ -666,6 +680,20 @@ def get_final_bam(sample):
         return f"results/bams/markdup/{sample}.bam"
     else:
         return f"results/bams/merged/{sample}.bam"
+
+
+def get_final_bam_index(sample):
+    """Get final BAM CSI index path for a sample."""
+    return get_bam_index(get_final_bam(sample))
+
+
+def get_indexed_final_bam_input(sample):
+    """Get final BAM plus CSI index inputs for tools that require indexed access."""
+    bam = get_final_bam(sample)
+    return {
+        "bam": bam,
+        "bam_index": get_bam_index(bam),
+    }
 
 
 def get_final_gvcf(sample):

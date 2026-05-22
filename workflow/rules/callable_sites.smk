@@ -36,7 +36,7 @@ rule mosdepth:
     """Compute per-base coverage with mosdepth."""
     input:
         bam=lambda wc: get_final_bam(wc.sample),
-        bai=lambda wc: get_final_bam(wc.sample) + ".bai",
+        bam_index=lambda wc: get_final_bam_index(wc.sample),
     output:
         d4=temp("results/callable_sites/depths/{sample}.per-base.d4"),
         summary="results/callable_sites/depths/{sample}.mosdepth.summary.txt",

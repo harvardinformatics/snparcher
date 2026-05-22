@@ -5,12 +5,14 @@ pixi.lock merge=binary linguist-language=YAML linguist-generated=true
 *.gz binary
 *.bam binary
 *.bai binary
+*.csi binary
 *.vcf.gz binary
 *.tbi binary
 *.dict binary
 tests/data/fixtures/** linguist-generated
 tests/data/fixtures/**/*.bam binary
 tests/data/fixtures/**/*.bam.bai binary
+tests/data/fixtures/**/*.bam.csi binary
 tests/data/fixtures/**/*.vcf.gz binary
 tests/data/fixtures/**/*.vcf.gz.tbi binary
 tests/data/fixtures/**/*.g.vcf.gz binary

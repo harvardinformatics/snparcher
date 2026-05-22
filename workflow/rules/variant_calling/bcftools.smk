@@ -5,7 +5,7 @@ def bcftools_call_input(wc):
     bams = [get_final_bam(s) for s in SAMPLES_WITH_BAM]
     return {
         "bams": bams,
-        "bais": [f"{bam}.bai" for bam in bams],
+        "bam_indexes": [get_bam_index(bam) for bam in bams],
         **REF_FILES,
     }
 

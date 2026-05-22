@@ -9,10 +9,8 @@ def haplotype_caller_input(wildcards):
     if sample_has_input_type(wildcards.sample, "gvcf"):
         raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotype_caller")
     
-    bam = get_final_bam(wildcards.sample)
     return {
-        "bam": bam,
-        "bai": bam + ".bai",
+        **get_indexed_final_bam_input(wildcards.sample),
         "interval": f"results/intervals/gvcf/{wildcards.interval}-scattered.interval_list",
         **REF_FILES,
     }
