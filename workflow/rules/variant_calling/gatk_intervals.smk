@@ -5,6 +5,27 @@ wildcard_constraints:
     round=r"\d+",
     chunk=r"\d+"
 
+INTERVAL_GVCF_PATTERN = (
+    "results/interval_gvcfs/{sample}/{interval}.g.vcf"
+    if LONG_CONTIG_MODE
+    else "results/interval_gvcfs/{sample}/{interval}.g.vcf.gz"
+)
+STAGED_GVCF_PATTERN = (
+    "results/gvcfs/work/staged/{sample}/r{round}/c{chunk}.g.vcf"
+    if LONG_CONTIG_MODE
+    else "results/gvcfs/staged/{sample}/r{round}/c{chunk}.g.vcf.gz"
+)
+INTERVAL_VCF_PATTERN = (
+    "results/vcfs/intervals/L{interval}.vcf"
+    if LONG_CONTIG_MODE
+    else "results/vcfs/intervals/L{interval}.vcf.gz"
+)
+STAGED_VCF_PATTERN = (
+    "results/vcfs/work/staged/r{round}/c{chunk}.vcf"
+    if LONG_CONTIG_MODE
+    else "results/vcfs/staged/r{round}/c{chunk}.vcf.gz"
+)
+
 def haplotype_caller_input(wildcards):
     if sample_has_input_type(wildcards.sample, "gvcf"):
         raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotype_caller")
@@ -14,6 +35,14 @@ def haplotype_caller_input(wildcards):
         "interval": f"results/intervals/gvcf/{wildcards.interval}-scattered.interval_list",
         **REF_FILES,
     }
+
+
+def external_gvcf_input(wildcards):
+    if not sample_has_input_type(wildcards.sample, "gvcf"):
+        raise ValueError(
+            f"Sample {wildcards.sample} does not have input_type 'gvcf'"
+        )
+    return {"gvcf": get_final_gvcf(wildcards.sample)}
 
 
 def get_interval_gvcfs(wc):
@@ -35,11 +64,7 @@ def get_interval_gvcfs(wc):
 
     list_files = [os.path.basename(x) for x in lines]
     intervals = [f.replace("-scattered.interval_list", "") for f in list_files]
-    return expand(
-        "results/interval_gvcfs/{sample}/{interval}.g.vcf.gz",
-        sample=wc.sample,
-        interval=intervals,
-    )
+    return expand(INTERVAL_GVCF_PATTERN, sample=wc.sample, interval=intervals)
 
 
 def get_db_intervals(wc):
@@ -61,19 +86,24 @@ def get_db_intervals(wc):
 def get_interval_vcfs(wc):
     """Get unfiltered interval VCF files."""
     intervals = get_db_intervals(wc)
-    return expand(
-        "results/vcfs/intervals/L{interval}.vcf.gz",
-        interval=intervals,
-    )
+    return expand(INTERVAL_VCF_PATTERN, interval=intervals)
 
 
 def get_gvcfs_for_db(wc):
-    return {
+    inputs = {
         "gvcfs": get_joint_gvcf_paths(),
-        "tbis": get_joint_gvcf_tbis(),
+        "tbis": get_joint_gvcf_indexes(),
         "interval": f"results/intervals/db/{wc.interval}-scattered.interval_list",
         "db_mapfile": "results/genomics_db/mapfile.txt",
     }
+    if GATK_LONG_CONTIG_MODE:
+        inputs.update(
+            {
+                "archive_gvcfs": get_generated_gvcf_archives(),
+                "archive_indexes": get_generated_gvcf_archive_indexes(),
+            }
+        )
+    return inputs
 
 
 def get_concat_batch_size():
@@ -119,11 +149,15 @@ def get_stage_chunk_counts(num_files):
 
 
 def staged_vcf_path(wc, round_idx, chunk_idx):
-    return f"results/vcfs/staged/r{round_idx}/c{chunk_idx}.vcf.gz"
+    return STAGED_VCF_PATTERN.format(round=round_idx, chunk=chunk_idx)
 
 
 def staged_gvcf_path(wc, round_idx, chunk_idx):
-    return f"results/gvcfs/staged/{wc.sample}/r{round_idx}/c{chunk_idx}.g.vcf.gz"
+    return STAGED_GVCF_PATTERN.format(
+        sample=wc.sample,
+        round=round_idx,
+        chunk=chunk_idx,
+    )
 
 
 def get_stage_inputs(base_files, round_idx, chunk_idx, wc, path_builder):
@@ -187,7 +221,7 @@ def get_interval_gvcf_stage_inputs(wc):
 
 def get_interval_gvcf_stage_tbis(wc):
     stage_inputs = get_interval_gvcf_stage_inputs(wc)
-    return [f"{gvcf}.tbi" for gvcf in stage_inputs]
+    return [get_vcf_index(gvcf) for gvcf in stage_inputs]
 
 
 def get_final_interval_gvcf_stage_file(wc):
@@ -199,7 +233,7 @@ def get_final_interval_gvcf_stage_file(wc):
 
 
 def get_final_interval_gvcf_stage_tbi(wc):
-    return get_final_interval_gvcf_stage_file(wc) + ".tbi"
+    return get_vcf_index(get_final_interval_gvcf_stage_file(wc))
 
 
 def get_interval_vcf_stage_inputs(wc):
@@ -214,7 +248,7 @@ def get_interval_vcf_stage_inputs(wc):
 
 def get_interval_vcf_stage_tbis(wc):
     stage_inputs = get_interval_vcf_stage_inputs(wc)
-    return [f"{vcf}.tbi" for vcf in stage_inputs]
+    return [get_vcf_index(vcf) for vcf in stage_inputs]
 
 
 def get_final_interval_vcf_stage_file(wc):
@@ -226,14 +260,14 @@ def get_final_interval_vcf_stage_file(wc):
 
 
 def get_final_interval_vcf_stage_tbi(wc):
-    return get_final_interval_vcf_stage_file(wc) + ".tbi"
+    return get_vcf_index(get_final_interval_vcf_stage_file(wc))
 
 rule gatk_haplotypecaller_interval:
     input:
         unpack(haplotype_caller_input),
     output:
-        gvcf=temp("results/interval_gvcfs/{sample}/{interval}.g.vcf.gz"),
-        tbi=temp("results/interval_gvcfs/{sample}/{interval}.g.vcf.gz.tbi"),
+        gvcf=temp(INTERVAL_GVCF_PATTERN),
+        idx=temp(get_vcf_index(INTERVAL_GVCF_PATTERN)),
     params:
         ploidy=config["variant_calling"]["ploidy"],
         min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
@@ -266,19 +300,28 @@ rule concat_interval_gvcfs_stage:
         gvcfs=get_interval_gvcf_stage_inputs,
         tbis=get_interval_gvcf_stage_tbis,
     output:
-        gvcf=temp("results/gvcfs/staged/{sample}/r{round}/c{chunk}.g.vcf.gz"),
-        tbi=temp("results/gvcfs/staged/{sample}/r{round}/c{chunk}.g.vcf.gz.tbi"),
+        gvcf=temp(STAGED_GVCF_PATTERN),
+        idx=temp(get_vcf_index(STAGED_GVCF_PATTERN)),
+    params:
+        index_args=BCFTOOLS_INDEX_ARGS,
+        long_mode=LONG_CONTIG_MODE,
     conda:
-        "../../envs/bcftools.yaml"
+        "../../envs/gatk.yaml"
     benchmark:
         "benchmarks/concat_interval_gvcfs/staged/{sample}/r{round}/c{chunk}.txt"
     log:
         "logs/concat_interval_gvcfs/staged/{sample}/r{round}/c{chunk}.txt"
     shell:
         """
-        bcftools concat -D -a -Ou {input.gvcfs} 2> {log} \
-            | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.gvcf} - 2>> {log}
-        tabix -p vcf {output.gvcf} 2>> {log}
+        if [ "{params.long_mode}" = "True" ]; then
+            bcftools concat -D -a -Ou {input.gvcfs} 2> {log} \
+                | bcftools sort -T {resources.tmpdir}/ -O v -o {output.gvcf} - 2>> {log}
+            gatk IndexFeatureFile -I {output.gvcf} &>> {log}
+        else
+            bcftools concat -D -a -Ou {input.gvcfs} 2> {log} \
+                | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.gvcf} - 2>> {log}
+            bcftools index {params.index_args} {output.gvcf} 2>> {log}
+        fi
         """
 
 
@@ -287,8 +330,8 @@ rule concat_interval_gvcfs:
         gvcf=get_final_interval_gvcf_stage_file,
         tbi=get_final_interval_gvcf_stage_tbi,
     output:
-        gvcf="results/gvcfs/{sample}.g.vcf.gz",
-        tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
+        gvcf=temp("results/gvcfs/work/{sample}.g.vcf") if LONG_CONTIG_MODE else "results/gvcfs/{sample}.g.vcf.gz",
+        idx=temp("results/gvcfs/work/{sample}.g.vcf.idx") if LONG_CONTIG_MODE else get_compressed_vcf_index("results/gvcfs/{sample}.g.vcf.gz"),
     benchmark:
         "benchmarks/concat_interval_gvcfs/{sample}.txt"
     log:
@@ -296,12 +339,68 @@ rule concat_interval_gvcfs:
     shell:
         """
         mv {input.gvcf} {output.gvcf} 2> {log}
-        mv {input.tbi} {output.tbi} 2>> {log}
+        mv {input.tbi} {output.idx} 2>> {log}
         """
+
+if LONG_CONTIG_MODE:
+
+    rule normalize_external_gvcf_for_gatk:
+        input:
+            unpack(external_gvcf_input),
+        output:
+            gvcf=temp("results/gvcfs/work/external/{sample}.g.vcf"),
+            idx=temp("results/gvcfs/work/external/{sample}.g.vcf.idx"),
+        conda:
+            "../../envs/gatk.yaml"
+        benchmark:
+            "benchmarks/normalize_external_gvcf_for_gatk/{sample}.txt"
+        log:
+            "logs/normalize_external_gvcf_for_gatk/{sample}.txt"
+        shell:
+            """
+            bcftools view -O v -o {output.gvcf} {input.gvcf} 2> {log}
+            gatk IndexFeatureFile -I {output.gvcf} &>> {log}
+            """
+
+
+    rule archive_gatk_gvcf:
+        input:
+            gvcf=lambda wc: get_gatk_work_gvcf(wc.sample),
+            idx=lambda wc: get_gatk_work_gvcf_index(wc.sample),
+        output:
+            gvcf=get_archive_gvcf("{sample}"),
+            idx=get_archive_gvcf_index("{sample}"),
+        params:
+            index_args=BCFTOOLS_INDEX_ARGS,
+        conda:
+            "../../envs/bcftools.yaml"
+        benchmark:
+            "benchmarks/archive_gatk_gvcf/{sample}.txt"
+        log:
+            "logs/archive_gatk_gvcf/{sample}.txt"
+        shell:
+            """
+            bcftools view -Oz -o {output.gvcf} {input.gvcf} 2> {log}
+            bcftools index {params.index_args} {output.gvcf} 2>> {log}
+            """
+
+
+def create_db_mapfile_input(wc):
+    inputs = {"gvcfs": get_joint_gvcf_paths()}
+    if GATK_LONG_CONTIG_MODE:
+        inputs.update(
+            {
+                "gvcf_indexes": get_joint_gvcf_indexes(),
+                "archive_gvcfs": get_generated_gvcf_archives(),
+                "archive_indexes": get_generated_gvcf_archive_indexes(),
+            }
+        )
+    return inputs
+
 
 rule create_db_mapfile:
     input:
-        gvcfs=get_joint_gvcf_paths(),
+        unpack(create_db_mapfile_input),
     output:
         mapfile="results/genomics_db/mapfile.txt",
     run:
@@ -345,13 +444,14 @@ rule gatk_genomics_db_import:
         tar -cf {output.tar} {output.db} &>> {log}
         """
 
+
 rule gatk_genotype_gvcfs:
     input:
         db="results/gatk_genomics_db/L{interval}.tar",
         **REF_FILES,
     output:
-        vcf=temp("results/vcfs/intervals/L{interval}.vcf.gz"),
-        tbi=temp("results/vcfs/intervals/L{interval}.vcf.gz.tbi"),
+        vcf=temp(INTERVAL_VCF_PATTERN),
+        idx=temp(get_vcf_index(INTERVAL_VCF_PATTERN)),
     params:
         het_prior=config["variant_calling"]["gatk"]["het_prior"],
         db_rel=subpath(input.db, strip_suffix=".tar"),
@@ -377,24 +477,34 @@ rule gatk_genotype_gvcfs:
             &> {log}
         """
 
+
 rule concat_interval_vcfs_stage:
     input:
         vcfs=get_interval_vcf_stage_inputs,
         tbis=get_interval_vcf_stage_tbis,
     output:
-        vcf=temp("results/vcfs/staged/r{round}/c{chunk}.vcf.gz"),
-        tbi=temp("results/vcfs/staged/r{round}/c{chunk}.vcf.gz.tbi"),
+        vcf=temp(STAGED_VCF_PATTERN),
+        idx=temp(get_vcf_index(STAGED_VCF_PATTERN)),
+    params:
+        index_args=BCFTOOLS_INDEX_ARGS,
+        long_mode=LONG_CONTIG_MODE,
     conda:
-        "../../envs/bcftools.yaml"
+        "../../envs/gatk.yaml"
     benchmark:
         "benchmarks/concat_interval_vcfs/staged/r{round}/c{chunk}.txt"
     log:
         "logs/concat_interval_vcfs/staged/r{round}/c{chunk}.txt"
     shell:
         """
-        bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
-            | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}
-        tabix -p vcf {output.vcf} 2>> {log}
+        if [ "{params.long_mode}" = "True" ]; then
+            bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
+                | bcftools sort -T {resources.tmpdir}/ -O v -o {output.vcf} - 2>> {log}
+            gatk IndexFeatureFile -I {output.vcf} &>> {log}
+        else
+            bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
+                | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}
+            bcftools index {params.index_args} {output.vcf} 2>> {log}
+        fi
         """
 
 
@@ -403,8 +513,8 @@ rule concat_interval_vcfs:
         vcf=get_final_interval_vcf_stage_file,
         tbi=get_final_interval_vcf_stage_tbi,
     output:
-        vcf="results/vcfs/raw.vcf.gz",
-        tbi="results/vcfs/raw.vcf.gz.tbi",
+        vcf=temp(RAW_VCF_WORK) if LONG_CONTIG_MODE else RAW_VCF,
+        idx=temp(RAW_VCF_WORK_INDEX) if LONG_CONTIG_MODE else RAW_VCF_INDEX,
     benchmark:
         "benchmarks/concat_interval_vcfs/benchmark.txt"
     log:
@@ -412,5 +522,29 @@ rule concat_interval_vcfs:
     shell:
         """
         mv {input.vcf} {output.vcf} 2> {log}
-        mv {input.tbi} {output.tbi} 2>> {log}
+        mv {input.tbi} {output.idx} 2>> {log}
         """
+
+
+if LONG_CONTIG_MODE:
+
+    rule compress_interval_raw_vcf:
+        input:
+            vcf=RAW_VCF_WORK,
+            idx=RAW_VCF_WORK_INDEX,
+        output:
+            vcf=temp(RAW_VCF),
+            idx=temp(RAW_VCF_INDEX),
+        params:
+            index_args=BCFTOOLS_INDEX_ARGS,
+        conda:
+            "../../envs/bcftools.yaml"
+        benchmark:
+            "benchmarks/compress_interval_raw_vcf.txt"
+        log:
+            "logs/compress_interval_raw_vcf.txt"
+        shell:
+            """
+            bcftools view -Oz -o {output.vcf} {input.vcf} 2> {log}
+            bcftools index {params.index_args} {output.vcf} 2>> {log}
+            """

@@ -60,6 +60,7 @@ DEFAULTS = {
     "variant_calling": {
         "expected_coverage": "low",
         "tool": "gatk",
+        "long_contig_mode": "auto",
         "ploidy": 2,
         "gatk": {
             "het_prior": 0.005,
@@ -507,6 +508,104 @@ REF_BWA_IDX = multiext(
 )
 
 
+# --- VCF/gVCF index mode -----------------------------------------------------
+
+TBI_MAX_CONTIG_LENGTH = (2**29) - 1
+
+
+def _max_contig_length_from_fai(path):
+    """Return max contig length from a .fai path, or None if unavailable."""
+    fai_path = Path(path)
+    if not fai_path.exists():
+        return None
+
+    max_length = 0
+    with open(fai_path) as handle:
+        for line in handle:
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < 2:
+                continue
+            try:
+                max_length = max(max_length, int(fields[1]))
+            except ValueError:
+                continue
+    return max_length
+
+
+def _reference_fai_candidates():
+    """Return known places where a reference FAI may already exist."""
+    source = config["reference"]["source"]
+    candidates = [REF_FILES["ref_fai"]]
+    if source.startswith(("http://", "https://", "ftp://")):
+        return candidates
+
+    source_path = Path(source)
+    candidates.append(f"{source}.fai")
+    if source_path.suffix == ".gz":
+        candidates.append(str(source_path.with_suffix("")) + ".fai")
+    return candidates
+
+
+def _resolve_long_contig_mode():
+    """Resolve variant_calling.long_contig_mode to a boolean."""
+    setting = config["variant_calling"].get("long_contig_mode", "auto")
+    if isinstance(setting, bool):
+        return setting
+    if setting != "auto":
+        raise ValueError(
+            "variant_calling.long_contig_mode must be true, false, or 'auto'"
+        )
+
+    for fai in _reference_fai_candidates():
+        max_length = _max_contig_length_from_fai(fai)
+        if max_length is None:
+            continue
+        return max_length > TBI_MAX_CONTIG_LENGTH
+
+    logger.warning(
+        "variant_calling.long_contig_mode is 'auto', but no reference .fai was "
+        "available while building the DAG. Using standard TBI-compatible mode. "
+        "For first runs with URL/accession references or known long contigs, set "
+        "variant_calling.long_contig_mode: true or run setup first."
+    )
+    return False
+
+
+LONG_CONTIG_MODE = _resolve_long_contig_mode()
+GATK_LONG_CONTIG_MODE = LONG_CONTIG_MODE and VARIANT_TOOL == "gatk"
+
+if LONG_CONTIG_MODE and VARIANT_TOOL in {"sentieon", "parabricks"}:
+    raise ValueError(
+        f"variant_calling.long_contig_mode is not implemented for the {VARIANT_TOOL} "
+        "backend. Use gatk, bcftools, or deepvariant for long-contig "
+        "references."
+    )
+
+COMPRESSED_VCF_INDEX_SUFFIX = ".csi" if LONG_CONTIG_MODE else ".tbi"
+BCFTOOLS_INDEX_ARGS = "-f -c" if LONG_CONTIG_MODE else "-f -t"
+BCFTOOLS_WRITE_INDEX_FORMAT = "csi" if LONG_CONTIG_MODE else "tbi"
+
+
+def get_compressed_vcf_index(vcf):
+    """Return the index path for a bgzip-compressed VCF/gVCF."""
+    return f"{vcf}{COMPRESSED_VCF_INDEX_SUFFIX}"
+
+
+def get_vcf_index(vcf):
+    """Return the expected index path for compressed or plain VCF/gVCF."""
+    if str(vcf).endswith(".gz"):
+        return get_compressed_vcf_index(vcf)
+    return f"{vcf}.idx"
+
+
+RAW_VCF = "results/vcfs/raw.vcf.gz"
+RAW_VCF_INDEX = get_compressed_vcf_index(RAW_VCF)
+RAW_VCF_WORK = "results/vcfs/work/raw.vcf"
+RAW_VCF_WORK_INDEX = get_vcf_index(RAW_VCF_WORK)
+FILTERED_VCF = "results/vcfs/filtered.vcf.gz"
+FILTERED_VCF_INDEX = get_compressed_vcf_index(FILTERED_VCF)
+
+
 # --- Sample lists ---
 
 SAMPLES_ALL = samples_df["sample_id"].unique().tolist()
@@ -704,12 +803,60 @@ def get_final_gvcf(sample):
         gvcf_rows = sample_rows[sample_rows["input_type"] == "gvcf"]
         return gvcf_rows["input"].iloc[0]
 
-    result = f"results/gvcfs/{sample}.g.vcf.gz"
-    return result
+    return get_archive_gvcf(sample)
+
+
+def get_archive_gvcf(sample):
+    """Return the durable, workflow-generated compressed gVCF path."""
+    return f"results/gvcfs/{sample}.g.vcf.gz"
+
+
+def get_archive_gvcf_index(sample):
+    """Return the durable, workflow-generated compressed gVCF index path."""
+    return get_compressed_vcf_index(get_archive_gvcf(sample))
+
+
+def get_gatk_work_gvcf(sample):
+    """Return the temp uncompressed gVCF path consumed by GATK in long mode."""
+    if sample_has_input_type(sample, "gvcf"):
+        return f"results/gvcfs/work/external/{sample}.g.vcf"
+    return f"results/gvcfs/work/{sample}.g.vcf"
+
+
+def get_gatk_work_gvcf_index(sample):
+    """Return the temp uncompressed gVCF index path consumed by GATK in long mode."""
+    return get_vcf_index(get_gatk_work_gvcf(sample))
+
+
+def get_gatk_joint_gvcf(sample):
+    """Return the gVCF path that GATK joint genotyping should consume."""
+    if GATK_LONG_CONTIG_MODE:
+        return get_gatk_work_gvcf(sample)
+    return get_final_gvcf(sample)
+
+
+def get_generated_gvcf_archives():
+    """Return durable gVCF archives generated by this workflow."""
+    return [
+        get_archive_gvcf(sample)
+        for sample in SAMPLES_ALL
+        if not sample_has_input_type(sample, "gvcf")
+    ]
+
+
+def get_generated_gvcf_archive_indexes():
+    """Return durable gVCF archive indexes generated by this workflow."""
+    return [
+        get_archive_gvcf_index(sample)
+        for sample in SAMPLES_ALL
+        if not sample_has_input_type(sample, "gvcf")
+    ]
 
 
 def get_joint_gvcf_records():
     """Return sample IDs paired with their final gVCF paths."""
+    if VARIANT_TOOL == "gatk":
+        return [(sample, get_gatk_joint_gvcf(sample)) for sample in SAMPLES_ALL]
     return [(sample, get_final_gvcf(sample)) for sample in SAMPLES_ALL]
 
 
@@ -718,9 +865,19 @@ def get_joint_gvcf_paths():
     return [gvcf for _, gvcf in get_joint_gvcf_records()]
 
 
+def get_joint_gvcf_indexes():
+    """Return final gVCF index paths for GATK-style indexed readers."""
+    return [get_vcf_index(gvcf) for gvcf in get_joint_gvcf_paths()]
+
+
+def get_glnexus_joint_gvcf_indexes():
+    """Return only compressed gVCF indexes needed before GLnexus can run."""
+    return [get_vcf_index(gvcf) for gvcf in get_joint_gvcf_paths()]
+
+
 def get_joint_gvcf_tbis():
-    """Return final gVCF index paths for joint genotyping."""
-    return [f"{gvcf}.tbi" for gvcf in get_joint_gvcf_paths()]
+    """Backward-compatible alias for older rule code."""
+    return get_joint_gvcf_indexes()
 
 
 def write_joint_gvcf_mapfile(path):

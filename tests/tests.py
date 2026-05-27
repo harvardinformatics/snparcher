@@ -383,6 +383,46 @@ def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
     out_path.write_text(text)
     return out_path
 
+
+def write_long_contig_config(base_config, out_dir, tool="gatk", mode="true"):
+    """Write a config copy with long-contig mode enabled or set to auto."""
+    text = Path(base_config).read_text()
+    text = text.replace('tool: "gatk"', f'tool: "{tool}"', 1)
+    text = text.replace('tool: "gatk" #', f'tool: "{tool}" #', 1)
+    pattern = re.compile(r'(variant_calling:\n(?:  .+\n)*?  tool: "[^"]+".*\n)')
+    if not pattern.search(text):
+        raise AssertionError("Expected variant_calling.tool entry not found")
+    text = pattern.sub(rf"\1  long_contig_mode: {mode}\n", text, count=1)
+    if tool == "parabricks":
+        text = text.replace(
+            'container_image: ""',
+            'container_image: "/tmp/parabricks.sif"',
+            1,
+        )
+
+    out_path = Path(out_dir) / f"config_{tool}_long_{mode}.yaml"
+    out_path.write_text(text)
+    return out_path
+
+
+def write_auto_long_contig_reference_config(base_config, out_dir, contig_length, tool="sentieon"):
+    """Write a config whose local reference has a pre-existing .fai."""
+    out_dir = Path(out_dir)
+    ref = out_dir / f"auto_{contig_length}.fa"
+    ref.write_text(">ctg0\nA\n")
+    Path(f"{ref}.fai").write_text(f"ctg0\t{contig_length}\t0\t80\t81\n")
+
+    cfg = write_long_contig_config(base_config, out_dir, tool=tool, mode="auto")
+    text = cfg.read_text()
+    text = re.sub(
+        r'  source: "[^"]+".*',
+        f'  source: "{ref}"',
+        text,
+        count=1,
+    )
+    cfg.write_text(text)
+    return cfg
+
 def write_callable_sites_config(
     base_config,
     out_dir,
@@ -1547,7 +1587,7 @@ def test_deepvariant_dry_run(request):
         assert "/opt/deepvariant/bin/run_deepvariant" in output
         assert "glnexus_joint" in output
 
-        source = workflow_source("rules", "variant_calling", "deepvariant.smk")
+        source = workflow_source("rules", "variant_calling", "glnexus_gvcf.smk")
         assert_glnexus_rule_uses_profile_memory(source)
         assert_profile_resource_scales_by_attempt(
             WORKFLOW_PROFILE_DIR,
@@ -1559,6 +1599,210 @@ def test_deepvariant_dry_run(request):
             "glnexus_joint",
             "mem_mb_reduced",
         )
+
+
+@pytest.mark.dry_run
+def test_gatk_long_contig_dry_run_uses_work_gvcfs_and_csi_archives(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals",
+            "results/bams/markdup",
+        )
+        cfg = write_long_contig_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            "gatk",
+        )
+
+        result = smk.dry_run(
+            target="results/vcfs/raw.vcf.gz.csi",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert scheduled_rule_present(output, "gatk_genomics_db_import")
+        assert scheduled_rule_present(output, "gatk_genotype_gvcfs")
+        assert "glnexus_joint" not in output
+        assert "results/gvcfs/work/sample0.g.vcf" in output
+        assert "results/gvcfs/sample0.g.vcf.gz.csi" in output
+
+        source = workflow_source("rules", "variant_calling", "gatk_intervals.smk")
+        assert "INTERVAL_GVCF_PATTERN" in source
+        assert "results/interval_gvcfs/{sample}/{interval}.g.vcf" in source
+        assert "gatk IndexFeatureFile -I {output.gvcf}" in source
+
+
+@pytest.mark.dry_run
+def test_gatk_long_contig_without_intervals_uses_work_gvcfs(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/bams/markdup",
+        )
+        cfg = write_long_contig_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            "gatk",
+        )
+        cfg = write_intervals_config(cfg, tmpdir, enabled=False)
+
+        result = smk.dry_run(
+            target="results/vcfs/raw.vcf.gz.csi",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert scheduled_rule_present(output, "gatk_haplotypecaller")
+        assert scheduled_rule_present(output, "joint_genomics_db_import")
+        assert scheduled_rule_present(output, "joint_genotype_gvcfs")
+        assert scheduled_rule_present(output, "compress_joint_raw_vcf")
+        assert "results/gvcfs/work/sample0.g.vcf" in output
+        assert "results/gvcfs/sample0.g.vcf.gz.csi" in output
+
+
+@pytest.mark.dry_run
+def test_bcftools_long_contig_dry_run_uses_csi_indexes(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        smk = SnakemakeRunner(tmpdir, use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/bams/markdup",
+        )
+        regions = tmpdir / "results/vcfs/regions/regions.tsv"
+        regions.parent.mkdir(parents=True, exist_ok=True)
+        regions.write_text("L000000\tcontig0\n")
+        cfg = write_long_contig_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            "bcftools",
+        )
+
+        result = smk.dry_run(
+            target="results/vcfs/regions/L000000.vcf.gz.csi",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert scheduled_rule_present(output, "bcftools_call")
+        assert "results/vcfs/regions/L000000.vcf.gz.csi" in output
+        assert "bcftools index -f -c" in output
+        source = workflow_source("rules", "variant_calling", "bcftools.smk")
+        assert "tabix -p vcf" not in source
+
+
+@pytest.mark.dry_run
+def test_deepvariant_long_contig_dry_run_archives_compressed_csi_gvcfs(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/bams/markdup",
+        )
+        cfg = write_long_contig_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            "deepvariant",
+        )
+
+        result = smk.dry_run(
+            target="results/gvcfs/sample0.g.vcf.gz.csi",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert scheduled_rule_present(output, "deepvariant_call")
+        assert scheduled_rule_present(output, "archive_deepvariant_gvcf")
+        assert "results/deepvariant/sample0.g.vcf" in output
+        assert "results/gvcfs/sample0.g.vcf.gz.csi" in output
+        assert "bcftools index -f -c" in output
+
+
+@pytest.mark.dry_run
+def test_deepvariant_long_contig_dry_run_glnexus_consumes_csi_gvcfs(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/bams/markdup",
+        )
+        cfg = write_long_contig_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            "deepvariant",
+        )
+
+        result = smk.dry_run(
+            target="results/vcfs/raw.vcf.gz.csi",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert scheduled_rule_present(output, "archive_deepvariant_gvcf")
+        assert scheduled_rule_present(output, "glnexus_joint")
+        assert "results/gvcfs/sample0.g.vcf.gz.csi" in output
+        assert "results/vcfs/raw.vcf.gz.csi" in output
+
+
+@pytest.mark.dry_run
+def test_long_contig_hard_filters_use_csi_and_disable_gatk_indexing(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals",
+            "results/bams/markdup",
+        )
+        cfg = write_long_contig_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            "gatk",
+        )
+
+        result = smk.dry_run(
+            target="results/vcfs/filtered.vcf.gz.csi",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert scheduled_rule_present(output, "variant_filtration")
+        assert "results/vcfs/raw.vcf.gz.csi" in output
+        assert "results/vcfs/filtered.vcf.gz.csi" in output
+        assert "--create-output-variant-index false" in output
+        assert "bcftools index -f -c results/vcfs/filtered.vcf.gz" in output
 
 
 @pytest.mark.dry_run
@@ -1646,6 +1890,64 @@ def test_parabricks_requires_container_image(request):
         assert not result.succeeded
         output = result.stdout + result.stderr
         assert "parabricks.container_image is required" in output
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize("tool", ["sentieon", "parabricks"])
+def test_long_contig_mode_rejects_unsupported_callers(request, tool):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_long_contig_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            tool,
+        )
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert f"long_contig_mode is not implemented for the {tool}" in output
+
+
+@pytest.mark.dry_run
+def test_long_contig_auto_detects_existing_fai(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        short_cfg = write_auto_long_contig_reference_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            contig_length=1000,
+            tool="parabricks",
+        )
+        short_result = smk.dry_run(
+            target="setup",
+            configfile=short_cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        short_result.assert_success()
+
+        long_cfg = write_auto_long_contig_reference_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            contig_length=(2**29),
+            tool="parabricks",
+        )
+        long_result = smk.dry_run(
+            target="setup",
+            configfile=long_cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+
+        assert not long_result.succeeded
+        output = long_result.stdout + long_result.stderr
+        assert "long_contig_mode is not implemented for the parabricks" in output
 
 
 @pytest.mark.full_run

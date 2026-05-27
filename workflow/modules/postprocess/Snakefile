@@ -33,6 +33,7 @@ _PP_DEFAULTS = {
     "samples": "config/samples.csv",
     "sample_metadata": "",
     "vcf": "results/vcfs/raw.vcf.gz",
+    "long_contig_mode": False,
     "ref_fai": "results/reference/ref.fa.gz.fai",
     "callable_sites_bed": "results/callable_sites/callable_sites.bed",
     "contig_size": 10000,
@@ -44,6 +45,15 @@ _PP_DEFAULTS = {
 for _k, _v in _PP_DEFAULTS.items():
     if _k not in config:
         config[_k] = _v
+
+_LONG_CONTIG_MODE = bool(config.get("long_contig_mode", False))
+_BCFTOOLS_INDEX_ARGS = "-f -c" if _LONG_CONTIG_MODE else "-f -t"
+_TABIX_INDEX_ARGS = "-C" if _LONG_CONTIG_MODE else ""
+_VCF_INDEX_SUFFIX = ".csi" if _LONG_CONTIG_MODE else ".tbi"
+
+
+def _vcf_index(vcf):
+    return f"{vcf}{_VCF_INDEX_SUFFIX}"
 
 
 # ---------- Sample sheet + metadata ------------------------------------------
@@ -143,6 +153,8 @@ rule basic_filter:
     output:
         filtered="results/postprocess/filtered.vcf.gz",
         filtered_idx="results/postprocess/filtered.vcf.gz.csi",
+    params:
+        index_args="-f -c",
     conda:
         "envs/filter.yml"
     shell:
@@ -150,7 +162,7 @@ rule basic_filter:
         bcftools view -S {input.include} -f .,PASS {input.vcf} -a -U -O u \
             | bcftools +fill-tags -Ou \
             | bcftools view -m2 -e 'AF==0 | ref="N" | ALT="."' -O z -o {output.filtered}
-        bcftools index {output.filtered}
+        bcftools index {params.index_args} {output.filtered}
         """
 
 
@@ -199,6 +211,7 @@ rule strict_filter:
         maf=config["maf"],
         upper_bound=lambda wildcards: 1 - float(config["maf"]),
         chr_ex=config["exclude_scaffolds"],
+        index_args="-f -c",
     shell:
         """
         if [ -z "{params.chr_ex}" ]
@@ -211,7 +224,7 @@ rule strict_filter:
                 -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
                 {input.vcf} -O u -o {output.vcf}
         fi
-        bcftools index {output.vcf}
+        bcftools index {params.index_args} {output.vcf}
         """
 
 
@@ -222,7 +235,9 @@ rule subset_indels:
         idx="results/postprocess/filtered.TEMP.vcf.gz.csi",
     output:
         vcf="results/postprocess/clean_indels.vcf.gz",
-        idx="results/postprocess/clean_indels.vcf.gz.tbi",
+        idx=_vcf_index("results/postprocess/clean_indels.vcf.gz"),
+    params:
+        index_args=_BCFTOOLS_INDEX_ARGS,
     conda:
         "envs/filter.yml"
     log:
@@ -230,7 +245,7 @@ rule subset_indels:
     shell:
         """
         bcftools view -v indels -O z -o {output.vcf} {input.vcf}
-        bcftools index -t {output.vcf}
+        bcftools index {params.index_args} {output.vcf}
         """
 
 
@@ -241,7 +256,9 @@ rule subset_snps:
         idx="results/postprocess/filtered.TEMP.vcf.gz.csi",
     output:
         vcf=temp("results/postprocess/clean_snps_prefilter.vcf.gz"),
-        idx=temp("results/postprocess/clean_snps_prefilter.vcf.gz.tbi"),
+        idx=temp(_vcf_index("results/postprocess/clean_snps_prefilter.vcf.gz")),
+    params:
+        index_args=_BCFTOOLS_INDEX_ARGS,
     conda:
         "envs/filter.yml"
     log:
@@ -249,7 +266,7 @@ rule subset_snps:
     shell:
         """
         bcftools view -v snps -e 'TYPE ~ "indel"' -O z -o {output.vcf} {input.vcf}
-        bcftools index -t {output.vcf}
+        bcftools index {params.index_args} {output.vcf}
         """
 
 
@@ -257,11 +274,14 @@ rule drop_indel_SNPs:
     """Remove SNPs that overlap indels (genotype length > 1)."""
     input:
         vcf="results/postprocess/clean_snps_prefilter.vcf.gz",
-        idx="results/postprocess/clean_snps_prefilter.vcf.gz.tbi",
+        idx=_vcf_index("results/postprocess/clean_snps_prefilter.vcf.gz"),
     output:
         keep_snps=temp("results/postprocess/keep_snp_positions.txt"),
         vcf="results/postprocess/clean_snps.vcf.gz",
-        idx="results/postprocess/clean_snps.vcf.gz.tbi",
+        idx=_vcf_index("results/postprocess/clean_snps.vcf.gz"),
+    params:
+        index_args=_BCFTOOLS_INDEX_ARGS,
+        tabix_index_args=_TABIX_INDEX_ARGS,
     conda:
         "envs/filter.yml"
     log:
@@ -271,7 +291,7 @@ rule drop_indel_SNPs:
         bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\n' {input.vcf} \
             | awk 'length($3) == 1 {{print $1"\t"$2}}' \
             | bgzip -c > {output.keep_snps}
-        tabix -s1 -b2 -e2 {output.keep_snps}
+        tabix {params.tabix_index_args} -s1 -b2 -e2 {output.keep_snps}
         bcftools view -T {output.keep_snps} {input.vcf} -Oz -o {output.vcf}
-        bcftools index -t {output.vcf}
+        bcftools index {params.index_args} {output.vcf}
         """

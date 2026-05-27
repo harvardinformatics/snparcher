@@ -20,6 +20,7 @@ These are the supported v2 config keys used by the main workflow. Unknown keys a
 | `reference.source` | string | yes | none | Path, URL, or NCBI accession |
 | `variant_calling.expected_coverage` | string | no | `low` | `low`, `high` |
 | `variant_calling.tool` | string | no | `gatk` | `gatk`, `sentieon`, `bcftools`, `deepvariant`, `parabricks` |
+| `variant_calling.long_contig_mode` | boolean or `auto` | no | `auto` | Uses CSI-capable indexes and GATK temp work files for TBI-incompatible contigs |
 | `variant_calling.ploidy` | integer | no | `2` | `>= 1` |
 | `variant_calling.gatk.het_prior` | number | no | `0.005` | `0..1` |
 | `variant_calling.gatk.concat_batch_size` | integer | no | `250` | `>= 2` |

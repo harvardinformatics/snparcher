@@ -67,7 +67,10 @@ def get_bcftools_region_vcfs(wc):
 
 def get_bcftools_region_vcf_tbis(wc):
     region_ids = get_bcftools_region_ids(wc)
-    return expand("results/vcfs/regions/{region_id}.vcf.gz.tbi", region_id=region_ids)
+    return expand(
+        get_compressed_vcf_index("results/vcfs/regions/{region_id}.vcf.gz"),
+        region_id=region_ids,
+    )
 
 
 rule bcftools_call:
@@ -76,13 +79,14 @@ rule bcftools_call:
         regions_tsv="results/vcfs/regions/regions.tsv",
     output:
         vcf=temp("results/vcfs/regions/{region_id}.vcf.gz"),
-        tbi=temp("results/vcfs/regions/{region_id}.vcf.gz.tbi"),
+        idx=temp(get_compressed_vcf_index("results/vcfs/regions/{region_id}.vcf.gz")),
     params:
         min_mapq=config["variant_calling"]["bcftools"]["min_mapq"],
         min_baseq=config["variant_calling"]["bcftools"]["min_baseq"],
         max_depth=config["variant_calling"]["bcftools"]["max_depth"],
         ploidy=config["variant_calling"]["ploidy"],
         contig=lambda wc: get_bcftools_region_name(wc.region_id),
+        index_args=BCFTOOLS_INDEX_ARGS,
     threads: 1
     conda:
         "../../envs/bcftools.yaml"
@@ -107,7 +111,7 @@ rule bcftools_call:
             -v \
             -Oz \
             -o {output.vcf} - 2>> {log}
-        tabix -p vcf {output.vcf} 2>> {log}
+        bcftools index {params.index_args} {output.vcf} 2>> {log}
         """
 
 
@@ -116,8 +120,10 @@ rule bcftools_concat_regions:
         vcfs=get_bcftools_region_vcfs,
         tbis=get_bcftools_region_vcf_tbis,
     output:
-        vcf=temp("results/vcfs/raw.vcf.gz"),
-        tbi=temp("results/vcfs/raw.vcf.gz.tbi"),
+        vcf=temp(RAW_VCF),
+        idx=temp(RAW_VCF_INDEX),
+    params:
+        index_args=BCFTOOLS_INDEX_ARGS,
     conda:
         "../../envs/bcftools.yaml"
     benchmark:
@@ -128,5 +134,5 @@ rule bcftools_concat_regions:
         """
         bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
             | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}
-        tabix -p vcf {output.vcf} 2>> {log}
+        bcftools index {params.index_args} {output.vcf} 2>> {log}
         """
