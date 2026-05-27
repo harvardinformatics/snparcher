@@ -10,40 +10,6 @@ def haplotype_caller_input(wildcards):
     }
 
 
-<<<<<<< HEAD
-rule gatk_haplotypecaller:
-    input:
-        unpack(haplotype_caller_input),
-    output:
-        gvcf="results/gvcfs/{sample}.g.vcf.gz",
-        tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
-    params:
-        ploidy=config["variant_calling"]["ploidy"],
-        min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
-        min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
-    threads: 1
-    conda:
-        "../../envs/gatk.yaml"
-    benchmark:
-        "benchmarks/gatk_haplotypecaller/{sample}.txt"
-    log:
-        "logs/gatk_haplotypecaller/{sample}.txt"
-    shell:
-        """
-        gatk HaplotypeCaller \
-            --java-options '-Xmx{resources.mem_mb_reduced}m' \
-            -R {input.ref} \
-            -I {input.bam} \
-            --read-index {input.bam_index} \
-            -O {output.gvcf} \
-            -ploidy {params.ploidy} \
-            --native-pair-hmm-threads {threads} \
-            --emit-ref-confidence GVCF \
-            --min-pruning {params.min_pruning} \
-            --min-dangling-branch-length {params.min_dangling} \
-            &> {log}
-        """
-=======
 def external_gvcf_input(wildcards):
     if not sample_has_input_type(wildcards.sample, "gvcf"):
         raise ValueError(
@@ -77,6 +43,7 @@ if LONG_CONTIG_MODE:
                 --java-options '-Xmx{resources.mem_mb_reduced}m' \
                 -R {input.ref} \
                 -I {input.bam} \
+                --read-index {input.bam_index} \
                 -O {output.gvcf} \
                 -ploidy {params.ploidy} \
                 --native-pair-hmm-threads {threads} \
@@ -152,6 +119,7 @@ else:
                 --java-options '-Xmx{resources.mem_mb_reduced}m' \
                 -R {input.ref} \
                 -I {input.bam} \
+                --read-index {input.bam_index} \
                 -O {output.gvcf} \
                 -ploidy {params.ploidy} \
                 --native-pair-hmm-threads {threads} \
@@ -160,4 +128,3 @@ else:
                 --min-dangling-branch-length {params.min_dangling} \
                 &> {log}
             """
->>>>>>> 7b09cc8 (implement long-contig option that avoids tbi indexes for variant call files)

@@ -101,6 +101,11 @@ def assert_gatk_rule_uses_profile_heap(source):
     assert "mem_mb=4096" not in source
 
 
+def assert_haplotypecaller_uses_explicit_bam_csi_index(source, expected_count):
+    assert "**get_indexed_final_bam_input(wildcards.sample)" in source
+    assert source.count("--read-index {input.bam_index}") == expected_count
+
+
 def assert_glnexus_rule_uses_profile_memory(source):
     assert "glnexus_mem_gbytes=$(( {resources.mem_mb_reduced} / 1024 ))" in source
     assert '--mem-gbytes "$glnexus_mem_gbytes"' in source
@@ -1319,6 +1324,9 @@ def test_gatk_without_intervals_dry_run(request):
         assert "gatk_haplotypecaller" in output
         assert "joint_genomics_db_import" in output
 
+        source = workflow_source("rules", "variant_calling", "gatk.smk")
+        assert_haplotypecaller_uses_explicit_bam_csi_index(source, expected_count=2)
+
 
 @pytest.mark.dry_run
 def test_joint_genomicsdb_import_dry_run_uses_profile_heap_and_contig_merge_guard(request):
@@ -1374,6 +1382,7 @@ def test_interval_genomicsdb_import_dry_run_uses_profile_heap(request):
 
         source = workflow_source("rules", "variant_calling", "gatk_intervals.smk")
         assert_gatk_rule_uses_profile_heap(source)
+        assert_haplotypecaller_uses_explicit_bam_csi_index(source, expected_count=1)
         assert "genomicsdb-merge-contigs-arg" in source
         assert "--threshold {params.merge_contig_threshold}" in source
         assert_profile_resource(
@@ -1629,7 +1638,7 @@ def test_gatk_long_contig_dry_run_uses_work_gvcfs_and_csi_archives(request):
         output = result.stdout + result.stderr
         assert scheduled_rule_present(output, "gatk_genomics_db_import")
         assert scheduled_rule_present(output, "gatk_genotype_gvcfs")
-        assert "glnexus_joint" not in output
+        assert not scheduled_rule_present(output, "glnexus_joint")
         assert "results/gvcfs/work/sample0.g.vcf" in output
         assert "results/gvcfs/sample0.g.vcf.gz.csi" in output
 
