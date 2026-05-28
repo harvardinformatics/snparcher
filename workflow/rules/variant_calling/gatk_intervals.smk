@@ -1,5 +1,7 @@
 localrules: create_db_mapfile
 
+import shlex
+
 wildcard_constraints:
     sample="[^/]+",
     round=r"\d+",
@@ -196,6 +198,11 @@ def get_stage_inputs(base_files, round_idx, chunk_idx, wc, path_builder):
     return selected
 
 
+def format_gatk_vcf_inputs(files):
+    """Format VCF inputs as repeated GatherVcfs -I arguments."""
+    return " ".join(f"-I {shlex.quote(str(path))}" for path in files)
+
+
 def get_final_stage_file(base_files, wc, path_builder):
     """Return final staged output path (or original file if no staging is needed)."""
     if not base_files:
@@ -224,6 +231,10 @@ def get_interval_gvcf_stage_tbis(wc):
     return [get_vcf_index(gvcf) for gvcf in stage_inputs]
 
 
+def get_interval_gvcf_stage_gatk_inputs(wc):
+    return format_gatk_vcf_inputs(get_interval_gvcf_stage_inputs(wc))
+
+
 def get_final_interval_gvcf_stage_file(wc):
     return get_final_stage_file(
         base_files=get_interval_gvcfs(wc),
@@ -249,6 +260,10 @@ def get_interval_vcf_stage_inputs(wc):
 def get_interval_vcf_stage_tbis(wc):
     stage_inputs = get_interval_vcf_stage_inputs(wc)
     return [get_vcf_index(vcf) for vcf in stage_inputs]
+
+
+def get_interval_vcf_stage_gatk_inputs(wc):
+    return format_gatk_vcf_inputs(get_interval_vcf_stage_inputs(wc))
 
 
 def get_final_interval_vcf_stage_file(wc):
@@ -304,6 +319,7 @@ rule concat_interval_gvcfs_stage:
         idx=temp(get_vcf_index(STAGED_GVCF_PATTERN)),
     params:
         index_args=BCFTOOLS_INDEX_ARGS,
+        gatk_inputs=get_interval_gvcf_stage_gatk_inputs,
         long_mode=LONG_CONTIG_MODE,
     conda:
         "../../envs/gatk.yaml"
@@ -314,9 +330,12 @@ rule concat_interval_gvcfs_stage:
     shell:
         """
         if [ "{params.long_mode}" = "True" ]; then
-            bcftools concat -D -a -Ou {input.gvcfs} 2> {log} \
-                | bcftools sort -T {resources.tmpdir}/ -O v -o {output.gvcf} - 2>> {log}
-            gatk IndexFeatureFile -I {output.gvcf} &>> {log}
+            gatk GatherVcfs {params.gatk_inputs} \
+                -O {output.gvcf} \
+                --CREATE_INDEX false \
+                --TMP_DIR {resources.tmpdir} \
+                > {log} 2>&1
+            gatk IndexFeatureFile -I {output.gvcf} >> {log} 2>&1
         else
             bcftools concat -D -a -Ou {input.gvcfs} 2> {log} \
                 | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.gvcf} - 2>> {log}
@@ -359,7 +378,7 @@ if LONG_CONTIG_MODE:
         shell:
             """
             bcftools view -O v -o {output.gvcf} {input.gvcf} 2> {log}
-            gatk IndexFeatureFile -I {output.gvcf} &>> {log}
+            gatk IndexFeatureFile -I {output.gvcf} >> {log} 2>&1
             """
 
 
@@ -440,8 +459,8 @@ rule gatk_genomics_db_import:
             -L {input.interval} \
             --tmp-dir {resources.tmpdir} \
             --sample-name-map {input.db_mapfile} \
-            &>> {log}
-        tar -cf {output.tar} {output.db} &>> {log}
+            >> {log} 2>&1
+        tar -cf {output.tar} {output.db} >> {log} 2>&1
         """
 
 
@@ -487,6 +506,7 @@ rule concat_interval_vcfs_stage:
         idx=temp(get_vcf_index(STAGED_VCF_PATTERN)),
     params:
         index_args=BCFTOOLS_INDEX_ARGS,
+        gatk_inputs=get_interval_vcf_stage_gatk_inputs,
         long_mode=LONG_CONTIG_MODE,
     conda:
         "../../envs/gatk.yaml"
@@ -497,9 +517,12 @@ rule concat_interval_vcfs_stage:
     shell:
         """
         if [ "{params.long_mode}" = "True" ]; then
-            bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
-                | bcftools sort -T {resources.tmpdir}/ -O v -o {output.vcf} - 2>> {log}
-            gatk IndexFeatureFile -I {output.vcf} &>> {log}
+            gatk GatherVcfs {params.gatk_inputs} \
+                -O {output.vcf} \
+                --CREATE_INDEX false \
+                --TMP_DIR {resources.tmpdir} \
+                > {log} 2>&1
+            gatk IndexFeatureFile -I {output.vcf} >> {log} 2>&1
         else
             bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
                 | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}

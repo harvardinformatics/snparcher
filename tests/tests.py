@@ -2063,6 +2063,58 @@ def test_multistage_interval_concat(request):
         )
 
 
+@pytest.mark.full_run
+def test_long_contig_multistage_interval_gather(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        configfile = write_long_contig_config(
+            get_multistage_config_file(),
+            tmpdir,
+            "gatk",
+        )
+        samples = get_samples_file()
+
+        result = smk.run(
+            target="setup",
+            configfile=configfile,
+            samples=samples,
+        )
+        result.assert_success()
+
+        staged_gvcf_targets = [
+            "results/gvcfs/work/staged/sample1/r1/c0.g.vcf",
+            "results/gvcfs/work/staged/sample1/r1/c0.g.vcf.idx",
+        ]
+        result = smk.run(
+            target=staged_gvcf_targets,
+            configfile=configfile,
+            samples=samples,
+            extra_args=["--notemp"],
+        )
+        result.assert_success()
+        result.assert_output_exists(*staged_gvcf_targets)
+
+        staged_vcf_targets = [
+            "results/vcfs/work/staged/r1/c0.vcf",
+            "results/vcfs/work/staged/r1/c0.vcf.idx",
+        ]
+        result = smk.run(
+            target=staged_vcf_targets,
+            configfile=configfile,
+            samples=samples,
+            extra_args=["--notemp"],
+        )
+        result.assert_success()
+        result.assert_output_exists(*staged_vcf_targets)
+
+        gvcf_log = result.workdir / "logs/concat_interval_gvcfs/staged/sample1/r1/c0.txt"
+        vcf_log = result.workdir / "logs/concat_interval_vcfs/staged/r1/c0.txt"
+        assert "GatherVcfs" in gvcf_log.read_text()
+        assert "GatherVcfs" in vcf_log.read_text()
+
+
 # --- Metadata tests ---
 
 @pytest.mark.dry_run
