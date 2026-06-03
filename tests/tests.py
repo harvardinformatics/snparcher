@@ -2111,8 +2111,17 @@ def test_long_contig_multistage_interval_gather(request):
 
         gvcf_log = result.workdir / "logs/concat_interval_gvcfs/staged/sample1/r1/c0.txt"
         vcf_log = result.workdir / "logs/concat_interval_vcfs/staged/r1/c0.txt"
-        assert "GatherVcfs" in gvcf_log.read_text()
-        assert "GatherVcfs" in vcf_log.read_text()
+        gvcf_log_text = gvcf_log.read_text()
+        vcf_log_text = vcf_log.read_text()
+        assert "IndexFeatureFile" in gvcf_log_text
+        assert "IndexFeatureFile" in vcf_log_text
+
+        source = workflow_source("rules", "variant_calling", "gatk_intervals.smk")
+        assert "picard SortVcf" in source
+        assert "O={output.gvcf}" in source
+        assert "O={output.vcf}" in source
+        assert "CREATE_INDEX=false" in source
+        assert "gatk GatherVcfs" not in source
 
 
 # --- Metadata tests ---

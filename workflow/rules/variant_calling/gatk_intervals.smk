@@ -198,9 +198,9 @@ def get_stage_inputs(base_files, round_idx, chunk_idx, wc, path_builder):
     return selected
 
 
-def format_gatk_vcf_inputs(files):
-    """Format VCF inputs as repeated GatherVcfs -I arguments."""
-    return " ".join(f"-I {shlex.quote(str(path))}" for path in files)
+def format_picard_vcf_inputs(files):
+    """Format VCF inputs as repeated Picard SortVcf I= arguments."""
+    return " ".join(f"I={shlex.quote(str(path))}" for path in files)
 
 
 def get_final_stage_file(base_files, wc, path_builder):
@@ -231,8 +231,8 @@ def get_interval_gvcf_stage_tbis(wc):
     return [get_vcf_index(gvcf) for gvcf in stage_inputs]
 
 
-def get_interval_gvcf_stage_gatk_inputs(wc):
-    return format_gatk_vcf_inputs(get_interval_gvcf_stage_inputs(wc))
+def get_interval_gvcf_stage_picard_inputs(wc):
+    return format_picard_vcf_inputs(get_interval_gvcf_stage_inputs(wc))
 
 
 def get_final_interval_gvcf_stage_file(wc):
@@ -262,8 +262,8 @@ def get_interval_vcf_stage_tbis(wc):
     return [get_vcf_index(vcf) for vcf in stage_inputs]
 
 
-def get_interval_vcf_stage_gatk_inputs(wc):
-    return format_gatk_vcf_inputs(get_interval_vcf_stage_inputs(wc))
+def get_interval_vcf_stage_picard_inputs(wc):
+    return format_picard_vcf_inputs(get_interval_vcf_stage_inputs(wc))
 
 
 def get_final_interval_vcf_stage_file(wc):
@@ -319,7 +319,7 @@ rule concat_interval_gvcfs_stage:
         idx=temp(get_vcf_index(STAGED_GVCF_PATTERN)),
     params:
         index_args=BCFTOOLS_INDEX_ARGS,
-        gatk_inputs=get_interval_gvcf_stage_gatk_inputs,
+        picard_inputs=get_interval_gvcf_stage_picard_inputs,
         long_mode=LONG_CONTIG_MODE,
     conda:
         "../../envs/gatk.yaml"
@@ -330,10 +330,11 @@ rule concat_interval_gvcfs_stage:
     shell:
         """
         if [ "{params.long_mode}" = "True" ]; then
-            gatk GatherVcfs {params.gatk_inputs} \
-                -O {output.gvcf} \
-                --CREATE_INDEX false \
-                --TMP_DIR {resources.tmpdir} \
+            picard SortVcf \
+                {params.picard_inputs} \
+                O={output.gvcf} \
+                TMP_DIR={resources.tmpdir} \
+                CREATE_INDEX=false \
                 > {log} 2>&1
             gatk IndexFeatureFile -I {output.gvcf} >> {log} 2>&1
         else
@@ -506,7 +507,7 @@ rule concat_interval_vcfs_stage:
         idx=temp(get_vcf_index(STAGED_VCF_PATTERN)),
     params:
         index_args=BCFTOOLS_INDEX_ARGS,
-        gatk_inputs=get_interval_vcf_stage_gatk_inputs,
+        picard_inputs=get_interval_vcf_stage_picard_inputs,
         long_mode=LONG_CONTIG_MODE,
     conda:
         "../../envs/gatk.yaml"
@@ -517,10 +518,11 @@ rule concat_interval_vcfs_stage:
     shell:
         """
         if [ "{params.long_mode}" = "True" ]; then
-            gatk GatherVcfs {params.gatk_inputs} \
-                -O {output.vcf} \
-                --CREATE_INDEX false \
-                --TMP_DIR {resources.tmpdir} \
+            picard SortVcf \
+                {params.picard_inputs} \
+                O={output.vcf} \
+                TMP_DIR={resources.tmpdir} \
+                CREATE_INDEX=false \
                 > {log} 2>&1
             gatk IndexFeatureFile -I {output.vcf} >> {log} 2>&1
         else
