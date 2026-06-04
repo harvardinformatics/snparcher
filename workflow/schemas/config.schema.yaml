@@ -52,6 +52,16 @@ properties:
         type: string
         enum: ["gatk", "sentieon", "bcftools", "deepvariant", "parabricks"]
         default: "gatk"
+      long_contig_mode:
+        oneOf:
+          - type: boolean
+          - type: string
+            enum: ["auto"]
+        default: "auto"
+        description: >
+          Use CSI-capable and GLnexus-based paths for references with contigs
+          longer than the TBI coordinate limit. "auto" inspects an existing
+          reference .fai when one is available while building the DAG.
       ploidy:
         type: integer
         minimum: 1

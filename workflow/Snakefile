@@ -23,6 +23,7 @@ elif VARIANT_TOOL == "bcftools":
     include: "rules/variant_calling/bcftools.smk"
 elif VARIANT_TOOL == "deepvariant":
     include: "rules/variant_calling/deepvariant.smk"
+    include: "rules/variant_calling/glnexus_gvcf.smk"
 elif VARIANT_TOOL == "parabricks":
     include: "rules/variant_calling/parabricks.smk"
     include: "rules/variant_calling/joint_gvcf_intervals.smk"
@@ -38,7 +39,7 @@ rule all:
     """Default target: full pipeline."""
     default_target: True
     input:
-        "results/vcfs/raw.vcf.gz",
+        RAW_VCF,
         "results/qc_metrics/qc_report.tsv",
         CALLABLE_TARGETS,
         # Postprocess outputs (when enabled)
@@ -55,7 +56,8 @@ if POSTPROCESS_ENABLED:
     _postprocess_config = {
         "samples": config["samples"],
         "sample_metadata": config.get("sample_metadata", ""),
-        "vcf": "results/vcfs/raw.vcf.gz",
+        "vcf": RAW_VCF,
+        "long_contig_mode": LONG_CONTIG_MODE,
         "ref_fai": REF_FILES["ref_fai"],
         "callable_sites_bed": "results/callable_sites/callable_sites.bed",
         **config["modules"]["postprocess"]["filtering"],
@@ -72,7 +74,8 @@ if config["modules"]["qc"]["enabled"]:
     _qc_config = {
         "samples": config["samples"],
         "sample_metadata": config.get("sample_metadata", ""),
-        "vcf": "results/vcfs/raw.vcf.gz",
+        "vcf": RAW_VCF,
+        "long_contig_mode": LONG_CONTIG_MODE,
         "fai": REF_FILES["ref_fai"],
         "qc_report": "results/qc_metrics/qc_report.tsv",
         "clusters": config["modules"]["qc"]["clusters"],
@@ -127,7 +130,7 @@ rule map_samples:
 rule call_variants:
     """Run variant calling through to filtered VCF."""
     input:
-        "results/vcfs/filtered.vcf.gz",
+        FILTERED_VCF,
 
 
 rule qc_report:

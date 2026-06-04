@@ -38,7 +38,7 @@ def get_interval_vcf_tbis(wc):
 def get_gvcfs_for_db(wc):
     return {
         "gvcfs": get_joint_gvcf_paths(),
-        "tbis": get_joint_gvcf_tbis(),
+        "tbis": get_joint_gvcf_indexes(),
         "interval": f"results/intervals/db/{wc.interval}-scattered.interval_list",
         "db_mapfile": "results/genomics_db/mapfile.txt",
     }
@@ -251,8 +251,8 @@ rule concat_interval_vcfs:
         vcf=get_final_interval_vcf_stage_file,
         tbi=get_final_interval_vcf_stage_tbi,
     output:
-        vcf="results/vcfs/raw.vcf.gz",
-        tbi="results/vcfs/raw.vcf.gz.tbi",
+        vcf=RAW_VCF,
+        tbi=RAW_VCF_INDEX,
     benchmark:
         "benchmarks/concat_interval_vcfs/benchmark.txt"
     log:

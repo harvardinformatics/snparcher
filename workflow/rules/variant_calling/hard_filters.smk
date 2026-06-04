@@ -1,13 +1,14 @@
 rule variant_filtration:
     input:
-        vcf="results/vcfs/raw.vcf.gz",
-        tbi="results/vcfs/raw.vcf.gz.tbi",
+        vcf=RAW_VCF,
+        idx=RAW_VCF_INDEX,
         **REF_FILES,
     output:
-        vcf="results/vcfs/filtered.vcf.gz",
-        tbi="results/vcfs/filtered.vcf.gz.tbi",
+        vcf=FILTERED_VCF,
+        idx=FILTERED_VCF_INDEX,
     params:
         filter_args=get_gatk_hard_filter_args(),
+        index_args=BCFTOOLS_INDEX_ARGS,
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -21,7 +22,8 @@ rule variant_filtration:
             -V {input.vcf} \
             --output {output.vcf} \
             {params.filter_args} \
-            --create-output-variant-index \
+            --create-output-variant-index false \
             --invalidate-previous-filters true \
             &> {log}
+        bcftools index {params.index_args} {output.vcf} 2>> {log}
         """

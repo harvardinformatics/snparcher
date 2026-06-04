@@ -1,5 +1,7 @@
 # mapping.smk
 
+from pathlib import Path
+
 def bwa_mem_input(wildcards):
     """Get input fastqs for alignment."""
     return {
@@ -43,7 +45,6 @@ def dedup_library_input(wildcards):
     bam = f"results/bams/library/{wildcards.sample}/{wildcards.library}.bam"
     return {
         "bam": bam,
-        "bai": bam + ".bai",
     }
 
 
@@ -76,6 +77,51 @@ def merge_library_level_bams_input(wildcards):
     }
 
 
+rule stage_external_bam:
+    input:
+        bam=lambda wc: get_external_bam(wc.sample),
+    output:
+        bam="results/bams/input/{sample}.bam",
+    log:
+        "logs/stage_external_bam/{sample}.txt"
+    run:
+        src = Path(input.bam).resolve()
+        dest = Path(output.bam)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        Path(log[0]).parent.mkdir(parents=True, exist_ok=True)
+
+        if not src.exists():
+            raise FileNotFoundError(f"External BAM not found for sample {wildcards.sample}: {src}")
+
+        if dest.exists() or dest.is_symlink():
+            if dest.resolve() == src:
+                with open(log[0], "w") as handle:
+                    handle.write(f"External BAM already staged: {dest} -> {src}\n")
+                return
+            dest.unlink()
+
+        dest.symlink_to(src)
+        with open(log[0], "w") as handle:
+            handle.write(f"Staged external BAM: {dest} -> {src}\n")
+
+
+rule index_bam_csi:
+    input:
+        bam="{bam}.bam",
+    output:
+        csi="{bam}.bam.csi",
+    conda:
+        "../envs/samtools.yaml"
+    benchmark:
+        "benchmarks/index_bam_csi/{bam}.txt"
+    log:
+        "logs/index_bam_csi/{bam}.txt"
+    shell:
+        """
+        samtools index -c {input.bam} {output.csi} 2> {log}
+        """
+
+
 if USE_SENTIEON:
 
     rule sentieon_map:
@@ -83,7 +129,6 @@ if USE_SENTIEON:
             unpack(bwa_mem_input),
         output:
             bam=temp("results/bams/raw/{sample}/{library}/{input_unit}.bam"),
-            bai=temp("results/bams/raw/{sample}/{library}/{input_unit}.bam.bai"),
         params:
             rg=get_read_group,
             lic=config["variant_calling"]["sentieon"]["license"],
@@ -100,7 +145,6 @@ if USE_SENTIEON:
             export SENTIEON_LICENSE={params.lic}
             sentieon bwa mem -M -R {params.rg} -t {threads} -K 10000000 {input.ref} {input.r1} {input.r2} 2> {log} \
                 | sentieon util sort --bam_compression 1 -r {input.ref} -o {output.bam} -t {threads} --sam2bam -i - 2>> {log}
-            samtools index {output.bam} 2>> {log}
             """
 
     rule sentieon_dedup_library:
@@ -108,7 +152,6 @@ if USE_SENTIEON:
             unpack(dedup_library_input),
         output:
             bam=temp("results/bams/library_markdup/{sample}/{library}.bam"),
-            bai=temp("results/bams/library_markdup/{sample}/{library}.bam.bai"),
             score=temp("results/bams/library_markdup/{sample}/{library}_score.txt"),
             metrics=temp("results/bams/library_markdup/{sample}/{library}_metrics.txt"),
         params:
@@ -130,6 +173,7 @@ if USE_SENTIEON:
                 --algo Dedup --score_info {output.score} --metrics {output.metrics} \
                 --bam_compression 1 {output.bam} \
                 2>> {log}
+            rm -f {output.bam}.bai
             """
 
     rule sentieon_bam_stats:
@@ -172,7 +216,6 @@ else:
             unpack(bwa_mem_input),
         output:
             bam=temp("results/bams/raw/{sample}/{library}/{input_unit}.bam"),
-            bai=temp("results/bams/raw/{sample}/{library}/{input_unit}.bam.bai"),
         params:
             rg=get_read_group,
         threads: 8
@@ -186,7 +229,6 @@ else:
             """
             bwa mem -M -t {threads} -R {params.rg} {input.ref} {input.r1} {input.r2} 2> {log} \
                 | samtools sort -o {output.bam} - 2>> {log}
-            samtools index {output.bam} 2>> {log}
             """
 
     rule markdup_library:
@@ -194,7 +236,6 @@ else:
             unpack(dedup_library_input),
         output:
             bam=temp("results/bams/library_markdup/{sample}/{library}.bam"),
-            bai=temp("results/bams/library_markdup/{sample}/{library}.bam.bai"),
         threads: 4
         conda:
             "../envs/sambamba.yaml"
@@ -205,6 +246,7 @@ else:
         shell:
             """
             sambamba markdup -t {threads} {input.bam} {output.bam} 2> {log}
+            rm -f {output.bam}.bai
             """
 
 
@@ -213,7 +255,6 @@ rule merge_library_bams:
         unpack(merge_library_bams_input),
     output:
         bam=temp("results/bams/library/{sample}/{library}.bam"),
-        bai=temp("results/bams/library/{sample}/{library}.bam.bai"),
     conda:
         "../envs/samtools.yaml"
     benchmark:
@@ -223,7 +264,6 @@ rule merge_library_bams:
     shell:
         """
         samtools merge {output.bam} {input.bams} 2> {log}
-        samtools index {output.bam} 2>> {log}
         """
 
 
@@ -232,7 +272,6 @@ rule merge_dedup_libraries:
         unpack(merge_dedup_libraries_input),
     output:
         bam="results/bams/markdup/{sample}.bam",
-        bai="results/bams/markdup/{sample}.bam.bai",
     conda:
         "../envs/samtools.yaml"
     benchmark:
@@ -242,7 +281,6 @@ rule merge_dedup_libraries:
     shell:
         """
         samtools merge {output.bam} {input.bams} 2> {log}
-        samtools index {output.bam} 2>> {log}
         """
 
 
@@ -251,7 +289,6 @@ rule merge_library_level_bams:
         unpack(merge_library_level_bams_input),
     output:
         bam="results/bams/merged/{sample}.bam",
-        bai="results/bams/merged/{sample}.bam.bai",
     conda:
         "../envs/samtools.yaml"
     benchmark:
@@ -261,7 +298,6 @@ rule merge_library_level_bams:
     shell:
         """
         samtools merge {output.bam} {input.bams} 2> {log}
-        samtools index {output.bam} 2>> {log}
         """
 
 

@@ -69,7 +69,6 @@ def test_bwa_mem(request):
         result = smk.run(
             target=[
                 "results/bams/raw/sample0/sample0/u1.bam",
-                "results/bams/raw/sample0/sample0/u1.bam.bai",
             ],
             samples=SAMPLES,
         )
@@ -97,13 +96,41 @@ def test_markdup(request):
         result = smk.run(
             target=[
                 "results/bams/markdup/sample0.bam",
-                "results/bams/markdup/sample0.bam.bai",
+                "results/bams/markdup/sample0.bam.csi",
             ],
             samples=SAMPLES,
         )
         result.assert_success()
         result.assert_output_exists(
             "results/bams/markdup/sample0.bam",
+            "results/bams/markdup/sample0.bam.csi",
+        )
+
+
+@pytest.mark.unit
+def test_external_bam_staging_and_indexing(request):
+    """External BAM inputs are staged and indexed with workflow-managed CSI."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        samples = tmpdir / "external_bam_samples.csv"
+        external_bam = FIXTURES_DIR / "results/bams/markdup/sample0.bam"
+        samples.write_text(
+            "sample_id,input_type,input\n"
+            f"sample_ext,bam,{external_bam}\n"
+        )
+
+        smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
+
+        result = smk.run(
+            target="results/bams/input/sample_ext.bam.csi",
+            samples=samples,
+        )
+        result.assert_success()
+        result.assert_output_exists(
+            "results/bams/input/sample_ext.bam",
+            "results/bams/input/sample_ext.bam.csi",
         )
 
 

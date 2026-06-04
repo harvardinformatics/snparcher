@@ -2,10 +2,8 @@ def sentieon_haplotyper_input(wildcards):
     if sample_has_input_type(wildcards.sample, "gvcf"):
         raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotyper")
     
-    bam = get_final_bam(wildcards.sample)
     return {
-        "bam": bam,
-        "bai": bam + ".bai",
+        **get_indexed_final_bam_input(wildcards.sample),
         **REF_FILES,
     }
 

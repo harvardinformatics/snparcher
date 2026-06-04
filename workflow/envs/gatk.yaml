@@ -4,3 +4,4 @@ channels:
 dependencies:
   - gatk4>=4.1
   - picard>=2.22
+  - bcftools>=1.19
