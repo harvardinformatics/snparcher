@@ -12,6 +12,12 @@ reference:
 variant_calling:
   expected_coverage: "low"  # low | high | auto (future)
   tool: "gatk" # gatk | sentieon | bcftools | deepvariant | parabricks
+  # Produce results/vcfs/filtered.vcf.gz (raw + GATK hard-filter FILTER column) as a
+  # default output. Requires a GATK-family caller (gatk/sentieon/parabricks); the
+  # workflow errors at startup if true with bcftools/deepvariant. Set false for a
+  # raw-only default (the filtered VCF is still built on demand by postprocess/qc or
+  # the `call_variants` target).
+  generate_filtered_vcf: true
   ploidy: 2
   gatk:
     het_prior: 0.005
@@ -68,3 +74,5 @@ modules:
       maf: 0.01
       missingness: 0.75
       exclude_scaffolds: "mtDNA,Y"
+      split_by_type: true       # also emit clean_snps.vcf.gz / clean_indels.vcf.gz
+      keep_basic_filter: false  # retain the pre-strict basic-filter VCF instead of discarding it

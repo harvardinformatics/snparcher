@@ -21,6 +21,7 @@ These are the supported v2 config keys used by the main workflow. Unknown keys a
 | `variant_calling.expected_coverage` | string | no | `low` | `low`, `high` |
 | `variant_calling.tool` | string | no | `gatk` | `gatk`, `sentieon`, `bcftools`, `deepvariant`, `parabricks` |
 | `variant_calling.long_contig_mode` | boolean or `auto` | no | `auto` | Uses CSI-capable indexes and GATK temp work files for TBI-incompatible contigs |
+| `variant_calling.generate_filtered_vcf` | boolean | no | `true` | Emit `results/vcfs/filtered.vcf.gz` (raw + GATK hard-filter FILTER column) as a default output. Requires a GATK-family caller (`gatk`/`sentieon`/`parabricks`); errors if `true` with `bcftools`/`deepvariant` |
 | `variant_calling.ploidy` | integer | no | `2` | `>= 1` |
 | `variant_calling.gatk.het_prior` | number | no | `0.005` | `0..1` |
 | `variant_calling.gatk.concat_batch_size` | integer | no | `250` | `>= 2` |
@@ -63,6 +64,8 @@ These are the supported v2 config keys used by the main workflow. Unknown keys a
 | `modules.postprocess.filtering.maf` | number | no | `0.01` | `0..1` |
 | `modules.postprocess.filtering.missingness` | number | no | `0.75` | `0..1` |
 | `modules.postprocess.filtering.exclude_scaffolds` | string | no | `mtDNA,Y` | Comma-separated scaffold list |
+| `modules.postprocess.filtering.split_by_type` | boolean | no | `true` | Also emit `clean_snps.vcf.gz` / `clean_indels.vcf.gz` |
+| `modules.postprocess.filtering.keep_basic_filter` | boolean | no | `false` | Retain the intermediate basic-filter VCF (`basic.vcf.gz`) instead of discarding it |
 
 ## 2) Aliases and compatibility parsing
 
@@ -87,4 +90,4 @@ When running module Snakefiles directly (outside the main workflow module-import
 
 ### Postprocess module (`workflow/modules/postprocess/Snakefile`)
 
-`samples`, `sample_metadata`, `vcf`, `ref_fai`, `callable_sites_bed`, `contig_size`, `maf`, `missingness`, `exclude_scaffolds`
+`samples`, `sample_metadata`, `vcf`, `ref_fai`, `callable_sites_bed`, `contig_size`, `maf`, `missingness`, `exclude_scaffolds`, `split_by_type`, `keep_basic_filter`

@@ -373,10 +373,28 @@ def test_genomicsdb_merge_contigs_arg_only_for_whole_contig_pathology(tmp_path):
     assert result.stdout.strip() == "--merge-contigs-into-num-partitions 2"
 
 
+# Callers that emit GATK-style annotations. Hard filtering (and therefore
+# variant_calling.generate_filtered_vcf) only applies to these; other callers
+# must set generate_filtered_vcf: false or the workflow raises at DAG build.
+GATK_LINEAGE_TOOLS = {"gatk", "sentieon", "parabricks"}
+
+
+def _disable_filtered_vcf_for_non_gatk(text, tool):
+    """Inject generate_filtered_vcf: false for non-GATK-family callers."""
+    if tool in GATK_LINEAGE_TOOLS:
+        return text
+    return text.replace(
+        f'tool: "{tool}"',
+        f'tool: "{tool}"\n  generate_filtered_vcf: false',
+        1,
+    )
+
+
 def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
     """Write a config copy with variant_calling.tool overridden."""
     text = Path(base_config).read_text()
     text = text.replace('tool: "gatk"', f'tool: "{tool}"', 1)
+    text = _disable_filtered_vcf_for_non_gatk(text, tool)
     if parabricks_image is not None:
         text = text.replace(
             'container_image: "/tmp/parabricks.sif"',
@@ -394,6 +412,7 @@ def write_long_contig_config(base_config, out_dir, tool="gatk", mode="true"):
     text = Path(base_config).read_text()
     text = text.replace('tool: "gatk"', f'tool: "{tool}"', 1)
     text = text.replace('tool: "gatk" #', f'tool: "{tool}" #', 1)
+    text = _disable_filtered_vcf_for_non_gatk(text, tool)
     pattern = re.compile(r'(variant_calling:\n(?:  .+\n)*?  tool: "[^"]+".*\n)')
     if not pattern.search(text):
         raise AssertionError("Expected variant_calling.tool entry not found")
@@ -1552,6 +1571,9 @@ def test_full_pipeline(request):
         result.assert_success()
         result.assert_output_exists(
             "results/vcfs/raw.vcf.gz",
+            # gatk is GATK-lineage and generate_filtered_vcf defaults true, so the
+            # hard-filtered VCF is a default product alongside raw.
+            "results/vcfs/filtered.vcf.gz",
             "results/qc_metrics/qc_report.tsv",
             "results/callable_sites/callable_sites.bed",
         )
@@ -1574,7 +1596,10 @@ def test_bcftools_dry_run(request):
         output = result.stdout + result.stderr
         assert "bcftools_regions" in output
         assert "bcftools_concat_regions" in output
-        assert "variant_filtration" in output
+        # bcftools is not a GATK-lineage caller: no GATK hard filtering, so
+        # call_variants resolves to the raw VCF and variant_filtration never runs.
+        assert "variant_filtration" not in output
+        assert "results/vcfs/raw.vcf.gz" in output
 
 
 @pytest.mark.dry_run
@@ -1972,11 +1997,13 @@ def test_full_pipeline_bcftools(request):
             samples=get_samples_file(),
         )
         result.assert_success()
+        # bcftools is not GATK-lineage: no hard-filtered VCF is produced, and
+        # call_variants resolves to the raw VCF.
         result.assert_output_exists(
             "results/vcfs/raw.vcf.gz",
-            "results/vcfs/filtered.vcf.gz",
             "results/qc_metrics/qc_report.tsv",
         )
+        assert not (Path(tmpdir) / "results/vcfs/filtered.vcf.gz").exists()
 
 
 @pytest.mark.full_run
@@ -2260,6 +2287,159 @@ def test_postprocess_disabled_no_rules(request):
 
 
 @pytest.mark.dry_run
+def test_generate_filtered_vcf_requires_gatk_family(request):
+    """generate_filtered_vcf: true with a non-GATK caller raises a clear error."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        # Unlike write_config_for_tool, keep generate_filtered_vcf true for bcftools.
+        text = Path(get_config_file()).read_text()
+        text = text.replace(
+            'tool: "gatk"',
+            'tool: "bcftools"\n  generate_filtered_vcf: true',
+            1,
+        )
+        cfg = Path(tmpdir) / "config_bcftools_generate.yaml"
+        cfg.write_text(text)
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=get_samples_file())
+        assert not result.succeeded, "Expected a config error for non-GATK caller"
+        output = result.stdout + result.stderr
+        assert "generate_filtered_vcf" in output
+        assert "GATK family" in output
+
+
+@pytest.mark.dry_run
+def test_generate_filtered_vcf_false_is_raw_only_default(request):
+    """generate_filtered_vcf: false -> raw-only default; call_variants still builds filtered."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        text = Path(get_config_file()).read_text()
+        text = text.replace(
+            'tool: "gatk"',
+            'tool: "gatk"\n  generate_filtered_vcf: false',
+            1,
+        )
+        cfg = Path(tmpdir) / "config_gatk_no_filtered.yaml"
+        cfg.write_text(text)
+
+        # Default target: raw only, no hard filtering.
+        all_result = smk.dry_run(target="all", configfile=cfg, samples=get_samples_file())
+        all_result.assert_success()
+        all_output = all_result.stdout + all_result.stderr
+        assert "variant_filtration" not in all_output
+
+        # But the filtered VCF is still reachable on demand via call_variants.
+        cv_result = smk.dry_run(
+            target="call_variants", configfile=cfg, samples=get_samples_file()
+        )
+        cv_result.assert_success()
+        assert "variant_filtration" in (cv_result.stdout + cv_result.stderr)
+
+
+@pytest.mark.dry_run
+def test_gatk_postprocess_consumes_filtered_vcf(request):
+    """GATK-lineage: postprocess consumes the shared hard-filtered VCF (built once)."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        result = smk.dry_run(
+            target="all",
+            configfile=get_postprocess_config(),
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "variant_filtration" in output
+        assert "postprocess_basic_filter" in output
+        # basic_filter consumes the main-workflow hard-filtered VCF.
+        assert "results/vcfs/filtered.vcf.gz" in output
+
+
+@pytest.mark.dry_run
+def test_non_gatk_postprocess_consumes_raw_vcf(request):
+    """Non-GATK: no hard filtering; postprocess consumes the raw VCF directly."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        text = Path(get_postprocess_config()).read_text()
+        text = text.replace(
+            'tool: "gatk"',
+            'tool: "bcftools"\n  generate_filtered_vcf: false',
+            1,
+        )
+        cfg = Path(tmpdir) / "postprocess_bcftools.yaml"
+        cfg.write_text(text)
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=get_samples_file())
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "variant_filtration" not in output
+        assert "postprocess_basic_filter" in output
+        assert "results/vcfs/raw.vcf.gz" in output
+
+
+@pytest.mark.dry_run
+def test_postprocess_split_by_type_false_skips_subsets(request):
+    """split_by_type: false keeps the strict filtered VCF but no SNP/indel split."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        text = Path(get_postprocess_config()).read_text()
+        text = text.replace(
+            'exclude_scaffolds: "mtDNA,Y"',
+            'exclude_scaffolds: "mtDNA,Y"\n      split_by_type: false',
+            1,
+        )
+        cfg = Path(tmpdir) / "postprocess_no_split.yaml"
+        cfg.write_text(text)
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "postprocess_strict_filter" in output
+        assert "postprocess_subset_snps" not in output
+        assert "postprocess_subset_indels" not in output
+        assert "postprocess_drop_indel_SNPs" not in output
+
+
+@pytest.mark.dry_run
+def test_postprocess_standalone_config_flag_coercion(request):
+    """Standalone module coerces string --config flags (split_by_type=false)."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile",
+        )
+        fixture_dir = TEST_DATA_DIR / "postprocess"
+        result = smk.dry_run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "postprocess" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(fixture_dir / "samples.csv"),
+                "sample_metadata": str(fixture_dir / "sample_metadata.csv"),
+                "vcf": str(fixture_dir / "raw.vcf"),
+                "ref_fai": str(fixture_dir / "ref.fai"),
+                "callable_sites_bed": str(fixture_dir / "callable_sites.bed"),
+                # Passed as the string "false"; the module must coerce it to a bool.
+                "split_by_type": "false",
+            },
+        )
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "filtered.vcf.gz" in output
+        assert "subset_snps" not in output
+        assert "subset_indels" not in output
+
+
+@pytest.mark.dry_run
 def test_postprocess_with_metadata_dry_run(request):
     """Postprocess works with sample metadata (exclude column)."""
     no_conda = request.config.getoption("--no-conda")
@@ -2353,6 +2533,41 @@ def test_postprocess_standalone_full_run(request):
             len(record[3]) != 1 or any(len(alt) != 1 for alt in record[4].split(","))
             for record in indel_records
         )
+
+
+@pytest.mark.full_run
+def test_postprocess_standalone_keep_basic_and_no_split(request):
+    """keep_basic_filter retains basic.vcf.gz; split_by_type=false skips subsets."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile",
+        )
+        fixture_dir = TEST_DATA_DIR / "postprocess"
+        result = smk.run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "postprocess" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(fixture_dir / "samples.csv"),
+                "sample_metadata": str(fixture_dir / "sample_metadata.csv"),
+                "vcf": str(fixture_dir / "raw.vcf"),
+                "ref_fai": str(fixture_dir / "ref.fai"),
+                "callable_sites_bed": str(fixture_dir / "callable_sites.bed"),
+                "keep_basic_filter": "true",
+                "split_by_type": "false",
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools", "bedtools")
+        result.assert_success()
+        result.assert_output_exists(
+            "results/postprocess/filtered.vcf.gz",
+            "results/postprocess/basic.vcf.gz",
+        )
+        # split_by_type=false -> no per-type subsets
+        assert not (Path(tmpdir) / "results/postprocess/clean_snps.vcf.gz").exists()
+        assert not (Path(tmpdir) / "results/postprocess/clean_indels.vcf.gz").exists()
 
 
 # --- QC module tests ---

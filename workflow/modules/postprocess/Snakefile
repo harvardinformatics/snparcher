@@ -40,11 +40,29 @@ _PP_DEFAULTS = {
     "maf": 0.01,
     "missingness": 0.75,
     "exclude_scaffolds": "",
+    "split_by_type": True,
+    "keep_basic_filter": False,
 }
 
 for _k, _v in _PP_DEFAULTS.items():
     if _k not in config:
         config[_k] = _v
+
+
+def _as_bool(value):
+    """Coerce a config flag to bool, tolerating --config string values
+    (e.g. split_by_type=false arrives as the truthy string "false")."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"true", "t", "yes", "y", "1"}
+
+
+# Normalize boolean flags so both parent-supplied bools and standalone --config
+# strings behave correctly.
+config["split_by_type"] = _as_bool(config["split_by_type"])
+config["keep_basic_filter"] = _as_bool(config["keep_basic_filter"])
 
 _LONG_CONTIG_MODE = bool(config.get("long_contig_mode", False))
 _BCFTOOLS_INDEX_ARGS = "-f -c" if _LONG_CONTIG_MODE else "-f -t"
@@ -54,6 +72,12 @@ _VCF_INDEX_SUFFIX = ".csi" if _LONG_CONTIG_MODE else ".tbi"
 
 def _vcf_index(vcf):
     return f"{vcf}{_VCF_INDEX_SUFFIX}"
+
+
+def _maybe_temp(path):
+    """Retain the basic-filter VCF only if the user opts in; else treat it as a
+    temp intermediate consumed by strict_filter."""
+    return path if config["keep_basic_filter"] else temp(path)
 
 
 # ---------- Sample sheet + metadata ------------------------------------------
@@ -122,8 +146,14 @@ def _get_included_samples():
 rule all:
     input:
         "results/postprocess/filtered.vcf.gz",
-        "results/postprocess/clean_snps.vcf.gz",
-        "results/postprocess/clean_indels.vcf.gz",
+        *(
+            [
+                "results/postprocess/clean_snps.vcf.gz",
+                "results/postprocess/clean_indels.vcf.gz",
+            ]
+            if config["split_by_type"]
+            else []
+        ),
 
 
 # ---------- Rules ------------------------------------------------------------
@@ -151,10 +181,10 @@ rule basic_filter:
         vcf=config["vcf"],
         include="results/postprocess/include_samples.txt",
     output:
-        filtered="results/postprocess/filtered.vcf.gz",
-        filtered_idx="results/postprocess/filtered.vcf.gz.csi",
+        filtered=_maybe_temp("results/postprocess/basic.vcf.gz"),
+        filtered_idx=_maybe_temp(_vcf_index("results/postprocess/basic.vcf.gz")),
     params:
-        index_args="-f -c",
+        index_args=_BCFTOOLS_INDEX_ARGS,
     conda:
         "envs/filter.yml"
     shell:
@@ -199,11 +229,11 @@ rule strict_filter:
     """
     input:
         bed="results/postprocess/callable_sites_filtered.bed",
-        vcf="results/postprocess/filtered.vcf.gz",
-        filtered_idx="results/postprocess/filtered.vcf.gz.csi",
+        vcf="results/postprocess/basic.vcf.gz",
+        basic_idx=_vcf_index("results/postprocess/basic.vcf.gz"),
     output:
-        vcf=temp("results/postprocess/filtered.TEMP.vcf.gz"),
-        idx=temp("results/postprocess/filtered.TEMP.vcf.gz.csi"),
+        vcf="results/postprocess/filtered.vcf.gz",
+        idx=_vcf_index("results/postprocess/filtered.vcf.gz"),
     conda:
         "envs/filter.yml"
     params:
@@ -211,18 +241,18 @@ rule strict_filter:
         maf=config["maf"],
         upper_bound=lambda wildcards: 1 - float(config["maf"]),
         chr_ex=config["exclude_scaffolds"],
-        index_args="-f -c",
+        index_args=_BCFTOOLS_INDEX_ARGS,
     shell:
         """
         if [ -z "{params.chr_ex}" ]
         then
             bcftools view -R {input.bed} -m2 -M2 \
                 -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
-                {input.vcf} -O u -o {output.vcf}
+                {input.vcf} -O z -o {output.vcf}
         else
             bcftools view -t ^{params.chr_ex} -R {input.bed} -m2 -M2 \
                 -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
-                {input.vcf} -O u -o {output.vcf}
+                {input.vcf} -O z -o {output.vcf}
         fi
         bcftools index {params.index_args} {output.vcf}
         """
@@ -231,8 +261,8 @@ rule strict_filter:
 rule subset_indels:
     """Extract clean indels from strictly-filtered VCF."""
     input:
-        vcf="results/postprocess/filtered.TEMP.vcf.gz",
-        idx="results/postprocess/filtered.TEMP.vcf.gz.csi",
+        vcf="results/postprocess/filtered.vcf.gz",
+        idx=_vcf_index("results/postprocess/filtered.vcf.gz"),
     output:
         vcf="results/postprocess/clean_indels.vcf.gz",
         idx=_vcf_index("results/postprocess/clean_indels.vcf.gz"),
@@ -252,8 +282,8 @@ rule subset_indels:
 rule subset_snps:
     """Extract SNPs (excluding indel-overlapping sites) from strictly-filtered VCF."""
     input:
-        vcf="results/postprocess/filtered.TEMP.vcf.gz",
-        idx="results/postprocess/filtered.TEMP.vcf.gz.csi",
+        vcf="results/postprocess/filtered.vcf.gz",
+        idx=_vcf_index("results/postprocess/filtered.vcf.gz"),
     output:
         vcf=temp("results/postprocess/clean_snps_prefilter.vcf.gz"),
         idx=temp(_vcf_index("results/postprocess/clean_snps_prefilter.vcf.gz")),

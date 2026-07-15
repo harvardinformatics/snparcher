@@ -26,10 +26,35 @@ To generate the QC dashboard, you must have at least 3 samples specified in your
 ```{note}
 The output of the QC module should not be considered a final analysis and is solely intended to direct quality control of the dataset.
 ```
+## Hard filtering (GATK-lineage callers)
+
+For GATK-lineage callers (`gatk`, `sentieon`, `parabricks`), the main workflow annotates
+the raw calls with the GATK hard-filter FILTER column (`gatk VariantFiltration`), writing
+`results/vcfs/filtered.vcf.gz`. This file has the same records as `results/vcfs/raw.vcf.gz`
+and differs only in the FILTER column — sites that fail a hard filter are *tagged*, not
+removed, so downstream tools can choose to include or exclude them.
+
+`bcftools` and `deepvariant` do not emit the annotations these filters use
+(`QD`/`FS`/`SOR`/`MQ`/`MQRankSum`/`ReadPosRankSum`), so hard filtering is skipped for them
+and their raw VCF is the final call set.
+
+`variant_calling.generate_filtered_vcf` (default `true`) controls whether
+`results/vcfs/filtered.vcf.gz` is produced as a default output alongside `raw.vcf.gz`
+(reproducing the v1 raw + filtered output set). It requires a GATK-lineage caller and the
+workflow raises an error at startup if it is `true` with `bcftools`/`deepvariant`; set it to
+`false` for those callers (or for a raw-only default). When `false`, the filtered VCF is
+still built on demand when postprocess/QC run or you request the `call_variants` target.
+
 ## Postprocessing
 The postprocessing module is designed to be run after the main workflow once you have decided whether any samples should be excluded from downstream analyses. To exclude samples, provide a `sample_metadata` file with an `exclude` column; samples with `exclude=true` are removed from the postprocessed outputs.
 
-This module produces a filtered VCF by removing excluded samples, restricting to callable regions, excluding small contigs, and applying user-defined SNP/indel filters.
+The module consumes the final call set (the hard-filtered `results/vcfs/filtered.vcf.gz` for
+GATK-lineage callers, otherwise `results/vcfs/raw.vcf.gz`) and produces the strictly-filtered
+`results/postprocess/filtered.vcf.gz` by removing excluded samples and hard-filter-failing
+sites, restricting to callable regions, excluding small contigs, and applying MAF/missingness
+filters. Note this is a different file from `results/vcfs/filtered.vcf.gz` (the main-workflow
+hard-filtered VCF, all sites retained). By default it also emits SNP-only and indel-only
+subsets (`clean_snps.vcf.gz`, `clean_indels.vcf.gz`).
 
 For standalone runs against an existing VCF, you can use `run-postprocess.sh` as a thin wrapper around `workflow/modules/postprocess/Snakefile`.
 ### Config Options
@@ -39,6 +64,8 @@ For standalone runs against an existing VCF, you can use `run-postprocess.sh` as
 |`modules.postprocess.filtering.maf`| Variants with MAF below this value are excluded.| `float`|
 |`modules.postprocess.filtering.missingness`| Variants with missingness above this value are excluded.| `float`|
 |`modules.postprocess.filtering.exclude_scaffolds` | Comma-separated scaffolds/contigs to exclude from clean outputs.| `str`|
+|`modules.postprocess.filtering.split_by_type`| Also emit `clean_snps.vcf.gz` and `clean_indels.vcf.gz` (the strict-filtered VCF split by variant type). Default `true`.| `bool`|
+|`modules.postprocess.filtering.keep_basic_filter`| Retain the intermediate basic-filter VCF (`results/postprocess/basic.vcf.gz`) instead of discarding it. Default `false`.| `bool`|
 
 ```{hint}
 If you want to keep all samples in postprocess, omit the `exclude` column or set every row to `false`.
