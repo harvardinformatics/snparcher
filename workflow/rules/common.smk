@@ -621,24 +621,21 @@ APPLY_HARD_FILTERS = VARIANT_TOOL in GATK_LINEAGE_TOOLS
 # The VCF that downstream consumers (postprocess, qc, `call_variants`) treat as
 # the final call set: hard-filtered for GATK-lineage callers, raw otherwise.
 FINAL_VCF = FILTERED_VCF if APPLY_HARD_FILTERS else RAW_VCF
-FINAL_VCF_INDEX = FILTERED_VCF_INDEX if APPLY_HARD_FILTERS else RAW_VCF_INDEX
 
 # Config-gated outputs.
 GENERATE_FILTERED_VCF = bool(config["variant_calling"]["generate_filtered_vcf"])
 POSTPROCESS_SPLIT_BY_TYPE = bool(
     config["modules"]["postprocess"]["filtering"]["split_by_type"]
 )
-POSTPROCESS_KEEP_BASIC = bool(
-    config["modules"]["postprocess"]["filtering"]["keep_basic_filter"]
-)
 
 if GENERATE_FILTERED_VCF and not APPLY_HARD_FILTERS:
-    raise ValueError(
+    logger.warning(
         f"variant_calling.generate_filtered_vcf is true but caller '{VARIANT_TOOL}' "
         "is not in the GATK family (gatk/sentieon/parabricks); GATK hard filters "
-        "require GATK-style annotations that this caller does not emit. "
-        "Set variant_calling.generate_filtered_vcf: false."
+        "require GATK-style annotations that this caller does not emit. Disabling "
+        "generate_filtered_vcf; the raw VCF is the final call set for this caller."
     )
+    GENERATE_FILTERED_VCF = False
 
 
 # --- Sample lists ---

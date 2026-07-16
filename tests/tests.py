@@ -373,28 +373,10 @@ def test_genomicsdb_merge_contigs_arg_only_for_whole_contig_pathology(tmp_path):
     assert result.stdout.strip() == "--merge-contigs-into-num-partitions 2"
 
 
-# Callers that emit GATK-style annotations. Hard filtering (and therefore
-# variant_calling.generate_filtered_vcf) only applies to these; other callers
-# must set generate_filtered_vcf: false or the workflow raises at DAG build.
-GATK_LINEAGE_TOOLS = {"gatk", "sentieon", "parabricks"}
-
-
-def _disable_filtered_vcf_for_non_gatk(text, tool):
-    """Inject generate_filtered_vcf: false for non-GATK-family callers."""
-    if tool in GATK_LINEAGE_TOOLS:
-        return text
-    return text.replace(
-        f'tool: "{tool}"',
-        f'tool: "{tool}"\n  generate_filtered_vcf: false',
-        1,
-    )
-
-
 def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
     """Write a config copy with variant_calling.tool overridden."""
     text = Path(base_config).read_text()
     text = text.replace('tool: "gatk"', f'tool: "{tool}"', 1)
-    text = _disable_filtered_vcf_for_non_gatk(text, tool)
     if parabricks_image is not None:
         text = text.replace(
             'container_image: "/tmp/parabricks.sif"',
@@ -412,7 +394,6 @@ def write_long_contig_config(base_config, out_dir, tool="gatk", mode="true"):
     text = Path(base_config).read_text()
     text = text.replace('tool: "gatk"', f'tool: "{tool}"', 1)
     text = text.replace('tool: "gatk" #', f'tool: "{tool}" #', 1)
-    text = _disable_filtered_vcf_for_non_gatk(text, tool)
     pattern = re.compile(r'(variant_calling:\n(?:  .+\n)*?  tool: "[^"]+".*\n)')
     if not pattern.search(text):
         raise AssertionError("Expected variant_calling.tool entry not found")
@@ -2287,12 +2268,12 @@ def test_postprocess_disabled_no_rules(request):
 
 
 @pytest.mark.dry_run
-def test_generate_filtered_vcf_requires_gatk_family(request):
-    """generate_filtered_vcf: true with a non-GATK caller raises a clear error."""
+def test_generate_filtered_vcf_auto_disabled_for_non_gatk(request):
+    """generate_filtered_vcf: true with a non-GATK caller warns and auto-disables."""
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
-        # Unlike write_config_for_tool, keep generate_filtered_vcf true for bcftools.
+        # Explicitly request the filtered VCF with a non-GATK caller.
         text = Path(get_config_file()).read_text()
         text = text.replace(
             'tool: "gatk"',
@@ -2302,11 +2283,12 @@ def test_generate_filtered_vcf_requires_gatk_family(request):
         cfg = Path(tmpdir) / "config_bcftools_generate.yaml"
         cfg.write_text(text)
 
+        # The run still succeeds; the flag is disabled with a warning rather than erroring.
         result = smk.dry_run(target="all", configfile=cfg, samples=get_samples_file())
-        assert not result.succeeded, "Expected a config error for non-GATK caller"
+        result.assert_success()
         output = result.stdout + result.stderr
-        assert "generate_filtered_vcf" in output
-        assert "GATK family" in output
+        assert "generate_filtered_vcf" in output  # warning was emitted
+        assert "variant_filtration" not in output  # no hard filtering scheduled
 
 
 @pytest.mark.dry_run

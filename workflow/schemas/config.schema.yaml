@@ -68,8 +68,8 @@ properties:
         description: >
           Produce results/vcfs/filtered.vcf.gz (raw calls annotated with the GATK
           hard-filter FILTER column) as a default output, reproducing the v1
-          raw + filtered output set. Requires a GATK-family caller
-          (gatk/sentieon/parabricks); the workflow raises an error if true with
+          raw + filtered output set. Only applies to GATK-family callers
+          (gatk/sentieon/parabricks); it is ignored with a warning for
           bcftools/deepvariant. When false the filtered VCF is still built on demand
           by the postprocess/qc modules or the `call_variants` target.
       ploidy:

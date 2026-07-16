@@ -21,7 +21,7 @@ These are the supported v2 config keys used by the main workflow. Unknown keys a
 | `variant_calling.expected_coverage` | string | no | `low` | `low`, `high` |
 | `variant_calling.tool` | string | no | `gatk` | `gatk`, `sentieon`, `bcftools`, `deepvariant`, `parabricks` |
 | `variant_calling.long_contig_mode` | boolean or `auto` | no | `auto` | Uses CSI-capable indexes and GATK temp work files for TBI-incompatible contigs |
-| `variant_calling.generate_filtered_vcf` | boolean | no | `true` | Emit `results/vcfs/filtered.vcf.gz` (raw + GATK hard-filter FILTER column) as a default output. Requires a GATK-family caller (`gatk`/`sentieon`/`parabricks`); errors if `true` with `bcftools`/`deepvariant` |
+| `variant_calling.generate_filtered_vcf` | boolean | no | `true` | Emit `results/vcfs/filtered.vcf.gz` (raw + GATK hard-filter FILTER column) as a default output. Applies only to GATK-family callers (`gatk`/`sentieon`/`parabricks`); ignored with a warning for `bcftools`/`deepvariant` |
 | `variant_calling.ploidy` | integer | no | `2` | `>= 1` |
 | `variant_calling.gatk.het_prior` | number | no | `0.005` | `0..1` |
 | `variant_calling.gatk.concat_batch_size` | integer | no | `250` | `>= 2` |

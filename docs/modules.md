@@ -40,10 +40,10 @@ and their raw VCF is the final call set.
 
 `variant_calling.generate_filtered_vcf` (default `true`) controls whether
 `results/vcfs/filtered.vcf.gz` is produced as a default output alongside `raw.vcf.gz`
-(reproducing the v1 raw + filtered output set). It requires a GATK-lineage caller and the
-workflow raises an error at startup if it is `true` with `bcftools`/`deepvariant`; set it to
-`false` for those callers (or for a raw-only default). When `false`, the filtered VCF is
-still built on demand when postprocess/QC run or you request the `call_variants` target.
+(reproducing the v1 raw + filtered output set). It only applies to GATK-lineage callers; for
+`bcftools`/`deepvariant` it is ignored with a warning (they have no GATK hard-filter step).
+Set it to `false` for a raw-only default. When `false`, the filtered VCF is still built on
+demand when postprocess/QC run or you request the `call_variants` target.
 
 ## Postprocessing
 The postprocessing module is designed to be run after the main workflow once you have decided whether any samples should be excluded from downstream analyses. To exclude samples, provide a `sample_metadata` file with an `exclude` column; samples with `exclude=true` are removed from the postprocessed outputs.
