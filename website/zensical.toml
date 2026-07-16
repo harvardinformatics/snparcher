@@ -1,0 +1,104 @@
+[project]
+site_name = "snpArcher"
+site_url = "https://snparcher.github.io"
+site_description = "Documentation for snpArcher — a Snakemake workflow for variant calling in non-model organisms"
+site_author = "snpArcher contributors"
+repo_url = "https://github.com/harvardinformatics/snparcher"
+repo_name = "harvardinformatics/snparcher"
+copyright = "Copyright &copy; 2024–2026 Harvard Informatics"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Installation" = "how-to/install.md" },
+  { "Tutorials" = [
+    "tutorials/index.md",
+    { "Quickstart" = "tutorials/quickstart.md" },
+    { "Your first project" = "tutorials/first-project.md" },
+  ]},
+  { "How-to guides" = [
+    "how-to/index.md",
+    { "Create a sample sheet" = "how-to/sample-sheet.md" },
+    { "Configure your run" = "how-to/configure.md" },
+    { "Run locally" = "how-to/run-local.md" },
+    { "Run on HPC" = "how-to/run-hpc.md" },
+    { "Interpret QC reports" = "how-to/qc-report.md" },
+    { "Filter and postprocess" = "how-to/postprocess.md" },
+    { "Add a custom module" = "how-to/custom-modules.md" },
+    { "Troubleshoot errors" = "how-to/troubleshoot.md" },
+  ]},
+  { "Reference" = [
+    "reference/index.md",
+    { "Config schema" = "reference/config-schema.md" },
+    { "Sample sheet schema" = "reference/sample-sheet-schema.md" },
+    { "Output files" = "reference/outputs.md" },
+    { "CLI flags" = "reference/cli.md" },
+    { "Modules" = "reference/modules.md" },
+    { "Changelog" = "reference/changelog.md" },
+  ]},
+  { "Concepts" = [
+    "explanation/index.md",
+    { "Pipeline architecture" = "explanation/architecture.md" },
+    { "Variant calling" = "explanation/variant-calling.md" },
+    { "Parallelization" = "explanation/parallelization.md" },
+    { "QC metrics" = "explanation/qc-metrics.md" },
+    { "Filtering philosophy" = "explanation/filtering.md" },
+    { "Non-model organisms" = "explanation/non-model.md" },
+  ]},
+]
+
+[project.theme]
+language = "en"
+custom_dir = "overrides"
+features = [
+  "content.code.copy",
+  "content.code.annotate",
+  "content.tabs.link",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/harvardinformatics/snparcher"
+
+# Markdown extensions
+[project.markdown_extensions.admonition]
+
+[project.markdown_extensions.attr_list]
+
+[project.markdown_extensions.md_in_html]
+
+[project.markdown_extensions.tables]
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.details]
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+
+[project.markdown_extensions.pymdownx.superfences]
+
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true

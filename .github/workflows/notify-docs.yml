@@ -1,0 +1,24 @@
+name: Notify docs site
+
+# When the docs sources under website/ change on main, tell the
+# snparcher/snparcher.github.io repo to rebuild and redeploy the site.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger snparcher.github.io rebuild
+        env:
+          # Fine-grained PAT (or GitHub App token) with Contents: write
+          # on snparcher/snparcher.github.io. Store as a repo secret.
+          GH_TOKEN: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+        run: |
+          gh api --method POST \
+            repos/snparcher/snparcher.github.io/dispatches \
+            -f event_type=docs-updated
