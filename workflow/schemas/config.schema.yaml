@@ -62,6 +62,16 @@ properties:
           Use CSI-capable and GLnexus-based paths for references with contigs
           longer than the TBI coordinate limit. "auto" inspects an existing
           reference .fai when one is available while building the DAG.
+      generate_filtered_vcf:
+        type: boolean
+        default: true
+        description: >
+          Produce results/vcfs/filtered.vcf.gz (raw calls annotated with the GATK
+          hard-filter FILTER column) as a default output, reproducing the v1
+          raw + filtered output set. Only applies to GATK-family callers
+          (gatk/sentieon/parabricks); it is ignored with a warning for
+          bcftools/deepvariant. When false the filtered VCF is still built on demand
+          by the postprocess/qc modules or the `call_variants` target.
       ploidy:
         type: integer
         minimum: 1
@@ -298,6 +308,19 @@ properties:
               exclude_scaffolds:
                 type: string
                 default: "mtDNA,Y"
+              split_by_type:
+                type: boolean
+                default: true
+                description: >
+                  Also emit clean_snps.vcf.gz and clean_indels.vcf.gz (the
+                  strict-filtered VCF split by variant type).
+              keep_basic_filter:
+                type: boolean
+                default: false
+                description: >
+                  Retain the intermediate basic-filter VCF
+                  (results/postprocess/basic.vcf.gz) instead of treating it as a
+                  temporary file consumed by the strict filter.
 
 required:
   - samples

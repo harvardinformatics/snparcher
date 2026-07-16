@@ -5,6 +5,8 @@ Raw sequencing reads were quality-filtered using fastp v0.20.1 (Chen et al. 2018
 
 If using low coverage mode, please add “HaplotypeCaller was run using parameters optimized for low-coverage data (--min-pruning 1, --min-dangling-branch-length 1).
 
+If using the parabricks caller, per-sample calling was performed with NVIDIA Parabricks' GPU-accelerated GATK HaplotypeCaller; the same GATK VariantFiltration hard-filter criteria described above were applied. The bcftools and DeepVariant callers do not emit the annotations these hard filters use, so GATK hard filtering is not applied to their output.
+
 --------------------------------------------------------------------------------
 VERSION 2: SENTIEON PIPELINE (sentieon=true)
 --------------------------------------------------------------------------------

@@ -61,6 +61,7 @@ DEFAULTS = {
         "expected_coverage": "low",
         "tool": "gatk",
         "long_contig_mode": "auto",
+        "generate_filtered_vcf": True,
         "ploidy": 2,
         "gatk": {
             "het_prior": 0.005,
@@ -127,6 +128,8 @@ DEFAULTS = {
                 "maf": 0.01,
                 "missingness": 0.75,
                 "exclude_scaffolds": "mtDNA,Y",
+                "split_by_type": True,
+                "keep_basic_filter": False,
             },
         },
     },
@@ -604,6 +607,35 @@ RAW_VCF_WORK = "results/vcfs/work/raw.vcf"
 RAW_VCF_WORK_INDEX = get_vcf_index(RAW_VCF_WORK)
 FILTERED_VCF = "results/vcfs/filtered.vcf.gz"
 FILTERED_VCF_INDEX = get_compressed_vcf_index(FILTERED_VCF)
+
+
+# --- Hard-filtering / final call set ---
+#
+# GATK hard filters key on GATK-style annotations (QD, FS, SOR, MQ, MQRankSum,
+# ReadPosRankSum), which only the GATK-lineage callers emit. bcftools and
+# DeepVariant produce a different annotation set, so hard filtering is skipped
+# for them and their raw VCF is the final call set.
+GATK_LINEAGE_TOOLS = {"gatk", "sentieon", "parabricks"}
+APPLY_HARD_FILTERS = VARIANT_TOOL in GATK_LINEAGE_TOOLS
+
+# The VCF that downstream consumers (postprocess, qc, `call_variants`) treat as
+# the final call set: hard-filtered for GATK-lineage callers, raw otherwise.
+FINAL_VCF = FILTERED_VCF if APPLY_HARD_FILTERS else RAW_VCF
+
+# Config-gated outputs.
+GENERATE_FILTERED_VCF = bool(config["variant_calling"]["generate_filtered_vcf"])
+POSTPROCESS_SPLIT_BY_TYPE = bool(
+    config["modules"]["postprocess"]["filtering"]["split_by_type"]
+)
+
+if GENERATE_FILTERED_VCF and not APPLY_HARD_FILTERS:
+    logger.warning(
+        f"variant_calling.generate_filtered_vcf is true but caller '{VARIANT_TOOL}' "
+        "is not in the GATK family (gatk/sentieon/parabricks); GATK hard filters "
+        "require GATK-style annotations that this caller does not emit. Disabling "
+        "generate_filtered_vcf; the raw VCF is the final call set for this caller."
+    )
+    GENERATE_FILTERED_VCF = False
 
 
 # --- Sample lists ---

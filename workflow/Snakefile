@@ -30,7 +30,8 @@ elif VARIANT_TOOL == "parabricks":
 else:
     raise ValueError(f"Unsupported variant_calling.tool: {VARIANT_TOOL}")
 
-include: "rules/variant_calling/hard_filters.smk"
+if APPLY_HARD_FILTERS:
+    include: "rules/variant_calling/hard_filters.smk"
 
 
 # --- Default target ----------------------------------------------------------
@@ -40,12 +41,18 @@ rule all:
     default_target: True
     input:
         RAW_VCF,
+        # Hard-filtered VCF as a default product (GATK-lineage only; validated in common.smk)
+        FILTERED_VCF if GENERATE_FILTERED_VCF else [],
         "results/qc_metrics/qc_report.tsv",
         CALLABLE_TARGETS,
         # Postprocess outputs (when enabled)
         "results/postprocess/filtered.vcf.gz" if POSTPROCESS_ENABLED else [],
-        "results/postprocess/clean_snps.vcf.gz" if POSTPROCESS_ENABLED else [],
-        "results/postprocess/clean_indels.vcf.gz" if POSTPROCESS_ENABLED else [],
+        "results/postprocess/clean_snps.vcf.gz"
+        if POSTPROCESS_ENABLED and POSTPROCESS_SPLIT_BY_TYPE
+        else [],
+        "results/postprocess/clean_indels.vcf.gz"
+        if POSTPROCESS_ENABLED and POSTPROCESS_SPLIT_BY_TYPE
+        else [],
         # QC dashboard (when enabled)
         "results/qc/qc_dashboard.html" if config["modules"]["qc"]["enabled"] else [],
 
@@ -56,7 +63,7 @@ if POSTPROCESS_ENABLED:
     _postprocess_config = {
         "samples": config["samples"],
         "sample_metadata": config.get("sample_metadata", ""),
-        "vcf": RAW_VCF,
+        "vcf": FINAL_VCF,
         "long_contig_mode": LONG_CONTIG_MODE,
         "ref_fai": REF_FILES["ref_fai"],
         "callable_sites_bed": "results/callable_sites/callable_sites.bed",
@@ -74,7 +81,7 @@ if config["modules"]["qc"]["enabled"]:
     _qc_config = {
         "samples": config["samples"],
         "sample_metadata": config.get("sample_metadata", ""),
-        "vcf": RAW_VCF,
+        "vcf": FINAL_VCF,
         "long_contig_mode": LONG_CONTIG_MODE,
         "fai": REF_FILES["ref_fai"],
         "qc_report": "results/qc_metrics/qc_report.tsv",
@@ -128,9 +135,10 @@ rule map_samples:
 
 
 rule call_variants:
-    """Run variant calling through to filtered VCF."""
+    """Run variant calling through to the final call set (hard-filtered VCF for
+    GATK-lineage callers, raw VCF otherwise)."""
     input:
-        FILTERED_VCF,
+        FINAL_VCF,
 
 
 rule qc_report:
