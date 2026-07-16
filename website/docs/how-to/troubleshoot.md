@@ -53,9 +53,9 @@ Check logs in this order:
 
     ```yaml
     set-resources:
-      gatk_haplotypecaller:
-        mem_mb: attempt * 16000
-        mem_mb_reduced: (attempt * 16000) * 0.9
+      gatk_haplotypecaller_interval:
+        mem_mb: attempt * 24000
+        mem_mb_reduced: attempt * 22000  # integer MB, kept below mem_mb
     ```
 
 - **Enable retries** with `--retries 3` in your Snakemake command. Combined with `attempt * N` memory scaling, this automatically increases memory on each retry.

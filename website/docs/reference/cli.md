@@ -64,27 +64,29 @@ The bundled workflow profile (`workflow-profiles/default/config.yaml`) sets thes
 
 | Resource | Value | Description |
 |----------|-------|-------------|
-| `mem_mb` | `attempt * 16000` | Memory in MB, scaling with retry attempt. |
-| `mem_mb_reduced` | `(attempt * 16000) * 0.9` | Memory allocated to Java processes (GATK), 90% of total to prevent OOM. |
+| `mem_mb` | `attempt * 8000` | Scheduler memory request in MB, scaling with retry attempt. |
+| `mem_mb_reduced` | `attempt * 7000` | Memory budget for Java/GATK tool heaps, kept below `mem_mb` to leave headroom and prevent OOM. |
 | `tmpdir` | `system_tmpdir` | Temporary directory. Replace with an absolute path to force a custom location. |
+
+Memory-intensive GATK-family rules (HaplotypeCaller, GenomicsDBImport, GenotypeGVCFs, and the joint variants) request more than the defaults above via per-rule `set-resources` entries in the same profile. See `workflow-profiles/default/config.yaml` for the exact per-rule values.
 
 ### Thread allocations per rule
 
 | Rule | Threads | Stage |
 |------|--------:|-------|
-| `genmap` | 1 | Mappability |
-| `get_fastq_pe` | 6 | FASTQ download |
+| `download_sra` | 6 | FASTQ download |
 | `fastp` | 6 | Read trimming |
-| `bwa_map` | 16 | Alignment (BWA-MEM) |
-| `dedup` | 16 | Duplicate marking |
+| `bwa_mem` | 16 | Alignment (BWA-MEM) |
+| `markdup_library` | 16 | Duplicate marking |
 | `gatk_haplotypecaller` | 1 | GATK HaplotypeCaller (whole-genome) |
 | `gatk_haplotypecaller_interval` | 1 | GATK HaplotypeCaller (per-interval) |
 | `joint_genomics_db_import` | 1 | GenomicsDB import (whole-genome) |
 | `gatk_genomics_db_import` | 1 | GenomicsDB import (per-interval) |
-| `compute_d4` | 6 | Mosdepth D4 depth |
+| `mosdepth` | 6 | Mosdepth depth |
+| `clam_collect` | 6 | Callable depth collection |
 | `clam_loci` | 6 | Callable loci computation |
 | `sentieon_map` | 16 | Sentieon alignment |
-| `sentieon_dedup` | 16 | Sentieon duplicate marking |
+| `sentieon_dedup_library` | 16 | Sentieon duplicate marking |
 | `sentieon_haplotyper` | 32 | Sentieon HaplotypeCaller |
 | `sentieon_combine_gvcf` | 32 | Sentieon gVCF merge |
 | `bcftools_call` | 8 | bcftools mpileup/call |

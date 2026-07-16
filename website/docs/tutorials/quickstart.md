@@ -36,7 +36,7 @@ snakemake --use-conda --dry-run --directory example/
 ```
 
 You should see output listing all the rules that Snakemake would run, along with the total number of jobs.
-Look for familiar rule names like `fastp`, `bwa_map`, `gatk_haplotypecaller`, and `genotype_gvcfs`.
+Look for familiar rule names like `fastp`, `bwa_mem`, `gatk_haplotypecaller`, and `gatk_genotype_gvcfs`.
 If you see an error instead, double-check that you activated the `snparcher` conda environment and that you are in the snpArcher repository root.
 
 !!! tip "What does `--dry-run` do?"

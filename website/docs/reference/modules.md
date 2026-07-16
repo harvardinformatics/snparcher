@@ -18,6 +18,7 @@ The QC module produces an interactive HTML dashboard with visualizations for qua
 | `modules.qc.enabled` | boolean | `false` | | Enable the module. |
 | `modules.qc.clusters` | integer | `3` | >= 1 | Number of clusters for PCA-based clustering in the dashboard. |
 | `modules.qc.min_depth` | number | `2` | >= 0 | Samples with mean depth below this value are excluded from QC analyses. |
+| `modules.qc.max_sample_missingness` | number | `0.49` | 0 to 1 | Samples whose genotype missingness exceeds this fraction are dropped before the PLINK GRM and downstream QC analyses. |
 | `modules.qc.google_api_key` | string | `""` | | Google Maps JavaScript API key for geographic map panels. If empty, map panels are omitted. |
 | `modules.qc.exclude_scaffolds` | string | `""` | | Comma-separated list of scaffold/contig names to exclude from QC analyses (e.g., `"scaffold_mt,scaffold_Z"`). |
 
@@ -69,6 +70,8 @@ Sample exclusion is controlled via the `exclude` column in the [sample metadata 
 | `modules.postprocess.filtering.maf` | number | `0.01` | 0 to 1 | Minimum minor allele frequency threshold. |
 | `modules.postprocess.filtering.missingness` | number | `0.75` | 0 to 1 | Minimum genotyping rate (fraction of samples with a called genotype). |
 | `modules.postprocess.filtering.exclude_scaffolds` | string | `"mtDNA,Y"` | | Comma-separated scaffold/contig names to exclude. |
+| `modules.postprocess.filtering.split_by_type` | boolean | `true` | | Also emit `clean_snps.vcf.gz` and `clean_indels.vcf.gz` (strict-filtered VCF split by variant type). |
+| `modules.postprocess.filtering.keep_basic_filter` | boolean | `false` | | Retain the intermediate `results/postprocess/basic.vcf.gz` instead of treating it as temporary. |
 
 ### Outputs
 
