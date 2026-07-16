@@ -1,0 +1,16 @@
+[workspace]
+name = "snparcher-docs"
+version = "0.1.0"
+description = "Documentation site for snpArcher"
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "osx-64", "linux-64"]
+
+[dependencies]
+python = ">=3.11"
+
+[pypi-dependencies]
+zensical = "*"
+
+[tasks]
+serve = "zensical serve"
+build = "zensical build --clean"
