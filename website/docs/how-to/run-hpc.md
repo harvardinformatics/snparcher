@@ -29,8 +29,8 @@ At minimum, uncomment and set the partition and account fields under `default-re
 
 ```yaml
 default-resources:
-  mem_mb: attempt * 16000
-  mem_mb_reduced: (attempt * 16000) * 0.9
+  mem_mb: attempt * 8000
+  mem_mb_reduced: attempt * 7000
   tmpdir: system_tmpdir
   slurm_partition: "short"  # <-- change to your cluster's partition
   slurm_account: "mylab"  # <-- change this, or remove if not required
@@ -52,8 +52,8 @@ Adjust them if your cluster nodes have more or fewer cores:
 
 ```yaml
 set-threads:
-  bwa_map: 16  # <-- alignment benefits from many threads
-  dedup: 16
+  bwa_mem: 16  # <-- alignment benefits from many threads
+  markdup_library: 16
   fastp: 6
   bcftools_call: 8
 ```

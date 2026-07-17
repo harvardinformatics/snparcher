@@ -143,10 +143,10 @@ For local execution, the defaults in `workflow-profiles/default/config.yaml` are
 The profile sets thread counts for each pipeline step (e.g., 16 threads for BWA alignment, 6 threads for read downloading) and memory allocation.
 
 !!! tip "Adjusting for your machine"
-    If your workstation has fewer than 16 cores, reduce the `bwa_map` thread count in `workflow-profiles/default/config.yaml`:
+    If your workstation has fewer than 16 cores, reduce the `bwa_mem` thread count in `workflow-profiles/default/config.yaml`:
     ```yaml
     set-threads:
-      bwa_map: 8  # <-- reduce if you have fewer cores
+      bwa_mem: 8  # <-- reduce if you have fewer cores
     ```
     The `--cores` flag you pass to Snakemake (in Step 6) sets the total pool of available cores.
     Snakemake will not start a 16-thread job if only 8 cores are available, but reducing per-rule threads lets more jobs run in parallel.
@@ -167,7 +167,7 @@ snakemake \
 Check the output for the following:
 
 - **Sample IDs match**: You should see `zf_26462` through `zf_26733` appear in the planned job names.
-- **Expected rules are queued**: Look for `get_fastq_pe` (SRA download), `fastp` (trimming), `bwa_map` (alignment), `gatk_haplotypecaller` (variant calling), and QC rules.
+- **Expected rules are queued**: Look for `download_sra` (SRA download), `fastp` (trimming), `bwa_mem` (alignment), `gatk_haplotypecaller` (variant calling), and QC rules.
 - **No errors**: If you see a schema validation error, double-check your sample sheet columns and config syntax.
 
 !!! tip "Reading the dry-run output"

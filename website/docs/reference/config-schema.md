@@ -41,6 +41,8 @@ An optional key is also accepted at the top level:
 | `variant_calling.expected_coverage` | string | `"low"` | `low`, `high` | Expected sequencing coverage regime. |
 | `variant_calling.tool` | string | `"gatk"` | `gatk`, `sentieon`, `bcftools`, `deepvariant`, `parabricks` | Variant caller to use. |
 | `variant_calling.ploidy` | integer | `2` | >= 1 | Ploidy of the organism. |
+| `variant_calling.generate_filtered_vcf` | boolean | `true` | `true`, `false` | Produce `results/vcfs/filtered.vcf.gz` (raw calls annotated with the GATK hard-filter FILTER column) as a default output. Applies only to GATK-family callers (`gatk`, `sentieon`, `parabricks`); ignored with a warning for `bcftools`/`deepvariant`. When `false`, the filtered VCF is still built on demand by the postprocess/qc modules or the `call_variants` target. |
+| `variant_calling.long_contig_mode` | boolean or `"auto"` | `"auto"` | `true`, `false`, `"auto"` | Use CSI-capable (and, for DeepVariant, GLnexus-based) paths for references with contigs longer than the Tabix coordinate limit (~512 Mb). `"auto"` inspects the reference `.fai` when available while building the DAG. Enabling it switches VCF/gVCF indexes to `.csi`. |
 
 !!! note "Deprecated alias: `variant_calling.gatk.ploidy`"
     If `variant_calling.ploidy` is not set but `variant_calling.gatk.ploidy` is present, the value is copied to `variant_calling.ploidy`.
@@ -106,7 +108,10 @@ See [Parallelization](../explanation/parallelization.md) for background.
 | `intervals.enabled` | boolean | `true` | | Enable interval-based parallelization for GATK. When `false`, GATK runs whole-genome HaplotypeCaller and single-pass GenomicsDBImport. |
 | `intervals.min_nmer` | integer | `500` | >= 1 | Minimum length of N-mer run (assembly gap) used to split the genome into intervals. |
 | `intervals.num_gvcf_intervals` | integer | `50` | >= 1 | Target number of intervals for per-sample gVCF calling. |
-| `intervals.db_scatter_factor` | number | `0.15` | >= 0 | Scaling factor for GenomicsDB import parallelism. The number of database intervals is `db_scatter_factor * num_samples * num_gvcf_intervals` (rounded, minimum 1). Scales with both cohort size and interval count. |
+| `intervals.db_scatter_factor` | number | `0.15` | >= 0 | Scaling factor for GenomicsDB import parallelism. The target number of database intervals is `db_scatter_factor * num_samples * num_gvcf_intervals` (rounded, minimum 1), then refined by the complexity-aware splitting caps below. Scales with both cohort size and interval count. |
+| `intervals.min_contig_length` | integer | `0` | >= 0 | Drop contigs shorter than this length (bp) when building intervals. `0` keeps all contigs. |
+| `intervals.db_max_intervals_per_shard` | integer | `200` | >= 0 | Cap on the number of intervals packed into a single GenomicsDB shard. Limits per-shard complexity for fragmented assemblies. `0` disables the cap. |
+| `intervals.db_max_contigs_per_shard` | integer | `200` | >= 0 | Cap on the number of distinct contigs packed into a single GenomicsDB shard. `0` disables the cap. |
 
 ## `callable_sites`
 
@@ -146,6 +151,7 @@ See the [Modules](modules.md) reference for full details.
 | `modules.qc.enabled` | boolean | `false` | | Enable the QC dashboard module. |
 | `modules.qc.clusters` | integer | `3` | >= 1 | Number of clusters for PCA-based clustering. |
 | `modules.qc.min_depth` | number | `2` | >= 0 | Samples with mean depth below this value are excluded from QC analyses. |
+| `modules.qc.max_sample_missingness` | number | `0.49` | 0 to 1 | Samples whose genotype missingness exceeds this fraction are dropped before the PLINK GRM and downstream QC analyses. |
 | `modules.qc.google_api_key` | string | `""` | | Google Maps API key for geographic map panels. Optional. |
 | `modules.qc.exclude_scaffolds` | string | `""` | | Comma-separated list of scaffold/contig names to exclude from QC analyses. |
 
@@ -158,6 +164,8 @@ See the [Modules](modules.md) reference for full details.
 | `modules.postprocess.filtering.maf` | number | `0.01` | 0 to 1 | Minimum minor allele frequency. Sites below this threshold are excluded. |
 | `modules.postprocess.filtering.missingness` | number | `0.75` | 0 to 1 | Minimum genotyping rate. Sites with a called-genotype fraction below this threshold are excluded. |
 | `modules.postprocess.filtering.exclude_scaffolds` | string | `"mtDNA,Y"` | | Comma-separated list of scaffold/contig names to exclude from filtered output. |
+| `modules.postprocess.filtering.split_by_type` | boolean | `true` | `true`, `false` | Also emit `clean_snps.vcf.gz` and `clean_indels.vcf.gz` (the strict-filtered VCF split by variant type). |
+| `modules.postprocess.filtering.keep_basic_filter` | boolean | `false` | `true`, `false` | Retain the intermediate basic-filter VCF (`results/postprocess/basic.vcf.gz`) instead of treating it as a temporary file consumed by the strict filter. |
 
 ## Minimal example
 
@@ -188,6 +196,8 @@ variant_calling:
   expected_coverage: "low"
   tool: "gatk"
   ploidy: 2
+  generate_filtered_vcf: true
+  long_contig_mode: "auto"
   gatk:
     het_prior: 0.005
 
@@ -196,6 +206,9 @@ intervals:
   min_nmer: 500
   num_gvcf_intervals: 50
   db_scatter_factor: 0.15
+  min_contig_length: 0
+  db_max_intervals_per_shard: 200
+  db_max_contigs_per_shard: 200
 
 callable_sites:
   generate_bed_file: true
@@ -216,6 +229,7 @@ modules:
     enabled: true
     clusters: 3
     min_depth: 2
+    max_sample_missingness: 0.49
     google_api_key: ""
     exclude_scaffolds: ""
   postprocess:
@@ -225,4 +239,6 @@ modules:
       maf: 0.01
       missingness: 0.75
       exclude_scaffolds: "mtDNA,Y"
+      split_by_type: true
+      keep_basic_filter: false
 ```

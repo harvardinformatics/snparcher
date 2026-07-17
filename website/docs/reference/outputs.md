@@ -15,6 +15,12 @@ These files are always produced by the default `all` target.
 | `results/vcfs/filtered.vcf.gz.tbi` | Tabix index | Index for the filtered VCF. |
 | `results/qc_metrics/qc_report.tsv` | TSV | Per-sample QC metrics table aggregated from fastp, BAM stats, and coverage summaries. |
 
+!!! note "Index type depends on `long_contig_mode`"
+    VCF and gVCF indexes are Tabix (`.tbi`) by default. When
+    `variant_calling.long_contig_mode` is active — for references with contigs
+    longer than the Tabix coordinate limit — CSI indexes (`.csi`) are produced
+    instead. BAM files are always CSI-indexed (`.bam.csi`).
+
 ## Reference files
 
 | Path | Format | Description |
@@ -49,9 +55,11 @@ The tables below list retained per-sample outputs alongside key temporary files.
 | `results/bams/library_markdup/{sample}/{library}.bam` | BAM | yes | Per-library BAM after duplicate marking (when `mark_duplicates` is true). |
 | `results/bams/library/{sample}/{library}.bam` | BAM | yes | Per-library merged BAM (units merged, duplicates optionally marked). |
 | `results/bams/markdup/{sample}.bam` | BAM | | Final merged, deduplicated BAM for the sample (multi-library merge). |
-| `results/bams/markdup/{sample}.bam.bai` | BAI index | | Index for the final BAM. |
+| `results/bams/markdup/{sample}.bam.csi` | CSI index | | Index for the final BAM. |
 | `results/bams/merged/{sample}.bam` | BAM | | Final merged BAM when duplicate marking is disabled. |
-| `results/bams/merged/{sample}.bam.bai` | BAI index | | Index for the merged BAM. |
+| `results/bams/merged/{sample}.bam.csi` | CSI index | | Index for the merged BAM. |
+| `results/bams/input/{sample}.bam` | BAM | | Staged external BAM for samples with `input_type: bam` (symlinked to the sample-sheet path). |
+| `results/bams/input/{sample}.bam.csi` | CSI index | | Index for the external BAM. |
 
 ### BAM QC metrics
 

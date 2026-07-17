@@ -29,6 +29,13 @@ Create a dedicated conda environment with Snakemake:
 conda create -c conda-forge -c bioconda -n snparcher "snakemake>=9"
 ```
 
+!!! note "Recommended Snakemake version"
+    Snakemake **9.12** is currently recommended — later 9.x releases have a
+    resource-parsing regression that can affect snpArcher runs. To pin it:
+    ```bash
+    conda create -c conda-forge -c bioconda -n snparcher "snakemake=9.12"
+    ```
+
 Activate the environment:
 
 ```bash
