@@ -261,6 +261,7 @@ rule concat_interval_vcfs:
         """
         mv {input.vcf} {output.vcf} 2> {log}
         mv {input.tbi} {output.tbi} 2>> {log}
+        touch {output.vcf} {output.tbi}
         """
 
 
