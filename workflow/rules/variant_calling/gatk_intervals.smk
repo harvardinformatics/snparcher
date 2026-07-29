@@ -360,6 +360,7 @@ rule concat_interval_gvcfs:
         """
         mv {input.gvcf} {output.gvcf} 2> {log}
         mv {input.tbi} {output.idx} 2>> {log}
+        touch {output.gvcf} {output.idx}
         """
 
 if LONG_CONTIG_MODE:
@@ -548,6 +549,7 @@ rule concat_interval_vcfs:
         """
         mv {input.vcf} {output.vcf} 2> {log}
         mv {input.tbi} {output.idx} 2>> {log}
+        touch {output.vcf} {output.idx}
         """
 
 
