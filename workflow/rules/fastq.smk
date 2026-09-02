@@ -89,15 +89,31 @@ rule download_sra:
         "logs/download_sra/{sample}/{library}/{input_unit}/{accession}.txt"
     shell:
         """
-        rm -rf {wildcards.accession}
         mkdir -p {params.outdir}
-        
-        if prefetch --max-size 1T {wildcards.accession} 2>> {log}; then
+
+        # Everything this rule downloads or spills lives in one job-private
+        # directory, removed on exit however the job ends. prefetch previously
+        # wrote into the working directory, so every concurrent download_sra
+        # job created a sibling accession directory in the workflow root, and
+        # the rule's own `rm -rf <accession>` could delete another job's
+        # in-flight download whenever two sample rows shared an accession.
+        WORK=$(mktemp -d "{resources.tmpdir}/sra_{wildcards.accession}_XXXXXX")
+        trap 'rm -rf "$WORK"' EXIT
+
+        if prefetch --max-size 1T -O "$WORK" {wildcards.accession} 2>> {log}; then
+            # prefetch lays this out as <outdir>/<accession>/<accession>.sra,
+            # with any reference object the run needs alongside it. Passing the
+            # file path (rather than the bare accession) keeps resolution
+            # independent of the working directory; sibling references still
+            # resolve, and both extractors name their output from the basename.
+            SRA="$WORK/{wildcards.accession}/{wildcards.accession}.sra"
+            [ -f "$SRA" ] || SRA="$WORK/{wildcards.accession}/{wildcards.accession}.sralite"
+
             # Table row counts describing the run's shape. For aligned (cSRA)
             # submissions: SEQ = spots, PRIM = aligned reads, REF = reference
             # chunks. Logged on every download so the thresholds below can be
             # recalibrated from real data rather than re-derived by hand.
-            SRA_INFO=$(vdb-dump --info {wildcards.accession} 2>/dev/null)
+            SRA_INFO=$(vdb-dump --info "$SRA" 2>/dev/null)
             echo "$SRA_INFO" | grep -E '^(SEQ|REF|PRIM|SEC) ' >> {log} || true
 
             PRIM=$(echo "$SRA_INFO" \
@@ -119,14 +135,12 @@ rule download_sra:
                      "skipping fasterq-dump, extracting with fastq-dump." >> {log}
             fi
 
-            # Private temp dir so a timed-out attempt can be cleaned up whole.
-            FASTERQ_TMP=$(mktemp -d "{resources.tmpdir}/fasterq_{wildcards.accession}_XXXXXX")
-
             if [ "$USE_FASTQ_DUMP" -eq 0 ]; then
-                if timeout {params.fasterq_budget} fasterq-dump {wildcards.accession} \
+                mkdir -p "$WORK/fasterq"
+                if timeout {params.fasterq_budget} fasterq-dump "$SRA" \
                         -O {params.outdir} \
                         -e {threads} \
-                        -t "$FASTERQ_TMP" \
+                        -t "$WORK/fasterq" \
                         >> {log} 2>&1; then
                     :
                 else
@@ -143,16 +157,14 @@ rule download_sra:
             if [ "$USE_FASTQ_DUMP" -eq 1 ]; then
                 # --split-3 --skip-technical are required for parity with
                 # fasterq-dump's defaults; see the note at the top of this file.
-                fastq-dump {wildcards.accession} \
+                fastq-dump "$SRA" \
                     --split-3 \
                     --skip-technical \
                     -O {params.outdir} \
                     >> {log} 2>&1
             fi
 
-            rm -rf "$FASTERQ_TMP"
             pigz -p {threads} {params.outdir}/{wildcards.accession}*.fastq
-            rm -rf {wildcards.accession}
         else
             echo "Prefetch failed, trying ENA via ffq..." >> {log}
             ffq --ftp {wildcards.accession} 2>> {log} \
