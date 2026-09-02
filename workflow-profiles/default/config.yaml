@@ -47,6 +47,15 @@ set-threads:
 # mem_mb controls the scheduler request. mem_mb_reduced controls tool memory
 # budgets below the scheduler limit and should be an integer number of MB.
 set-resources:
+  # Fastq Processing
+  # runtime must cover reads.sra.fasterq_budget_minutes plus the fastq-dump
+  # fallback that follows it; the default 360 min budget plus a large aligned
+  # run's extraction fits inside 2880. Observed peak RSS for both extractors is
+  # ~14 GB, and neither uses more when given more.
+  download_sra:
+    mem_mb: attempt * 24000
+    runtime: 2880
+
   # Alignment
   bwa_mem:
     mem_mb: attempt * 16000

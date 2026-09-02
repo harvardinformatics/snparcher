@@ -5,6 +5,25 @@ samples: "config/samples.csv"
 # Optional: per-sample metadata for modules (exclude, outgroup, lat, long, etc.)
 # sample_metadata: "config/sample_metadata.csv"
 
+reads:
+  mark_duplicates: true
+  sra:
+    # fasterq-dump is the default extractor. For reference-aligned (cSRA)
+    # submissions it builds a spot-id lookup over every alignment, which does
+    # not scale: a run with 1.1e9 alignments against an 8.9 Gbp reference
+    # projects to ~577 h, versus ~3.3 h for fastq-dump. The two produce
+    # byte-identical FASTQ, so snpArcher falls back to fastq-dump when needed.
+    #
+    # Budget for fasterq-dump before falling back. A backstop, not a target:
+    # a healthy 400M-spot aligned run finishes in well under an hour.
+    fasterq_budget_minutes: 360
+    # Skip fasterq-dump outright when BOTH thresholds are met. Both must hold,
+    # because alignment count and reference size are confounded in the only
+    # dataset where this has been measured. Set alignments to 0 to disable the
+    # shortcut and let the budget decide every time.
+    direct_fastq_dump_min_alignments: 300000000
+    direct_fastq_dump_min_reference_bp: 3000000000
+
 reference:
   name: "my_organism"
   source: "/data/reference/genome.fna.gz"  # Can be a refseq/genbank accession, url, or path

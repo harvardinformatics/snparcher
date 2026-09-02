@@ -3,6 +3,7 @@ channels:
   - bioconda
 dependencies:
   - sra-tools=3.2.1
+  - coreutils  # `timeout`, used to budget fasterq-dump before falling back
   - pigz>=2.6
   - curl>=7.73
   - ffq >=0.3.1

@@ -56,6 +56,11 @@ DEFAULTS = {
     "sample_metadata": "",
     "reads": {
         "mark_duplicates": True,
+        "sra": {
+            "fasterq_budget_minutes": 360,
+            "direct_fastq_dump_min_alignments": 300_000_000,
+            "direct_fastq_dump_min_reference_bp": 3_000_000_000,
+        },
     },
     "variant_calling": {
         "expected_coverage": "low",

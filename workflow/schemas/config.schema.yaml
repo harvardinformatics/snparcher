@@ -24,6 +24,42 @@ properties:
       mark_duplicates:
         type: boolean
         default: true
+      sra:
+        type: object
+        additionalProperties: false
+        default: {}
+        description: >
+          Controls how SRA accessions are converted to FASTQ. fasterq-dump is
+          the default extractor; fastq-dump is a byte-identical fallback used
+          only when fasterq-dump's alignment lookup does not scale. See the
+          commentary in workflow/rules/fastq.smk.
+        properties:
+          fasterq_budget_minutes:
+            type: integer
+            minimum: 1
+            default: 360
+            description: >
+              Wall-clock budget for fasterq-dump. If it has not finished within
+              this many minutes, its partial output is discarded and fastq-dump
+              extracts the accession instead. Set generously: this is a
+              backstop, not a target.
+          direct_fastq_dump_min_alignments:
+            type: integer
+            minimum: 0
+            default: 300000000
+            description: >
+              Skip fasterq-dump entirely (go straight to fastq-dump) when the
+              run has at least this many primary alignments AND a reference at
+              least direct_fastq_dump_min_reference_bp long. Both conditions
+              must hold. Set to 0 to disable the shortcut and always let the
+              budget decide.
+          direct_fastq_dump_min_reference_bp:
+            type: integer
+            minimum: 0
+            default: 3000000000
+            description: >
+              Reference-length half of the shortcut condition above, in base
+              pairs. Estimated from the SRA REFERENCE table row count.
 
   reference:
     type: object
