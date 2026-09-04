@@ -49,17 +49,32 @@ rule download_sra:
         "logs/download_sra/{sample}/{library}/{input_unit}/{accession}.txt"
     shell:
         """
-        rm -rf {wildcards.accession}
         mkdir -p {params.outdir}
-        
-        if prefetch --max-size 1T {wildcards.accession} 2>> {log}; then
-            fasterq-dump {wildcards.accession} \
+
+        # Everything this rule downloads or spills lives in one job-private
+        # directory, removed on exit however the job ends. prefetch previously
+        # wrote into the working directory, so every concurrent download_sra
+        # job created a sibling accession directory in the workflow root, and
+        # the rule's own `rm -rf <accession>` could delete another job's
+        # in-flight download whenever two sample rows shared an accession.
+        WORK=$(mktemp -d "{resources.tmpdir}/sra_{wildcards.accession}_XXXXXX")
+        trap 'rm -rf "$WORK"' EXIT
+
+        if prefetch --max-size 1T -O "$WORK" {wildcards.accession} 2>> {log}; then
+            # prefetch lays this out as <outdir>/<accession>/<accession>.sra,
+            # with any reference object the run needs alongside it. fasterq-dump
+            # accepts the file path, which keeps it independent of the working
+            # directory, and names its output from the basename.
+            SRA="$WORK/{wildcards.accession}/{wildcards.accession}.sra"
+            [ -f "$SRA" ] || SRA="$WORK/{wildcards.accession}/{wildcards.accession}.sralite"
+
+            mkdir -p "$WORK/fasterq"
+            fasterq-dump "$SRA" \
                 -O {params.outdir} \
                 -e {threads} \
-                -t {resources.tmpdir} \
+                -t "$WORK/fasterq" \
                 >> {log} 2>&1
             pigz -p {threads} {params.outdir}/{wildcards.accession}*.fastq
-            rm -rf {wildcards.accession}
         else
             echo "Prefetch failed, trying ENA via ffq..." >> {log}
             ffq --ftp {wildcards.accession} 2>> {log} \
