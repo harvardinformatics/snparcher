@@ -67,6 +67,8 @@ rule download_sra:
 
         SEQ=0
         ALIGNED=0
+        EXPECTED=""
+        EXPECTED_SOURCE=""
 
         if prefetch --max-size 1T -O "$WORK" {wildcards.accession} 2>> {log}; then
             # prefetch lays this out as <outdir>/<accession>/<accession>.sra,
@@ -126,6 +128,13 @@ rule download_sra:
                         -0 "$WORK/unpaired.fastq.gz" \
                         -s "$WORK/singleton.fastq.gz" \
                         - 2>> {log}
+
+                # sam-dump emits every stored read and -F 0x900 removes only
+                # the secondary/supplementary copies, so the archive's own spot
+                # count is the expectation. cSRA submissions are paired
+                # alignments, two reads per spot.
+                EXPECTED=$(( SEQ * 2 ))
+                EXPECTED_SOURCE="2 x SEQ"
             else
                 # No alignment table: there is no reference to walk, so
                 # fasterq-dump's multi-threaded read of the SEQUENCE table is
@@ -135,8 +144,17 @@ rule download_sra:
                     -O {params.outdir} \
                     -e {threads} \
                     -t "$WORK/fasterq" \
-                    >> {log} 2>&1
+                    > "$WORK/fasterq-dump.log" 2>&1
+                cat "$WORK/fasterq-dump.log" >> {log}
                 pigz -p {threads} {params.outdir}/{wildcards.accession}*.fastq
+
+                # 2 x SEQ is not the right expectation here: fasterq-dump drops
+                # technical and zero-length reads, and a spot need not hold two
+                # biological reads. SRR000001 stores four reads per spot and
+                # emits 707,026 of 1,883,940. Use the count the tool reports.
+                EXPECTED=$(awk -F: '/reads written/ {{gsub(/[^0-9]/, "", $2); print $2; exit}}' \
+                    "$WORK/fasterq-dump.log")
+                EXPECTED_SOURCE="fasterq-dump reads-written"
             fi
         else
             echo "Prefetch failed, trying ENA via ffq..." >> {log}
@@ -162,7 +180,17 @@ rule download_sra:
 
         N1=$(count_reads {output.r1})
         N2=$(count_reads {output.r2})
-        echo "emitted: r1=$N1 r2=$N2" >> {log}
+
+        # Reads that came out of the archive but are not part of the declared
+        # pair. fasterq-dump's split-3 behaviour emits an orphan file for spots
+        # carrying a single read, which pigz compresses alongside the pair;
+        # samtools fastq writes the equivalent to -0/-s. They are counted so
+        # that reads landing there are not mistaken for reads lost.
+        NORPHAN=$(count_reads {params.outdir}/{wildcards.accession}.fastq.gz)
+        NU=$(count_reads "$WORK/unpaired.fastq.gz")
+        NS=$(count_reads "$WORK/singleton.fastq.gz")
+
+        echo "emitted: r1=$N1 r2=$N2 orphan=$NORPHAN unpaired=$NU singleton=$NS" >> {log}
 
         if [ "$N1" -eq 0 ] || [ "$N2" -eq 0 ]; then
             echo "ERROR: {wildcards.accession}: empty FASTQ output (r1=$N1 r2=$N2)" >> {log}
@@ -174,29 +202,32 @@ rule download_sra:
             exit 1
         fi
 
-        if [ "$ALIGNED" -eq 1 ]; then
-            # Every read in the archive must come out exactly once. The
-            # unpaired and singleton files are counted here so that reads
-            # landing there are not mistaken for reads lost; whether any read
-            # landed there at all is asserted separately, because nothing
-            # downstream consumes those files.
-            NU=$(count_reads "$WORK/unpaired.fastq.gz")
-            NS=$(count_reads "$WORK/singleton.fastq.gz")
-            TOTAL=$(( N1 + N2 + NU + NS ))
-            EXPECTED=$(( SEQ * 2 ))
-            echo "completeness: emitted=$TOTAL expected=$EXPECTED unpaired=$NU singleton=$NS" >> {log}
+        # Every read the extractor produced must reach the output files. Both
+        # paths check this; they differ only in what the expected count is,
+        # because each extractor decides for itself which stored reads to emit.
+        TOTAL=$(( N1 + N2 + NORPHAN + NU + NS ))
+        echo "completeness: emitted=$TOTAL expected=${{EXPECTED:-unknown}} (${{EXPECTED_SOURCE:-none}})" >> {log}
 
-            if [ "$TOTAL" -ne "$EXPECTED" ]; then
-                echo "ERROR: {wildcards.accession}: emitted $TOTAL reads, archive holds" \
-                     "$SEQ spots (expected $EXPECTED). Reads were lost or duplicated." >> {log}
-                exit 1
-            fi
+        if [ -z "$EXPECTED" ]; then
+            echo "ERROR: {wildcards.accession}: could not determine the expected read" \
+                 "count, so completeness cannot be checked. The extractor probably" \
+                 "did not run to completion; see the log above." >> {log}
+            exit 1
+        fi
 
-            if [ "$NU" -ne 0 ] || [ "$NS" -ne 0 ]; then
-                echo "ERROR: {wildcards.accession}: $NU unpaired and $NS singleton reads" \
-                     "were extracted but nothing downstream consumes them." >> {log}
-                exit 1
-            fi
+        if [ "$TOTAL" -ne "$EXPECTED" ]; then
+            echo "ERROR: {wildcards.accession}: emitted $TOTAL reads, expected" \
+                 "$EXPECTED ($EXPECTED_SOURCE). Reads were lost or duplicated." >> {log}
+            exit 1
+        fi
+
+        # Reads the pipeline extracted but no downstream rule consumes. On the
+        # aligned path these should never appear: a cSRA run's mates are both
+        # present, so anything here means collate failed to pair them.
+        if [ "$NU" -ne 0 ] || [ "$NS" -ne 0 ]; then
+            echo "ERROR: {wildcards.accession}: $NU unpaired and $NS singleton reads" \
+                 "were extracted but nothing downstream consumes them." >> {log}
+            exit 1
         fi
         """
 

@@ -1,3 +1,4 @@
+import re
 import tempfile
 from pathlib import Path
 
@@ -403,3 +404,49 @@ def test_coverage_bed(request):
             assert len(fields) == 3, f"BED line should have 3 fields: {line}"
             assert fields[0] == "chr2l", f"Expected contig chr2l: {line}"
             assert int(fields[1]) < int(fields[2]), f"Start should be < end: {line}"
+
+
+@pytest.mark.unit
+def test_download_sra_completeness(request):
+    """download_sra emits every read the archive holds.
+
+    Exercises the completeness assertion in the rule: the extractor's output is
+    counted and compared against the archive's own spot count, rather than the
+    rule merely checking that the files exist. A truncated extractor, or a pigz
+    that compresses nothing and exits 0, fails here.
+
+    Requires network access: prefetch pulls SRR000001 (~312 MB) from NCBI.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    samples = Path(__file__).parent / "sample_sheets" / "local_fastqs_and_srr_same_library.csv"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures("config", "data")
+
+        r1 = "results/fastqs/sample_mixed_reads/libA/u2/SRR000001_1.fastq.gz"
+        r2 = "results/fastqs/sample_mixed_reads/libA/u2/SRR000001_2.fastq.gz"
+
+        result = smk.run(target=[r1, r2], samples=samples)
+        result.print_log()
+        result.assert_success()
+        result.assert_output_exists(r1, r2)
+
+        # The rule logs what it counted; assert it actually ran the check
+        # rather than passing because the block was skipped.
+        log = (
+            Path(tmpdir)
+            / "logs"
+            / "download_sra"
+            / "sample_mixed_reads"
+            / "libA"
+            / "u2"
+            / "SRR000001.txt"
+        ).read_text()
+        assert "completeness:" in log, f"completeness check did not run:\n{log}"
+
+        emitted, expected = re.search(
+            r"completeness: emitted=(\d+) expected=(\d+)", log
+        ).groups()
+        assert emitted == expected, f"emitted {emitted} != expected {expected}"
