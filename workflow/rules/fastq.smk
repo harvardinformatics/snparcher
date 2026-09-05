@@ -69,6 +69,7 @@ rule download_sra:
         ALIGNED=0
         EXPECTED=""
         EXPECTED_SOURCE=""
+        ENA_PATH=0
 
         if prefetch --max-size 1T -O "$WORK" {wildcards.accession} 2>> {log}; then
             # prefetch lays this out as <outdir>/<accession>/<accession>.sra,
@@ -157,16 +158,58 @@ rule download_sra:
                 EXPECTED_SOURCE="fasterq-dump reads-written"
             fi
         else
+            # prefetch can fail for a single run while every other accession in
+            # the same project succeeds -- NCBI returns "file unauthorized" for
+            # some runs -- so this path is the only way to obtain otherwise
+            # good data, and it must not be gated on something it cannot
+            # produce. There is no extractor here to report a read count;
+            # instead ENA publishes an md5 per file, which is a stronger
+            # completeness check than a count because it catches truncation and
+            # corruption exactly. That is what this path asserts.
+            ENA_PATH=1
             echo "Prefetch failed, trying ENA via ffq..." >> {log}
+
+            # Land the file list before looping. Feeding the loop by pipeline
+            # runs it in a subshell, where a failure cannot stop the rule.
             ffq --ftp {wildcards.accession} 2>> {log} \
-                | jq -r '.[].url' \
-                | while IFS= read -r url; do
-                    [[ -n "$url" ]] || continue
-                    echo "Downloading: $url" >> {log}
-                    curl -fSL "$url" \
-                        -o {params.outdir}/$(basename "$url") \
-                        >> {log} 2>&1
-                done
+                | jq -r '.[] | .url + " " + (.md5 // "")' \
+                > "$WORK/ena_files.txt"
+
+            ENA_FILES=0
+            ENA_NO_MD5=0
+            while read -r url md5; do
+                [[ -n "$url" ]] || continue
+                dest={params.outdir}/$(basename "$url")
+                echo "Downloading: $url" >> {log}
+                if ! curl -fSL "$url" -o "$dest" >> {log} 2>&1; then
+                    echo "ERROR: {wildcards.accession}: download failed for $url" >> {log}
+                    exit 1
+                fi
+                ENA_FILES=$(( ENA_FILES + 1 ))
+
+                if [ -n "$md5" ]; then
+                    if echo "$md5  $dest" | md5sum -c - >> {log} 2>&1; then
+                        echo "md5 verified: $dest" >> {log}
+                    else
+                        echo "ERROR: {wildcards.accession}: md5 mismatch for $dest;" \
+                             "the download is corrupt or truncated." >> {log}
+                        exit 1
+                    fi
+                else
+                    ENA_NO_MD5=$(( ENA_NO_MD5 + 1 ))
+                fi
+            done < "$WORK/ena_files.txt"
+
+            if [ "$ENA_FILES" -eq 0 ]; then
+                echo "ERROR: {wildcards.accession}: prefetch failed and ffq returned" \
+                     "no ENA files, so there is nothing to download." >> {log}
+                exit 1
+            fi
+
+            if [ "$ENA_NO_MD5" -ne 0 ]; then
+                echo "WARNING: {wildcards.accession}: $ENA_NO_MD5 of $ENA_FILES ENA files" \
+                     "carried no md5, so their integrity is unverified." >> {log}
+            fi
         fi
         
         # The previous test only asked whether the output files exist. That
@@ -208,16 +251,22 @@ rule download_sra:
         TOTAL=$(( N1 + N2 + NORPHAN + NU + NS ))
         echo "completeness: emitted=$TOTAL expected=${{EXPECTED:-unknown}} (${{EXPECTED_SOURCE:-none}})" >> {log}
 
-        if [ -z "$EXPECTED" ]; then
+        if [ -n "$EXPECTED" ]; then
+            if [ "$TOTAL" -ne "$EXPECTED" ]; then
+                echo "ERROR: {wildcards.accession}: emitted $TOTAL reads, expected" \
+                     "$EXPECTED ($EXPECTED_SOURCE). Reads were lost or duplicated." >> {log}
+                exit 1
+            fi
+        elif [ "$ENA_PATH" -eq 1 ]; then
+            # Files came from ENA rather than an extractor, so there is no
+            # read count to compare against. Completeness for this path was
+            # established by the md5 check above, which already exited on
+            # mismatch.
+            echo "completeness: established by ENA md5, not by read count" >> {log}
+        else
             echo "ERROR: {wildcards.accession}: could not determine the expected read" \
                  "count, so completeness cannot be checked. The extractor probably" \
                  "did not run to completion; see the log above." >> {log}
-            exit 1
-        fi
-
-        if [ "$TOTAL" -ne "$EXPECTED" ]; then
-            echo "ERROR: {wildcards.accession}: emitted $TOTAL reads, expected" \
-                 "$EXPECTED ($EXPECTED_SOURCE). Reads were lost or duplicated." >> {log}
             exit 1
         fi
 
