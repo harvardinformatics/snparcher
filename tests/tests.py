@@ -1034,8 +1034,11 @@ def test_mixed_srr_and_fastq_same_sample_dry_run(request):
         output = result.stdout + result.stderr
         assert "unsupported mixed input_type values" not in output
         assert "download_sra" in output
-        assert "while IFS= read -r url; do" in output
+        assert "while read -r url md5; do" in output
         assert 'curl -fSL "$url"' in output
+        # The ENA path has no extractor read count, so its completeness
+        # evidence is the md5 ENA publishes per file.
+        assert "md5sum -c -" in output
         assert "merge_library_bams" in output
         assert "library=libA" in output
         assert "input_unit=u1" in output

@@ -3,7 +3,13 @@ channels:
   - bioconda
 dependencies:
   - sra-tools=3.2.1
+  # collate + fastq for the sam-dump path on aligned runs. The pipeline is one
+  # shell block, so sra-tools and samtools must share a prefix. This matches the
+  # floor in envs/samtools.yaml but does not lock the two together; pin both to
+  # an exact version if the download and mapping paths must agree.
+  - samtools>=1.23
   - pigz>=2.6
   - curl>=7.73
   - ffq >=0.3.1
   - jq
+  - coreutils  # md5sum, verifying ENA downloads on the fallback path

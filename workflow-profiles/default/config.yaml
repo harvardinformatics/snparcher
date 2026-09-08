@@ -47,6 +47,16 @@ set-threads:
 # mem_mb controls the scheduler request. mem_mb_reduced controls tool memory
 # budgets below the scheduler limit and should be an integer number of MB.
 set-resources:
+  # Fastq Processing
+  # Aligned (cSRA) runs take the sam-dump path, whose cost tracks record count:
+  # ~6 h for a typical accession and ~13 h for the largest measured (1.92e9
+  # records). Peak RSS is ~6.5 GB. samtools collate spills to tmpdir at roughly
+  # 81 bytes/record, so budget ~80 GB there for a typical run and ~160 GB for a
+  # large one, per concurrent job.
+  download_sra:
+    mem_mb: attempt * 12000
+    runtime: 1440
+
   # Alignment
   bwa_mem:
     mem_mb: attempt * 16000
