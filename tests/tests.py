@@ -1791,7 +1791,9 @@ def test_deepvariant_long_contig_dry_run_glnexus_consumes_csi_gvcfs(request):
 
 
 @pytest.mark.dry_run
-def test_long_contig_hard_filters_use_csi_and_disable_gatk_indexing(request):
+def test_long_contig_hard_filters_run_on_uncompressed_work_vcf(request):
+    """GATK cannot read a CSI-indexed bgzipped VCF, so hard filtering in
+    long-contig mode must consume the uncompressed work VCF and compress after."""
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
@@ -1817,10 +1819,90 @@ def test_long_contig_hard_filters_use_csi_and_disable_gatk_indexing(request):
 
         output = result.stdout + result.stderr
         assert scheduled_rule_present(output, "variant_filtration")
-        assert "results/vcfs/raw.vcf.gz.csi" in output
+        assert scheduled_rule_present(output, "compress_filtered_vcf")
+        # GATK reads the plain work VCF + Tribble .idx, never the CSI-indexed one.
+        assert "-V results/vcfs/work/raw.vcf " in output
+        assert "-V results/vcfs/raw.vcf.gz" not in output
+        assert "results/vcfs/work/filtered.vcf.idx" in output
+        # GATK writes the .idx for plain-VCF output, so indexing is not disabled.
+        assert "--create-output-variant-index false" not in output
+        # The published call set is still bgzipped and CSI-indexed.
         assert "results/vcfs/filtered.vcf.gz.csi" in output
-        assert "--create-output-variant-index false" in output
         assert "bcftools index -f -c results/vcfs/filtered.vcf.gz" in output
+
+
+@pytest.mark.dry_run
+def test_short_contig_hard_filters_filter_compressed_vcf(request):
+    """Without long-contig mode, filtering keeps reading the bgzipped raw VCF."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals",
+            "results/bams/markdup",
+        )
+        cfg = write_long_contig_config(
+            FIXTURES_DIR / "config" / "config.yaml",
+            tmpdir,
+            "gatk",
+            mode="false",
+        )
+
+        result = smk.dry_run(
+            target="results/vcfs/filtered.vcf.gz.tbi",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert scheduled_rule_present(output, "variant_filtration")
+        assert not scheduled_rule_present(output, "compress_filtered_vcf")
+        assert "-V results/vcfs/raw.vcf.gz" in output
+        assert "--create-output-variant-index false" in output
+        assert "bcftools index -f -t results/vcfs/filtered.vcf.gz" in output
+
+
+@pytest.mark.dry_run
+def test_generate_filtered_vcf_false_skips_hard_filtering(request):
+    """generate_filtered_vcf: false must skip filtering outright, so downstream
+    consumers fall back to the raw VCF instead of depending on a VCF that is
+    never produced."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_long_contig_config(get_qc_config(), tmpdir, "gatk")
+        text = Path(cfg).read_text()
+        text = re.sub(
+            r"(^variant_calling:\n)",
+            r"\1  generate_filtered_vcf: false\n",
+            text,
+            count=1,
+            flags=re.M,
+        )
+        assert "generate_filtered_vcf: false" in text
+        cfg = Path(tmpdir) / "config_no_filtered_vcf.yaml"
+        cfg.write_text(text)
+
+        result = smk.dry_run(
+            target="results/qc/qc_dashboard.html",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert not scheduled_rule_present(output, "variant_filtration")
+        assert not scheduled_rule_present(output, "compress_filtered_vcf")
+        assert "results/vcfs/filtered.vcf.gz" not in output
+        # QC reads the raw call set instead.
+        assert re.search(
+            r"rule qc_vcftools_individuals:\n    input: results/vcfs/raw\.vcf\.gz\n",
+            output,
+        )
 
 
 @pytest.mark.dry_run
@@ -2075,6 +2157,75 @@ def test_multistage_interval_concat(request):
 
 
 @pytest.mark.full_run
+def test_long_contig_hard_filters_full_run(request):
+    """Execute hard filtering with long_contig_mode forced on the small test
+    genome. Long-contig mode is a pure code-path switch, so forcing it here
+    exercises the uncompressed-work-VCF filtering path without a >512 Mb
+    reference. A dry run cannot catch this: GATK only rejects the CSI-indexed
+    input at runtime."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        configfile = write_long_contig_config(get_config_file(), tmpdir, "gatk")
+        samples = get_samples_file()
+
+        result = smk.run(target="setup", configfile=configfile, samples=samples)
+        result.assert_success()
+
+        targets = [
+            "results/vcfs/filtered.vcf.gz",
+            "results/vcfs/filtered.vcf.gz.csi",
+        ]
+        result = smk.run(target=targets, configfile=configfile, samples=samples)
+        result.assert_success()
+        result.assert_output_exists(*targets)
+
+        # No TBI is produced (tabix cannot index long contigs at all).
+        assert not (Path(tmpdir) / "results/vcfs/filtered.vcf.gz.tbi").exists()
+
+        log = (Path(tmpdir) / "logs/variant_filtration.txt").read_text()
+        assert "An index is required but was not found" not in log
+        assert "results/vcfs/work/raw.vcf" in log
+
+        # The published VCF carries the GATK hard-filter FILTER labels.
+        with gzip.open(Path(tmpdir) / "results/vcfs/filtered.vcf.gz", "rt") as handle:
+            header = [line for line in handle if line.startswith("##FILTER=")]
+        declared = {
+            match.group(1)
+            for line in header
+            for match in [re.match(r"##FILTER=<ID=([^,]+)", line)]
+            if match
+        }
+        assert {"RPRS_filter", "FS_SOR_filter", "MQ_filter", "QUAL_filter"} <= declared
+
+
+@pytest.mark.full_run
+def test_long_contig_qc_consumes_filtered_vcf_full_run(request):
+    """The QC path was blocked in long-contig mode because its input VCF could
+    never be built. Run QC's VCF-processing rules through to the pruned SNP set
+    with long_contig_mode forced on. Stops short of plink/admixture/R so the
+    test runs on every platform."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        configfile = write_long_contig_config(get_qc_config(), tmpdir, "gatk")
+        samples = get_samples_file()
+
+        result = smk.run(target="setup", configfile=configfile, samples=samples)
+        result.assert_success()
+
+        targets = [
+            "results/qc/pruned.vcf.gz",
+            "results/qc/snpqc.txt",
+            "results/qc/individuals.idepth",
+        ]
+        result = smk.run(target=targets, configfile=configfile, samples=samples)
+        result.assert_success()
+        result.assert_output_exists(*targets)
+        result.assert_output_exists("results/vcfs/filtered.vcf.gz.csi")
+
+
+@pytest.mark.full_run
 def test_long_contig_multistage_interval_gather(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -2295,8 +2446,9 @@ def test_generate_filtered_vcf_auto_disabled_for_non_gatk(request):
 
 
 @pytest.mark.dry_run
-def test_generate_filtered_vcf_false_is_raw_only_default(request):
-    """generate_filtered_vcf: false -> raw-only default; call_variants still builds filtered."""
+def test_generate_filtered_vcf_false_disables_filtering_everywhere(request):
+    """generate_filtered_vcf: false -> no hard filtering at all, and the raw VCF
+    becomes the final call set that call_variants and the modules consume."""
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
@@ -2315,12 +2467,16 @@ def test_generate_filtered_vcf_false_is_raw_only_default(request):
         all_output = all_result.stdout + all_result.stderr
         assert "variant_filtration" not in all_output
 
-        # But the filtered VCF is still reachable on demand via call_variants.
+        # call_variants resolves to the raw VCF rather than building a filtered
+        # VCF the user asked not to generate.
         cv_result = smk.dry_run(
             target="call_variants", configfile=cfg, samples=get_samples_file()
         )
         cv_result.assert_success()
-        assert "variant_filtration" in (cv_result.stdout + cv_result.stderr)
+        cv_output = cv_result.stdout + cv_result.stderr
+        assert "variant_filtration" not in cv_output
+        assert "results/vcfs/filtered.vcf.gz" not in cv_output
+        assert "results/vcfs/raw.vcf.gz" in cv_output
 
 
 @pytest.mark.dry_run
@@ -2600,6 +2756,8 @@ def test_qc_dry_run(request):
         assert "qc_copy_qc_report" in output, \
             "Expected qc_copy_qc_report rule in DAG"
         assert "bcftools query --allow-undef-tags" in output
+        # QC indexes are explicitly CSI, not reliant on the bcftools default.
+        assert "bcftools index -f -c results/qc/filtered.vcf.gz" in output
 
 
 @pytest.mark.dry_run
@@ -2641,6 +2799,17 @@ def test_qc_disabled_no_rules(request):
             "QC rules should not appear when module is disabled"
         assert "qc_plink" not in output, \
             "QC rules should not appear when module is disabled"
+
+
+def test_qc_indexes_are_explicitly_csi():
+    """QC writes CSI indexes explicitly so the module stays long-contig safe
+    without depending on the bcftools default index format."""
+    source = workflow_source("modules", "qc", "Snakefile")
+    assert source.count("bcftools index -f -c") == 2
+    assert not re.search(r"bcftools index (?!-f -c)", source)
+    # Declared index outputs match what the commands write.
+    assert source.count(".vcf.gz.csi") == 3
+    assert ".vcf.gz.tbi" not in source
 
 
 @pytest.mark.dry_run

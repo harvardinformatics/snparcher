@@ -82,7 +82,8 @@ if config["modules"]["qc"]["enabled"]:
         "samples": config["samples"],
         "sample_metadata": config.get("sample_metadata", ""),
         "vcf": FINAL_VCF,
-        "long_contig_mode": LONG_CONTIG_MODE,
+        # No long_contig_mode: the QC module always writes CSI indexes, which
+        # are valid for contigs of any length.
         "fai": REF_FILES["ref_fai"],
         "qc_report": "results/qc_metrics/qc_report.tsv",
         "clusters": config["modules"]["qc"]["clusters"],

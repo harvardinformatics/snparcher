@@ -70,8 +70,9 @@ properties:
           hard-filter FILTER column) as a default output, reproducing the v1
           raw + filtered output set. Only applies to GATK-family callers
           (gatk/sentieon/parabricks); it is ignored with a warning for
-          bcftools/deepvariant. When false the filtered VCF is still built on demand
-          by the postprocess/qc modules or the `call_variants` target.
+          bcftools/deepvariant. When false, hard filtering is skipped entirely
+          and the raw VCF becomes the final call set consumed by the
+          postprocess/qc modules and the `call_variants` target.
       ploidy:
         type: integer
         minimum: 1
