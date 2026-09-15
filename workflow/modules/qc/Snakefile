@@ -10,6 +10,10 @@ Can run standalone:
 Or imported by the main workflow via Snakemake's `module` directive
 (config is passed in, overriding the configfile below).
 
+All QC-local VCF indexes are CSI, which is valid for contigs of any length,
+so this module is long-contig safe regardless of the main workflow's
+variant_calling.long_contig_mode setting.
+
 Config keys (flat):
     samples           - path to samples CSV (required)
     sample_metadata   - path to metadata CSV (optional, for lat/long coords)
@@ -344,7 +348,7 @@ rule subsample_snps:
                 -e 'AF==1 | AF==0 | AF<0.01 | ALT="*" | F_MISSING > 0.75 | TYPE~"indel" | ref="N"' \
                 {input.vcf} -O z -o {output.filtered} &> {log}
         fi
-        bcftools index {output.filtered} >> {log} 2>&1
+        bcftools index -f -c {output.filtered} >> {log} 2>&1
 
         # Figure out window size to get ~100k SNPs
         ALLSITES=$(bcftools query -f '%CHROM\\t%POS\\n' {output.filtered} | wc -l)
@@ -405,7 +409,7 @@ rule prepare_plink_inputs:
                 "bcftools annotate --rename-chrs {rename_path} {input.vcf} "
                 "-O z -o {output.vcf} &> {log}"
             )
-            shell("bcftools index {output.vcf} &>> {log}")
+            shell("bcftools index -f -c {output.vcf} &>> {log}")
         finally:
             os.unlink(rename_path)
 

@@ -607,6 +607,11 @@ RAW_VCF_WORK = "results/vcfs/work/raw.vcf"
 RAW_VCF_WORK_INDEX = get_vcf_index(RAW_VCF_WORK)
 FILTERED_VCF = "results/vcfs/filtered.vcf.gz"
 FILTERED_VCF_INDEX = get_compressed_vcf_index(FILTERED_VCF)
+# Uncompressed staging path for hard filtering under long_contig_mode. GATK
+# cannot read a bgzip-compressed VCF whose only index is CSI, so filtering runs
+# on the plain work VCF and the result is compressed/CSI-indexed afterwards.
+FILTERED_VCF_WORK = "results/vcfs/work/filtered.vcf"
+FILTERED_VCF_WORK_INDEX = get_vcf_index(FILTERED_VCF_WORK)
 
 
 # --- Hard-filtering / final call set ---
@@ -616,11 +621,7 @@ FILTERED_VCF_INDEX = get_compressed_vcf_index(FILTERED_VCF)
 # DeepVariant produce a different annotation set, so hard filtering is skipped
 # for them and their raw VCF is the final call set.
 GATK_LINEAGE_TOOLS = {"gatk", "sentieon", "parabricks"}
-APPLY_HARD_FILTERS = VARIANT_TOOL in GATK_LINEAGE_TOOLS
-
-# The VCF that downstream consumers (postprocess, qc, `call_variants`) treat as
-# the final call set: hard-filtered for GATK-lineage callers, raw otherwise.
-FINAL_VCF = FILTERED_VCF if APPLY_HARD_FILTERS else RAW_VCF
+GATK_LINEAGE_CALLER = VARIANT_TOOL in GATK_LINEAGE_TOOLS
 
 # Config-gated outputs.
 GENERATE_FILTERED_VCF = bool(config["variant_calling"]["generate_filtered_vcf"])
@@ -628,7 +629,7 @@ POSTPROCESS_SPLIT_BY_TYPE = bool(
     config["modules"]["postprocess"]["filtering"]["split_by_type"]
 )
 
-if GENERATE_FILTERED_VCF and not APPLY_HARD_FILTERS:
+if GENERATE_FILTERED_VCF and not GATK_LINEAGE_CALLER:
     logger.warning(
         f"variant_calling.generate_filtered_vcf is true but caller '{VARIANT_TOOL}' "
         "is not in the GATK family (gatk/sentieon/parabricks); GATK hard filters "
@@ -636,6 +637,16 @@ if GENERATE_FILTERED_VCF and not APPLY_HARD_FILTERS:
         "generate_filtered_vcf; the raw VCF is the final call set for this caller."
     )
     GENERATE_FILTERED_VCF = False
+
+# Hard filtering runs only when the caller emits GATK-style annotations *and*
+# the user asked for the filtered call set. Setting generate_filtered_vcf to
+# false therefore skips filtering outright rather than producing a filtered VCF
+# that downstream consumers still depend on.
+APPLY_HARD_FILTERS = GATK_LINEAGE_CALLER and GENERATE_FILTERED_VCF
+
+# The VCF that downstream consumers (postprocess, qc, `call_variants`) treat as
+# the final call set: hard-filtered when hard filtering runs, raw otherwise.
+FINAL_VCF = FILTERED_VCF if APPLY_HARD_FILTERS else RAW_VCF
 
 
 # --- Sample lists ---
