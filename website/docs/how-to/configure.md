@@ -37,6 +37,7 @@ variant_calling:
 | `gatk` | GATK HaplotypeCaller + GenomicsDB + GenotypeGVCFs | Default. Well-tested for population genomics. |
 | `sentieon` | Sentieon DNAseq (GATK-compatible, faster) | Requires a valid license (`variant_calling.sentieon.license`). |
 | `bcftools` | bcftools mpileup + call | No per-sample gVCF step. Cannot accept `gvcf` input. |
+| `repadapt` | RepAdapt's calling model (bcftools 1.16, per-sample `call -G -`, SNPs only) | Soft-filtered with RepAdapt's filter. Linux only. Ploidy 1 or 2. Cannot accept `gvcf` input. Ignores `variant_calling.bcftools`. |
 | `deepvariant` | Google DeepVariant + GLnexus | ML-based caller. Cannot accept `gvcf` input. |
 | `parabricks` | NVIDIA Parabricks | GPU-accelerated. Requires Apptainer image and NVIDIA GPUs. Cannot accept `gvcf` input. |
 

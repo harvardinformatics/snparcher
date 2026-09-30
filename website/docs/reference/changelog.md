@@ -58,6 +58,7 @@ v2.0 is a major rewrite of snpArcher with breaking changes to the sample sheet s
 - **Parabricks support:** GPU-accelerated variant calling via NVIDIA Parabricks.
 - **DeepVariant support:** Deep learning variant caller with GLnexus joint genotyping.
 - **bcftools pathway:** Region-parallelized bcftools mpileup/call as an alternative to GATK.
+- **RepAdapt calling model:** `variant_calling.tool: repadapt` runs RepAdapt's bcftools 1.16 calling (`call -G -`, SNPs only) on snpArcher's BAMs, with RepAdapt's filter as `AllHomAlt`/`LowMQ` soft filters in `filtered.vcf.gz`.
 
 ### Deprecated aliases
 

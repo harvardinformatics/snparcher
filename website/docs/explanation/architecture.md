@@ -198,6 +198,6 @@ The California Conservation Genomics Project, for example, used snpArcher to pro
 ## Further reading
 
 - [Parallelization](parallelization.md): How scatter-by-Ns works and why it matters for non-model genomes.
-- [Variant calling](variant-calling.md): The five supported callers and when to use each.
+- [Variant calling](variant-calling.md): The supported callers and when to use each.
 - [Non-model organisms](non-model.md): How snpArcher's design addresses the specific challenges of non-model species.
 - [Configuration how-to](../how-to/configure.md): Practical guide to setting up `config.yaml`.

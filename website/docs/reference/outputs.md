@@ -11,7 +11,7 @@ These files are always produced by the default `all` target.
 |------|--------|-------------|
 | `results/vcfs/raw.vcf.gz` | VCF (bgzipped) | Joint-genotyped, unfiltered VCF containing all samples and all sites called by the chosen variant caller. |
 | `results/vcfs/raw.vcf.gz.tbi` | Tabix index | Index for the raw VCF. |
-| `results/vcfs/filtered.vcf.gz` | VCF (bgzipped) | Hard-filtered VCF. GATK `VariantFiltration` tags are applied; sites are annotated but not removed. |
+| `results/vcfs/filtered.vcf.gz` | VCF (bgzipped) | Filtered VCF: GATK `VariantFiltration` tags for GATK-family callers, or RepAdapt's `AllHomAlt`/`LowMQ` tags for `tool: repadapt`. Sites are annotated but not removed. Not produced for `bcftools`/`deepvariant`, or when `generate_filtered_vcf` is false. |
 | `results/vcfs/filtered.vcf.gz.tbi` | Tabix index | Index for the filtered VCF. |
 | `results/qc_metrics/qc_report.tsv` | TSV | Per-sample QC metrics table aggregated from fastp, BAM stats, and coverage summaries. |
 

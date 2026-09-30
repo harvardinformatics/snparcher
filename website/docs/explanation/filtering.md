@@ -46,6 +46,17 @@ They remove the most egregious artifacts while retaining most real variants.
     Hard filtering tags sites in the FILTER column but does not remove them from the VCF.
     Downstream tools can choose whether to include or exclude filtered sites.
 
+With `tool: repadapt`, the core pipeline applies RepAdapt's filter instead, again as FILTER tags:
+
+| Filter | Condition | What it detects |
+|--------|-----------|-----------------|
+| `AllHomAlt` | `AC=AN` | Every called genotype carries the alternate allele (often a reference error or a fixed difference) |
+| `LowMQ` | `MQ < 30` | Reads that do not map uniquely |
+
+A site failing both gets `AllHomAlt;LowMQ`.
+The PASS records are exactly the sites RepAdapt keeps.
+bcftools and DeepVariant calls are not filtered in the core pipeline.
+
 ### 2. Postprocessing (postprocess module)
 
 The postprocess module applies additional filters after you have reviewed the QC dashboard and made decisions about sample inclusion.

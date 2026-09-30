@@ -39,9 +39,9 @@ An optional key is also accepted at the top level:
 | Key | Type | Default | Allowed values | Description |
 |-----|------|---------|----------------|-------------|
 | `variant_calling.expected_coverage` | string | `"low"` | `low`, `high` | Expected sequencing coverage regime. |
-| `variant_calling.tool` | string | `"gatk"` | `gatk`, `sentieon`, `bcftools`, `deepvariant`, `parabricks` | Variant caller to use. |
+| `variant_calling.tool` | string | `"gatk"` | `gatk`, `sentieon`, `bcftools`, `deepvariant`, `parabricks`, `repadapt` | Variant caller to use. `repadapt` requires `ploidy` 1 or 2. |
 | `variant_calling.ploidy` | integer | `2` | >= 1 | Ploidy of the organism. |
-| `variant_calling.generate_filtered_vcf` | boolean | `true` | `true`, `false` | Produce `results/vcfs/filtered.vcf.gz` (raw calls annotated with the GATK hard-filter FILTER column) as a default output. Applies only to GATK-family callers (`gatk`, `sentieon`, `parabricks`); ignored with a warning for `bcftools`/`deepvariant`. When `false`, hard filtering is skipped entirely and the raw VCF becomes the final call set consumed by the postprocess/qc modules and the `call_variants` target. |
+| `variant_calling.generate_filtered_vcf` | boolean | `true` | `true`, `false` | Produce `results/vcfs/filtered.vcf.gz` (raw calls annotated with a FILTER column) as a default output: GATK hard filters for GATK-family callers (`gatk`, `sentieon`, `parabricks`), or RepAdapt's `AllHomAlt` (`AC=AN`) and `LowMQ` (`MQ < 30`) soft filters for `repadapt`. Ignored with a warning for `bcftools`/`deepvariant`. When `false`, filtering is skipped entirely and the raw VCF becomes the final call set consumed by the postprocess/qc modules and the `call_variants` target. |
 | `variant_calling.long_contig_mode` | boolean or `"auto"` | `"auto"` | `true`, `false`, `"auto"` | Use CSI-capable (and, for DeepVariant, GLnexus-based) paths for references with contigs longer than the Tabix coordinate limit (~512 Mb). `"auto"` inspects the reference `.fai` when available while building the DAG. Enabling it switches VCF/gVCF indexes to `.csi`. Because GATK cannot read a CSI-indexed compressed VCF, GATK steps (including hard filtering) run on uncompressed work VCFs and the results are compressed and CSI-indexed afterwards. |
 
 !!! note "Deprecated alias: `variant_calling.gatk.ploidy`"
@@ -70,7 +70,7 @@ Applies when `variant_calling.tool` is `sentieon`.
 
 ### `variant_calling.bcftools`
 
-Applies when `variant_calling.tool` is `bcftools`.
+Applies when `variant_calling.tool` is `bcftools`. These settings have no effect with `tool: repadapt`, which uses RepAdapt's fixed mpileup settings.
 
 | Key | Type | Default | Constraints | Description |
 |-----|------|---------|-------------|-------------|

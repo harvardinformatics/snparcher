@@ -1,3 +1,5 @@
+import gzip
+import importlib.util
 import re
 import tempfile
 from pathlib import Path
@@ -450,3 +452,61 @@ def test_download_sra_completeness(request):
             r"completeness: emitted=(\d+) expected=(\d+)", log
         ).groups()
         assert emitted == expected, f"emitted {emitted} != expected {expected}"
+
+
+@pytest.mark.unit
+def test_repadapt_call_and_filter(request):
+    """RepAdapt calling model on the fixture BAMs: pinned bcftools 1.16, SNPs
+    only, AD/DP/GQ annotations, soft filters matching AC=AN / MQ<30, and the
+    raw VCF kept alongside the filtered one."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
+        # Link the BAMs one at a time: index_bam_csi writes next to them, and
+        # linking the directory would put the indexes into the fixtures.
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            *[f"results/bams/markdup/sample{i}.bam" for i in range(5)],
+        )
+        cfg = tmpdir / "config_repadapt.yaml"
+        cfg.write_text(
+            (FIXTURES_DIR / "config" / "config.yaml")
+            .read_text()
+            .replace('tool: "gatk"', 'tool: "repadapt"', 1)
+        )
+
+        result = smk.run(target="call_variants", configfile=cfg, samples=SAMPLES)
+        result.assert_success()
+        result.assert_output_exists(
+            "results/vcfs/raw.vcf.gz",
+            "results/vcfs/raw.vcf.gz.tbi",
+            "results/vcfs/filtered.vcf.gz",
+            "results/vcfs/filtered.vcf.gz.tbi",
+        )
+
+        spec = importlib.util.spec_from_file_location(
+            "repadapt_normalize_vcf", Path(__file__).parent / "repadapt" / "normalize_vcf.py"
+        )
+        normalizer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(normalizer)
+
+        records = {}
+        for name in ("raw", "filtered"):
+            with gzip.open(tmpdir / f"results/vcfs/{name}.vcf.gz", "rt") as handle:
+                lines = handle.read().splitlines()
+            header = [line for line in lines if line.startswith("##")]
+            assert "##bcftools_callVersion=1.16+htslib-1.16" in header, name
+            for tag in ("AD", "DP", "GQ"):
+                assert any(line.startswith(f"##FORMAT=<ID={tag},") for line in header), (name, tag)
+            records[name] = [line.split("\t") for line in lines if not line.startswith("#")]
+
+        assert records["raw"]
+        assert [f[:6] for f in records["filtered"]] == [f[:6] for f in records["raw"]]
+        for fields in records["filtered"]:
+            assert len(fields[3]) == 1 and all(len(a) == 1 for a in fields[4].split(","))
+            assert fields[6] == normalizer.expected_repadapt_filter(fields), fields[:8]
+

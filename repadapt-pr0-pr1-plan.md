@@ -285,7 +285,10 @@ git checkout tests/data/fixtures && git status   # no fixture changes committed
 ## Status
 
 - **Step 0:** done.
-- **PR 0:** implemented on `feat/repadapt-fixture`; PR open against `feat/repadapt`.
+- **PR 0:** merged (#347).
+- **PR 1:** implemented on `feat/repadapt-calling`.
+  - Verified on Linux (`agents-plan.md` 7.1 and 7.7): the pin file installs, Snakemake logs `Using pinnings from ...bcftools.linux-64.pin.txt`, and bcftools 1.16 gives the expected soft-filter labels.
+  - `test_repadapt_golden_bams`: calling on RepAdapt's BAMs reproduces its raw and PASS records exactly.
   - Golden run: two RepAdapt runs gave identical records. Raw outcomes are PASS 50, AllHomAlt 3, LowMQ 3, AllHomAlt;LowMQ 1.
   - `tests/data/repadapt/` totals 1.1 MB.
   - `test_repadapt_fixture_is_reproducible` and `test_repadapt_golden_records_are_consistent` pass.

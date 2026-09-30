@@ -39,6 +39,7 @@ set-threads:
 
   # Additional Variant Callers
   bcftools_call: 8
+  repadapt_call: 1 # RepAdapt's bcftools 1.16 command runs single-threaded
   deepvariant_call: 8
   glnexus_joint: 4
   parabricks_haplotypecaller: 16

@@ -50,7 +50,7 @@ properties:
         default: "low"
       tool:
         type: string
-        enum: ["gatk", "sentieon", "bcftools", "deepvariant", "parabricks"]
+        enum: ["gatk", "sentieon", "bcftools", "deepvariant", "parabricks", "repadapt"]
         default: "gatk"
       long_contig_mode:
         oneOf:
@@ -66,12 +66,13 @@ properties:
         type: boolean
         default: true
         description: >
-          Produce results/vcfs/filtered.vcf.gz (raw calls annotated with the GATK
-          hard-filter FILTER column) as a default output, reproducing the v1
-          raw + filtered output set. Only applies to GATK-family callers
-          (gatk/sentieon/parabricks); it is ignored with a warning for
-          bcftools/deepvariant. When false, hard filtering is skipped entirely
-          and the raw VCF becomes the final call set consumed by the
+          Produce results/vcfs/filtered.vcf.gz (raw calls annotated with a
+          FILTER column) as a default output: the GATK hard filters for
+          GATK-family callers (gatk/sentieon/parabricks), reproducing the v1
+          raw + filtered output set, or RepAdapt's AllHomAlt (AC=AN) and LowMQ
+          (MQ < 30) soft filters for repadapt. It is ignored with a warning for
+          bcftools/deepvariant. When false, filtering is skipped entirely and
+          the raw VCF becomes the final call set consumed by the
           postprocess/qc modules and the `call_variants` target.
       ploidy:
         type: integer
@@ -107,6 +108,9 @@ properties:
         type: object
         additionalProperties: false
         default: {}
+        description: >
+          mpileup settings for tool: bcftools. They have no effect with tool:
+          repadapt, which uses RepAdapt's fixed settings.
         properties:
           min_mapq:
             type: integer
