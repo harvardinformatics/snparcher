@@ -1,6 +1,7 @@
 import functools
 import gzip
 import http.server
+import importlib.util
 import math
 import platform
 import re
@@ -27,6 +28,9 @@ CONFIGS_DIR = TEST_DIR / "configs"
 SAMPLES_DIR = TEST_DIR / "sample_sheets"
 METADATA_DIR = TEST_DIR / "sample_metadata"
 INTERVAL_LIST_TOOLS = WORKFLOW_DIR / "scripts" / "interval_list_tools.py"
+REPADAPT_DATA_DIR = TEST_DATA_DIR / "repadapt"
+REPADAPT_GOLDEN_DIR = REPADAPT_DATA_DIR / "golden"
+REPADAPT_SAMPLES = ["S1", "S2", "S3", "S4"]
 
 
 def get_samples_file():
@@ -64,6 +68,15 @@ def write_profile_with_genomicsdb_heap_override(out_dir, mem_mb_reduced):
         raise AssertionError("Expected gatk_genomics_db_import resource block not found")
     config_path.write_text(profile_config.replace(old, new))
     return profile_dir
+
+
+def load_repadapt_normalizer():
+    """Import tests/repadapt/normalize_vcf.py, shared with make_golden.sh."""
+    path = TEST_DIR / "repadapt" / "normalize_vcf.py"
+    spec = importlib.util.spec_from_file_location("repadapt_normalize_vcf", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def scheduled_rule_present(output, rule):
@@ -3264,3 +3277,54 @@ def test_qc_numeric_contigs_full_run(request):
             if chrom not in chroms:
                 chroms.append(chrom)
         assert chroms[:2] == ["1", "2"]
+
+
+# --- RepAdapt fixture and golden outputs --------------------------------------
+
+
+def test_repadapt_fixture_is_reproducible(tmp_path):
+    """make_fixture.py regenerates the committed fixture exactly, and keeps each
+    sample at or under 1,000 read pairs so RepAdapt's fastp stays deterministic."""
+    subprocess.run(
+        [sys.executable, str(REPADAPT_DATA_DIR / "make_fixture.py"), "--outdir", str(tmp_path)],
+        check=True,
+    )
+    for name in ["reference.fasta", "genes.gff", "truth.tsv"]:
+        assert (tmp_path / name).read_text() == (REPADAPT_DATA_DIR / name).read_text(), name
+
+    committed = sorted(p.name for p in (REPADAPT_DATA_DIR / "fastq").glob("*.fastq.gz"))
+    assert committed == [f"{s}_{r}.fastq.gz" for s in REPADAPT_SAMPLES for r in (1, 2)]
+    for name in committed:
+        # Compare decompressed text: gzip bytes can differ between zlib builds.
+        with gzip.open(REPADAPT_DATA_DIR / "fastq" / name, "rt") as handle:
+            committed_text = handle.read()
+        with gzip.open(tmp_path / "fastq" / name, "rt") as handle:
+            assert handle.read() == committed_text, name
+        assert committed_text.count("\n") // 4 <= 1000, name
+
+
+def test_repadapt_golden_records_are_consistent():
+    """The golden PASS records are exactly RepAdapt's raw calls that pass its
+    AC=AN || MQ < 30 filter, and the raw calls cover every filter outcome."""
+    normalizer = load_repadapt_normalizer()
+    reference = REPADAPT_DATA_DIR / "reference.fasta"
+    raw = [line.split("\t") for line in (REPADAPT_GOLDEN_DIR / "raw_records.tsv").read_text().splitlines()]
+    final = (REPADAPT_GOLDEN_DIR / "final_records.tsv").read_text().splitlines()
+
+    expected_final = [
+        "\t".join(fields[:6] + ["PASS"] + fields[7:])
+        for fields in raw
+        if not normalizer.repadapt_failed_filters(fields)
+    ]
+    assert expected_final == final
+
+    outcomes = {normalizer.repadapt_failed_filters(fields) for fields in raw}
+    assert outcomes >= {(), ("AllHomAlt",), ("LowMQ",), ("AllHomAlt", "LowMQ")}
+
+    # RepAdapt calls with mpileup -I: SNPs only.
+    assert all(len(fields[3]) == 1 and all(len(a) == 1 for a in fields[4].split(",")) for fields in raw)
+
+    # The committed VCF is what final_records.tsv was normalized from.
+    assert normalizer.normalized_records([REPADAPT_GOLDEN_DIR / "final_variants.vcf.gz"], reference) == final
+    for sample in REPADAPT_SAMPLES:
+        assert (REPADAPT_GOLDEN_DIR / f"{sample}_sorted_RG_dedup_realigned.bam").stat().st_size > 0

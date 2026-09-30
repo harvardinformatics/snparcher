@@ -1,0 +1,7 @@
+##gff-version 3
+ctgA	sim	gene	501	1800	.	+	.	ID=gene1;Name=gene1
+ctgA	sim	gene	4001	6500	.	-	.	ID=gene2;Name=gene2
+ctgA	sim	gene	12001	13200	.	+	.	ID=gene3;Name=gene3
+ctgB	sim	gene	801	2400	.	+	.	ID=gene4;Name=gene4
+ctgB	sim	gene	5501	7200	.	-	.	ID=gene5;Name=gene5
+ctgC	sim	gene	201	1200	.	+	.	ID=gene6;Name=gene6
