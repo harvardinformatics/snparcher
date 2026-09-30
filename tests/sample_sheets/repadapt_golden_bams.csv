@@ -1,0 +1,5 @@
+sample_id,input_type,input
+S1,bam,tests/data/repadapt/golden/S1_sorted_RG_dedup_realigned.bam
+S2,bam,tests/data/repadapt/golden/S2_sorted_RG_dedup_realigned.bam
+S3,bam,tests/data/repadapt/golden/S3_sorted_RG_dedup_realigned.bam
+S4,bam,tests/data/repadapt/golden/S4_sorted_RG_dedup_realigned.bam

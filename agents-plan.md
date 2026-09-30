@@ -246,9 +246,9 @@ PRs 1 and 2 can proceed in parallel. When starting a sub-branch, update `feat/re
   - **Steps:**
     1. Clone RepAdapt at `2077f6f`.
     2. Pull the seven depot images (section 5.1) and record their sha256.
-    3. Write `golden.config` mapping each process to its image with `process { withName:trimSequences { container = '/abs/fastp.sif' } ... }` and `apptainer { enabled = true; autoMounts = true }`. The table below lists the process names.
-    4. Run with **`-C golden.config`** (capital C, which uses only this config). RepAdapt's own `nextflow.config` hard-codes the author's image paths.
-    5. `LC_ALL=C nextflow run main.nf -C golden.config --ref_genome $FIX/reference.fasta --gff_file $FIX/genes.gff --reads "$FIX/fastq/*_{1,2}.fastq.gz" --outdir OUT`
+    3. Write `golden.config` mapping each process to its image with `process { withName:trimSequences { container = '/abs/fastp.sif' } ... }` and `apptainer { enabled = true; autoMounts = true }` (or a `singularity {}` scope where only SingularityCE is installed, as on the holybioinf dev box). The table below lists the process names.
+    4. Run with **`-C golden.config`** (capital C, which uses only this config). `-C` is a top-level option, so it goes **before** `run`. RepAdapt's own `nextflow.config` hard-codes the author's image paths.
+    5. `LC_ALL=C nextflow -C golden.config run main.nf --ref_genome $FIX/reference.fasta --gff_file $FIX/genes.gff --reads "$FIX/fastq/*_{1,2}.fastq.gz" --outdir OUT`
   - **The reads pattern matters.** RepAdapt's default pattern is `./*{1,2}.fastq.gz`, which names `S1_1.fastq.gz` as sample `S1_`, with a trailing underscore. Use `*_{1,2}`.
   - **File suffixes:** the reference must end in `.fasta` and the GFF in `.gff`.
   - **Run twice** and confirm the VCF records and BAM records match between runs. This checks that RepAdapt is deterministic on the fixture.

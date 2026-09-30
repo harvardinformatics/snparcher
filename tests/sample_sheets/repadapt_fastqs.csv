@@ -1,0 +1,5 @@
+sample_id,input_type,input,library_id,mark_duplicates
+S1,fastq,tests/data/repadapt/fastq/S1_1.fastq.gz;tests/data/repadapt/fastq/S1_2.fastq.gz,,true
+S2,fastq,tests/data/repadapt/fastq/S2_1.fastq.gz;tests/data/repadapt/fastq/S2_2.fastq.gz,,true
+S3,fastq,tests/data/repadapt/fastq/S3_1.fastq.gz;tests/data/repadapt/fastq/S3_2.fastq.gz,,true
+S4,fastq,tests/data/repadapt/fastq/S4_1.fastq.gz;tests/data/repadapt/fastq/S4_2.fastq.gz,,true
