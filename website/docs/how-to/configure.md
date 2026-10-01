@@ -45,6 +45,17 @@ variant_calling:
     You only need to configure the sub-block for the tool you selected.
     Settings for other callers are ignored.
 
+## Choose a mapping pipeline
+
+`mapping.pipeline` sets how reads become each sample's final BAM.
+
+| Pipeline | Description |
+|---|---|
+| `default` | fastp, `bwa mem`, and per-library duplicate marking with sambamba. The default. |
+| `sentieon` | Sentieon's `bwa mem` and Dedup. Selected automatically with `tool: sentieon`, the only caller it supports, so you don't normally set it. |
+
+Samples supplied as BAMs (`input_type: bam`) are used as they are, whichever pipeline is set.
+
 ## Set the heterozygosity prior (GATK)
 
 If you are using `gatk` and working with a non-model organism, you should adjust the heterozygosity prior.

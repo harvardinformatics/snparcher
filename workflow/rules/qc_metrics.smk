@@ -86,14 +86,13 @@ rule parse_sentieon_stats:
 
 
 def combine_qc_input(wildcards):
-    """Get all QC metric files based on tool choice."""
-    inputs = {
+    """Get all QC metric files: fastp, per-sample mapping QC, and any extra QC
+    the mapping pipeline adds."""
+    return {
         "fastp": expand("results/qc_metrics/fastp/{sample}.json", sample=SAMPLES_WITH_FASTQ),
-        "bam": expand("results/qc_metrics/bam/{sample}.json", sample=SAMPLES_WITH_BAM),
+        "bam": [get_mapping_qc_json(sample) for sample in SAMPLES_WITH_BAM],
+        **MAPPING["extra_qc"](),
     }
-    if USE_SENTIEON:
-        inputs["sentieon"] = expand("results/qc_metrics/sentieon/{sample}.json", sample=SAMPLES_WITH_BAM)
-    return inputs
 
 
 rule combine_qc_metrics:

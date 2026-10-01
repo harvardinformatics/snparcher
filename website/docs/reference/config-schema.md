@@ -34,6 +34,12 @@ An optional key is also accepted at the top level:
 |-----|------|---------|-------------|
 | `reads.mark_duplicates` | boolean | `true` | Global default for duplicate marking. Can be overridden per row in the sample sheet. |
 
+## `mapping`
+
+| Key | Type | Default | Allowed values | Description |
+|-----|------|---------|----------------|-------------|
+| `mapping.pipeline` | string | `"default"` | `default`, `sentieon` | How reads become each sample's final BAM. `default`: fastp, `bwa mem` and per-library duplicate marking with sambamba. `sentieon`: Sentieon's `bwa mem` and Dedup; selected automatically with `variant_calling.tool: sentieon`, and only supported with it. Samples supplied as BAMs are used as they are. |
+
 ## `variant_calling`
 
 | Key | Type | Default | Allowed values | Description |
@@ -191,6 +197,9 @@ reference:
 
 reads:
   mark_duplicates: true
+
+mapping:
+  pipeline: "default"
 
 variant_calling:
   expected_coverage: "low"

@@ -57,6 +57,9 @@ DEFAULTS = {
     "reads": {
         "mark_duplicates": True,
     },
+    "mapping": {
+        "pipeline": "default",
+    },
     "variant_calling": {
         "expected_coverage": "low",
         "tool": "gatk",
@@ -332,7 +335,83 @@ set_defaults(config, DEFAULTS)
 validate_config_with_warnings(config, CONFIG_SCHEMA_PATH)
 
 VARIANT_TOOL = config["variant_calling"]["tool"]
-USE_SENTIEON = VARIANT_TOOL == "sentieon"
+
+
+# --- Mapping pipelines ---
+#
+# A mapping pipeline turns a sample's staged per-row reads into one
+# coordinate-sorted final BAM plus per-sample mapping QC. Everything else
+# (SRA downloads, fastq staging, external BAM inputs, CSI indexing, bam_stats,
+# callable sites, calling) is shared and reaches the pipeline only through its
+# MAPPING_PIPELINES entry:
+#
+#   rules      rule file the Snakefile includes (relative to workflow/)
+#   final_bam  sample -> final BAM, for samples the pipeline maps
+#   qc_json    sample -> mapping QC JSON with parse_bam_stats' keys, named
+#              {sample}.json, for samples the pipeline maps
+#   extra_qc   () -> extra named inputs for combine_qc_metrics
+#
+# A variant that only changes flags can reuse a rule file with different
+# settings; a pipeline with different steps gets its own rule file.
+
+
+def _library_merge_final_bam(sample):
+    """Final BAM of the per-library merge rules in rules/mapping/common.smk."""
+    if get_sample_mark_duplicates(sample):
+        return f"results/bams/markdup/{sample}.bam"
+    return f"results/bams/merged/{sample}.bam"
+
+
+def _bam_stats_qc_json(sample):
+    """Mapping QC from parse_bam_stats on the final BAM."""
+    return f"results/qc_metrics/bam/{sample}.json"
+
+
+def _sentieon_extra_qc():
+    """Sentieon's insert-size metrics, for every sample with a BAM."""
+    return {
+        "sentieon": expand("results/qc_metrics/sentieon/{sample}.json", sample=SAMPLES_WITH_BAM),
+    }
+
+
+MAPPING_PIPELINES = {
+    "default": {
+        "rules": "rules/mapping/default.smk",
+        "final_bam": _library_merge_final_bam,
+        "qc_json": _bam_stats_qc_json,
+        "extra_qc": lambda: {},
+    },
+    "sentieon": {
+        "rules": "rules/mapping/sentieon.smk",
+        "final_bam": _library_merge_final_bam,
+        "qc_json": _bam_stats_qc_json,
+        "extra_qc": _sentieon_extra_qc,
+    },
+}
+
+
+def resolve_mapping_pipeline():
+    """Return the mapping pipeline for this run, checking it suits the caller."""
+    requested = config["mapping"]["pipeline"]
+    if VARIANT_TOOL == "sentieon":
+        # Sentieon calling has always used Sentieon mapping. "default" is also
+        # the schema default, so an explicit setting can't be told apart from
+        # an omitted one; it has never been a valid pairing with this caller.
+        if requested in ("default", "sentieon"):
+            return "sentieon"
+        raise ValueError(
+            f"mapping.pipeline '{requested}' is not supported with "
+            "variant_calling.tool 'sentieon', which uses the 'sentieon' mapping pipeline."
+        )
+    if requested == "sentieon":
+        raise ValueError(
+            "mapping.pipeline 'sentieon' is only supported with variant_calling.tool 'sentieon'."
+        )
+    return requested
+
+
+MAPPING_PIPELINE = resolve_mapping_pipeline()
+MAPPING = MAPPING_PIPELINES[MAPPING_PIPELINE]
 
 
 # Canonical hard-filter definitions used by workflow/rules/variant_calling/hard_filters.smk.
@@ -835,13 +914,15 @@ def get_final_bam(sample):
     """Get final BAM path for a sample."""
     if sample_has_input_type(sample, "bam"):
         return f"results/bams/input/{sample}.bam"
+    return MAPPING["final_bam"](sample)
 
-    mark_dups = get_sample_mark_duplicates(sample)
 
-    if mark_dups:
-        return f"results/bams/markdup/{sample}.bam"
-    else:
-        return f"results/bams/merged/{sample}.bam"
+def get_mapping_qc_json(sample):
+    """Get the per-sample mapping QC JSON. Samples supplied as BAMs always use
+    parse_bam_stats on the staged BAM."""
+    if sample_has_input_type(sample, "bam"):
+        return _bam_stats_qc_json(sample)
+    return MAPPING["qc_json"](sample)
 
 
 def get_final_bam_index(sample):
@@ -1164,6 +1245,7 @@ def print_debug_banner():
     logger.info("    Profile:            " + profile)
     logger.info("")
     logger.info("    Reference:          " + REF_NAME + " (" + config["reference"]["source"] + ")")
+    logger.info("    Mapping pipeline:   " + MAPPING_PIPELINE)
     logger.info("    Variant tool:       " + VARIANT_TOOL)
     logger.info("    Ploidy:             " + str(config["variant_calling"]["ploidy"]))
     logger.info("    Expected coverage:  " + str(config["variant_calling"]["expected_coverage"]))

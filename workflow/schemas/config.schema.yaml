@@ -25,6 +25,22 @@ properties:
         type: boolean
         default: true
 
+  mapping:
+    type: object
+    additionalProperties: false
+    default: {}
+    properties:
+      pipeline:
+        type: string
+        enum: ["default", "sentieon"]
+        default: "default"
+        description: >
+          How reads become each sample's final BAM. "default" is fastp, bwa mem
+          and sambamba duplicate marking. "sentieon" is Sentieon's mapping and
+          Dedup, and is used automatically with variant_calling.tool: sentieon
+          (the only caller it supports). Samples supplied as BAMs are used as
+          they are.
+
   reference:
     type: object
     additionalProperties: false

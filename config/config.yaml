@@ -9,6 +9,12 @@ reference:
   name: "my_organism"
   source: "/data/reference/genome.fna.gz"  # Can be a refseq/genbank accession, url, or path
 
+mapping:
+  # How reads become each sample's final BAM: default (fastp, bwa mem, sambamba
+  # duplicate marking) | sentieon (Sentieon mapping and Dedup; used automatically
+  # with variant_calling.tool: sentieon, the only caller it supports).
+  pipeline: "default"
+
 variant_calling:
   expected_coverage: "low"  # low | high | auto (future)
   tool: "gatk" # gatk | sentieon | bcftools | deepvariant | parabricks | repadapt
