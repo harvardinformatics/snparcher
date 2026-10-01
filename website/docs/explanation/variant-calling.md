@@ -116,6 +116,13 @@ Base quality and depth use bcftools' defaults (minimum base quality 1, maximum d
 RepAdapt filters its BAMs to MAPQ >= 10 before calling and runs mpileup with `-q 5`; snpArcher uses `-q 10` in mpileup instead, which selects the same reads.
 snpArcher also passes `--ploidy`, which gives identical calls for diploids.
 
+**Sample order at extreme depth.**
+At sites with extreme depth, such as collapsed repeats far above mpileup's 250-reads-per-file cap, bcftools' genotype likelihoods depend on the order in which BAMs are given.
+snpArcher passes BAMs in sample-sheet order, so its output is reproducible.
+RepAdapt passes them in the order its Nextflow tasks finish, which can change between runs.
+On 10 *Candida albicans* isolates called from RepAdapt's own BAMs, snpArcher matched RepAdapt's output exactly except for 4 of 296,311 records, all in the collapsed rDNA, where one sample's PL and GQ differed.
+With RepAdapt's sample order, all records were identical.
+
 **Pinned bcftools.**
 The caller uses bcftools 1.16, RepAdapt's version, with the exact package builds from RepAdapt's container image.
 bcftools 1.16 stores INFO/MQ as an integer and newer versions as a float, which can move sites across the `MQ < 30` filter.

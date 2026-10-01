@@ -479,6 +479,10 @@ PRs 1 and 2 can proceed in parallel. When starting a sub-branch, update `feat/re
     - Multi-row samples are mapped per row and then merged. RepAdapt can't take them at all, so equivalence is defined for single-row samples.
 21. **Rule-name reuse.** The repadapt pipeline defines `fastp` and `bwa_mem` with the same names and outputs as `default`, which works because only one pipeline file is included. That keeps `collect_fastp_stats`, the profiles and `merge_*` wiring working.
 22. **`include:` with a computed path** (e.g. `include: MAPPING_PIPELINES[...]["rules"]`) should work in Snakemake, because the path is a Python expression. Verify it, including with `snakefmt`/lint.
+23. **BAM order matters at extreme depth.** Measured 2026-09-30, with bcftools 1.16 on 10 *C. albicans* isolates using RepAdapt's own BAMs; details in `../repadapt-calbicans/README.md`.
+    - At collapsed repeats far above the 250-read per-file cap, PL, GQ and sometimes QUAL depend on the order of the BAMs on the mpileup command line. It still happens with `-d 100000`, so it isn't only the cap.
+    - RepAdapt's order is Nextflow's `collect()` order, which is arbitrary; ours is the sample sheet's. Expect a few rDNA-type records to differ in real-data comparisons.
+    - With RepAdapt's order, all 296,311 raw records matched exactly. `-q 10` vs `-q 5`, `--ploidy 2` and the bgzipped reference had no effect.
 
 ## 7. Still to verify on Linux (early in each PR)
 

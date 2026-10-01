@@ -84,6 +84,7 @@ With `mapping.pipeline: repadapt` and `tool: repadapt`, on single-row, single-li
 - **Order:** sample and contig order. RepAdapt's is arbitrary; ours follows the sample sheet and the reference index.
 - **Headers:** bcftools writes dates into header lines, so headers always differ.
 - **Run-to-run variation:** RepAdapt isn't exactly reproducible on large inputs, because fastp's multi-threaded output order changes between runs. We share that property.
+- **Extreme-depth sites:** at sites with extreme depth (collapsed repeats far above mpileup's 250-read cap), bcftools' PL and GQ depend on the order of the BAMs on the command line. Ours is the sample-sheet order; RepAdapt's is Nextflow's arbitrary collect order. On 10 *C. albicans* isolates called from RepAdapt's BAMs, 4 of 296,311 records differed, all in the collapsed rDNA, and none differed once we used RepAdapt's order.
 - **Situations RepAdapt can't handle,** where snpArcher's behavior applies:
   - several rows per sample (mapped per row, then merged)
   - BAM inputs (used as they are)

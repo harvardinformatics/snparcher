@@ -286,10 +286,13 @@ git checkout tests/data/fixtures && git status   # no fixture changes committed
 
 - **Step 0:** done.
 - **PR 0:** merged (#347).
-- **PR 1:** implemented on `feat/repadapt-calling`.
-  - Verified on Linux (`agents-plan.md` 7.1 and 7.7): the pin file installs, Snakemake logs `Using pinnings from ...bcftools.linux-64.pin.txt`, and bcftools 1.16 gives the expected soft-filter labels.
-  - `test_repadapt_golden_bams`: calling on RepAdapt's BAMs reproduces its raw and PASS records exactly.
   - Golden run: two RepAdapt runs gave identical records. Raw outcomes are PASS 50, AllHomAlt 3, LowMQ 3, AllHomAlt;LowMQ 1.
   - `tests/data/repadapt/` totals 1.1 MB.
   - `test_repadapt_fixture_is_reproducible` and `test_repadapt_golden_records_are_consistent` pass.
+- **PR 1:** implemented on `feat/repadapt-calling` (#348).
+  - Verified on Linux (`agents-plan.md` 7.1 and 7.7): the pin file installs, Snakemake logs `Using pinnings from ...bcftools.linux-64.pin.txt`, and bcftools 1.16 gives the expected soft-filter labels.
+  - `test_repadapt_golden_bams`: calling on RepAdapt's BAMs reproduces its raw and PASS records exactly.
+  - **Real-data check** (`../repadapt-calbicans/`): 10 *C. albicans* isolates through RepAdapt's real pipeline, then `tool: repadapt` on its BAMs.
+    - With RepAdapt's BAM order, all 296,311 raw and 293,429 PASS records are identical.
+    - With the sample-sheet order, 4 records in the collapsed rDNA differ, because of BAM order at extreme depth (`agents-plan.md` gotcha 23).
 - To regenerate: `G=.../repadapt-golden; NEXTFLOW=$G/nf-env/bin/nextflow JAVA_HOME=$G/nf-env/lib/jvm tests/repadapt/make_golden.sh $G`
