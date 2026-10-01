@@ -53,8 +53,22 @@ variant_calling:
 |---|---|
 | `default` | fastp, `bwa mem`, and per-library duplicate marking with sambamba. The default. |
 | `sentieon` | Sentieon's `bwa mem` and Dedup. Selected automatically with `tool: sentieon`, the only caller it supports, so you don't normally set it. |
+| `repadapt` | RepAdapt's processing with its pinned tools: fastp 0.20.1, bwa 0.7.17, a MAPQ >= 10 filter, Picard duplicate removal per sample and GATK3 indel realignment. Linux only. Any caller except `sentieon`. |
 
 Samples supplied as BAMs (`input_type: bam`) are used as they are, whichever pipeline is set.
+
+To get calls equivalent to [RepAdapt](https://github.com/RepAdapt/nextflow_snp_calling_linux)'s from reads, pair the `repadapt` mapping pipeline with the `repadapt` caller:
+
+```yaml
+mapping:
+  pipeline: repadapt
+  repadapt:
+    indel_realignment: auto # auto | true | false
+variant_calling:
+  tool: repadapt
+```
+
+See [mapping pipelines](../explanation/mapping.md) for what this reproduces and where it differs.
 
 ## Set the heterozygosity prior (GATK)
 

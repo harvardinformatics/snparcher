@@ -59,6 +59,9 @@ DEFAULTS = {
     },
     "mapping": {
         "pipeline": "default",
+        "repadapt": {
+            "indel_realignment": "auto",
+        },
     },
     "variant_calling": {
         "expected_coverage": "low",
@@ -367,6 +370,20 @@ def _bam_stats_qc_json(sample):
     return f"results/qc_metrics/bam/{sample}.json"
 
 
+def _repadapt_final_bam(sample):
+    """Final BAM of the repadapt pipeline (rules/mapping/repadapt.smk)."""
+    if REPADAPT_INDEL_REALIGNMENT:
+        return f"results/bams/repadapt/realigned/{sample}.bam"
+    if get_sample_mark_duplicates(sample):
+        return f"results/bams/repadapt/dedup/{sample}.bam"
+    return f"results/bams/repadapt/merged/{sample}.bam"
+
+
+def _repadapt_qc_json(sample):
+    """Mapping QC from the pre-filter flagstats, Picard's metrics and coverage."""
+    return f"results/qc_metrics/repadapt/{sample}.json"
+
+
 def _sentieon_extra_qc():
     """Sentieon's insert-size metrics, for every sample with a BAM."""
     return {
@@ -386,6 +403,12 @@ MAPPING_PIPELINES = {
         "final_bam": _library_merge_final_bam,
         "qc_json": _bam_stats_qc_json,
         "extra_qc": _sentieon_extra_qc,
+    },
+    "repadapt": {
+        "rules": "rules/mapping/repadapt.smk",
+        "final_bam": _repadapt_final_bam,
+        "qc_json": _repadapt_qc_json,
+        "extra_qc": lambda: {},
     },
 }
 
@@ -670,6 +693,34 @@ if LONG_CONTIG_MODE and VARIANT_TOOL in {"sentieon", "parabricks"}:
         "backend. Use gatk, bcftools, deepvariant, or repadapt for long-contig "
         "references."
     )
+
+
+
+def resolve_repadapt_indel_realignment():
+    """Return whether the repadapt mapping pipeline runs GATK3 indel
+    realignment. GATK3 needs BAI indexes, which can't index contigs longer
+    than 2^29, so realignment is unavailable in long-contig mode."""
+    setting = config["mapping"]["repadapt"]["indel_realignment"]
+    if MAPPING_PIPELINE != "repadapt":
+        return False
+    if LONG_CONTIG_MODE:
+        if setting is True:
+            raise ValueError(
+                "mapping.repadapt.indel_realignment is true, but GATK3 indel realignment "
+                "needs BAI indexes, which can't index contigs longer than 2^29 "
+                "(long_contig_mode). Set it to 'auto' or false."
+            )
+        if setting == "auto":
+            logger.warning(
+                "Skipping GATK3 indel realignment (mapping.repadapt.indel_realignment: auto) "
+                "because long_contig_mode is on: GATK3 needs BAI indexes, which can't index "
+                "contigs longer than 2^29. Final BAMs are the deduplicated BAMs."
+            )
+        return False
+    return setting is True or setting == "auto"
+
+
+REPADAPT_INDEL_REALIGNMENT = resolve_repadapt_indel_realignment()
 
 COMPRESSED_VCF_INDEX_SUFFIX = ".csi" if LONG_CONTIG_MODE else ".tbi"
 BCFTOOLS_INDEX_ARGS = "-f -c" if LONG_CONTIG_MODE else "-f -t"

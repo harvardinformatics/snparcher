@@ -4,6 +4,7 @@ These pages cover the design decisions, trade-offs, and biology behind snpArcher
 None of this is required to use the pipeline, but it will help you make better choices for your project.
 
 - [Pipeline architecture](architecture.md): How the pipeline is structured and why.
+- [Mapping pipelines](mapping.md): How reads become BAMs, including the RepAdapt-equivalent pipeline.
 - [Variant calling](variant-calling.md): GATK vs. bcftools vs. DeepVariant, and when to choose each.
 - [Parallelization](parallelization.md): The scatter-by-Ns strategy.
 - [QC metrics](qc-metrics.md): What each QC figure means biologically.

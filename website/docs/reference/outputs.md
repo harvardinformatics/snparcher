@@ -61,6 +61,17 @@ The tables below list retained per-sample outputs alongside key temporary files.
 | `results/bams/input/{sample}.bam` | BAM | | Staged external BAM for samples with `input_type: bam` (symlinked to the sample-sheet path). |
 | `results/bams/input/{sample}.bam.csi` | CSI index | | Index for the external BAM. |
 
+With `mapping.pipeline: repadapt`, the per-unit BAM is filtered to MAPQ >= 10 and fixmate'd, and these replace the `library`, `library_markdup`, `markdup` and `merged` BAMs:
+
+| Path | Format | Temporary | Description |
+|------|--------|:---------:|-------------|
+| `results/bams/repadapt/dedup/{sample}.bam` | BAM | when realigning | All of the sample's units after Picard duplicate removal (when `mark_duplicates` is true). |
+| `results/bams/repadapt/merged/{sample}.bam` | BAM | when realigning | All of the sample's units merged, when `mark_duplicates` is false. |
+| `results/bams/repadapt/realigned/{sample}.bam` | BAM | | Final BAM after GATK3 indel realignment (when `mapping.repadapt.indel_realignment` is on). |
+| `results/bams/repadapt/{dedup,merged,realigned}/{sample}.bam.csi` | CSI index | | Index for the final BAM. |
+| `results/qc_metrics/repadapt/{sample}_duplicates.txt` | Picard metrics | | Picard MarkDuplicates metrics. |
+| `results/qc_metrics/repadapt/{sample}.json` | JSON | | Per-sample mapping QC used by the QC report; see [mapping pipelines](../explanation/mapping.md#mapping-qc). |
+
 ### BAM QC metrics
 
 | Path | Format | Temporary | Description |

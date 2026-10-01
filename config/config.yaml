@@ -12,8 +12,14 @@ reference:
 mapping:
   # How reads become each sample's final BAM: default (fastp, bwa mem, sambamba
   # duplicate marking) | sentieon (Sentieon mapping and Dedup; used automatically
-  # with variant_calling.tool: sentieon, the only caller it supports).
+  # with variant_calling.tool: sentieon, the only caller it supports) | repadapt
+  # (RepAdapt's processing with its pinned tools; pair with tool: repadapt for
+  # RepAdapt-equivalent calls).
   pipeline: "default"
+  repadapt:
+    # GATK3 indel realignment: auto (skipped, with a warning, in long-contig
+    # mode) | true | false
+    indel_realignment: "auto"
 
 variant_calling:
   expected_coverage: "low"  # low | high | auto (future)

@@ -180,6 +180,13 @@ Per row, then per sample:
 - BAM inputs are used as they are (no realignment) and get the shared QC. gVCF inputs follow the caller's rules.
 - Add resources and threads for the new rules to `workflow-profiles/default/config.yaml` and `workflow-profiles/slurm/config.yaml`. Java rules use `mem_mb_reduced` for `-Xmx`.
 - **Known limitations:** GATK3 is slow (single-threaded per sample; RepAdapt allows 48 h), and RepAdapt's README says GATK3 fails on heavily fragmented references. Document both. Scattering the realignment is a possible later optimization, but it must be shown to give identical output first.
+- **As implemented in PR 3** (`repadapt-pr3-plan.md` has the details):
+  - **Duplicate removal:** Picard reads a sample's row BAMs directly, one `-INPUT` per row, with no separate merge. Single-row samples are exactly RepAdapt's step. `mark_duplicates: false` samples are merged with `samtools merge`. The dedup or merged BAM is temp only when realignment follows.
+  - **No generic validation hook:** `resolve_repadapt_indel_realignment()` runs after `LONG_CONTIG_MODE`.
+  - **htslib pinned to 1.16** in the mapping env. Unpinned, samtools 1.16.1 solves with htslib 1.21.
+  - **Pre-filter flagstat:** read from a FIFO that `tee` feeds and that the rule waits on.
+  - **Uncompressed intermediates:** the piped steps write uncompressed BAM (`view -u`, `sort -n -u`). The records are the same.
+  - **Mapping QC:** `rules/mapping/repadapt.smk` writes `results/qc_metrics/repadapt/{sample}.json`. `parse_bam_stats`' coverage parsing is now a shared `parse_samtools_coverage()`, next to `read_picard_metrics()` in `qc_metrics.smk`.
 
 ### 2.5 Envs (conda only, no containers)
 
@@ -495,6 +502,8 @@ PR 2 moved `rules/mapping.smk` and the `fastp` rule into `rules/mapping/` (secti
     - With RepAdapt's order, all 296,311 raw records matched exactly. `-q 10` vs `-q 5`, `--ploidy 2` and the bgzipped reference had no effect.
 
 ## 7. Still to verify on Linux (early in each PR)
+
+All of these were checked by the end of PR 3; see `repadapt-pr0-pr1-plan.md` and `repadapt-pr3-plan.md`.
 
 1. The pin files install (`conda create --file X.linux-64.pin.txt`) and Snakemake picks them up.
 2. bwa 0.7.17 (h5bf99c6_8) and samtools 1.16.1 (h6899075_0) install into one env. If they don't, split the mapping step at a pipe boundary.

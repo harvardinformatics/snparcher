@@ -19,6 +19,10 @@ set-threads:
   # Alignment
   bwa_mem: 16
   markdup_library: 16
+  # mapping.pipeline: repadapt (Picard and GATK3 run single-threaded, as RepAdapt)
+  repadapt_remove_duplicates: 1
+  repadapt_realigner_targets: 1
+  repadapt_indel_realigner: 1
 
   # GATK Variant Calling
   gatk_haplotypecaller: 1
@@ -64,6 +68,20 @@ set-resources:
     runtime: 2880
   markdup_library:
     mem_mb: attempt * 8000
+  # mapping.pipeline: repadapt. Java heap (mem_mb_reduced) doesn't change
+  # results: Picard only spills to disk sooner, and IndelRealigner's limits
+  # count reads. GATK3 realignment is slow; RepAdapt allows it 48 h.
+  repadapt_remove_duplicates:
+    mem_mb: attempt * 16000
+    mem_mb_reduced: attempt * 14400
+  repadapt_realigner_targets:
+    mem_mb: attempt * 16000
+    mem_mb_reduced: attempt * 14400
+    runtime: 2880
+  repadapt_indel_realigner:
+    mem_mb: attempt * 16000
+    mem_mb_reduced: attempt * 14400
+    runtime: 2880
 
   # Interval generation
   picard_intervals:
