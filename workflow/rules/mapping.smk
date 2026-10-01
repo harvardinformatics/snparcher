@@ -181,7 +181,7 @@ if USE_SENTIEON:
             bam=lambda wc: get_final_bam(wc.sample),
             **REF_FILES,
         output:
-            insert="results/qc_metrics/sentieon/{sample}_insert_metrics.txt",
+            insert_metrics="results/qc_metrics/sentieon/{sample}_insert_metrics.txt",
             qd="results/qc_metrics/sentieon/{sample}_qd_metrics.txt",
             gc="results/qc_metrics/sentieon/{sample}_gc_metrics.txt",
             gc_summary="results/qc_metrics/sentieon/{sample}_gc_summary.txt",
@@ -205,7 +205,7 @@ if USE_SENTIEON:
                 --algo MeanQualityByCycle {output.mq} \
                 --algo QualDistribution {output.qd} \
                 --algo GCBias --summary {output.gc_summary} {output.gc} \
-                --algo InsertSizeMetricAlgo {output.insert} \
+                --algo InsertSizeMetricAlgo {output.insert_metrics} \
                 2> {log}
             """
 

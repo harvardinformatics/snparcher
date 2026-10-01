@@ -1645,6 +1645,35 @@ def test_bcftools_dry_run(request):
 
 
 @pytest.mark.dry_run
+def test_sentieon_dry_run(request):
+    """tool: sentieon maps and dedups with Sentieon, and its insert-size QC
+    feeds the QC report."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "sentieon")
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs.csv")
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        for rule in (
+            "sentieon_map",
+            "sentieon_dedup_library",
+            "sentieon_bam_stats",
+            "parse_sentieon_stats",
+            "sentieon_haplotyper",
+        ):
+            assert scheduled_rule_present(output, rule), rule
+        for rule in ("bwa_mem", "markdup_library"):
+            assert not scheduled_rule_present(output, rule), rule
+        assert re.search(
+            r"rule combine_qc_metrics:\n    input: [^\n]*results/qc_metrics/sentieon/sample1\.json",
+            output,
+        )
+
+
+@pytest.mark.dry_run
 def test_deepvariant_dry_run(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
