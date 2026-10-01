@@ -11,19 +11,20 @@ reference:
 
 variant_calling:
   expected_coverage: "low"  # low | high | auto (future)
-  tool: "gatk" # gatk | sentieon | bcftools | deepvariant | parabricks
-  # Produce results/vcfs/filtered.vcf.gz (raw + GATK hard-filter FILTER column) as a
-  # default output. Only applies to GATK-family callers (gatk/sentieon/parabricks);
-  # it is ignored with a warning for bcftools/deepvariant (which don't emit the
-  # required annotations). Set false to skip hard filtering entirely; the raw VCF
-  # then becomes the final call set for postprocess/qc and `call_variants`.
+  tool: "gatk" # gatk | sentieon | bcftools | deepvariant | parabricks | repadapt
+  # Produce results/vcfs/filtered.vcf.gz (raw + a FILTER column) as a default output:
+  # GATK hard filters for GATK-family callers (gatk/sentieon/parabricks), or RepAdapt's
+  # AllHomAlt/LowMQ soft filters for repadapt. It is ignored with a warning for
+  # bcftools/deepvariant (which don't emit the required annotations). Set false to
+  # skip filtering entirely; the raw VCF then becomes the final call set for
+  # postprocess/qc and `call_variants`.
   generate_filtered_vcf: true
   ploidy: 2
   gatk:
     het_prior: 0.005
   sentieon:
     license: ""
-  bcftools:
+  bcftools: # Not used by tool: repadapt, which uses RepAdapt's fixed mpileup settings.
     min_mapq: 20
     min_baseq: 20
     max_depth: 250

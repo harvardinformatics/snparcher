@@ -55,9 +55,16 @@ lint = "ruff check workflow/"
 format = "ruff format workflow/ && snakefmt workflow/"
 
 # Setup conda envs for unit tests
+# The second invocation adds the envs only tool: repadapt uses.
 setup-test-envs = """snakemake -s workflow/Snakefile \
     --configfile config/config.yaml \
     --config samples=config/samples.csv \
+    --use-conda --conda-prefix $(pwd)/.snakemake/conda \
+    --conda-create-envs-only --cores 1 \
+    --directory $(pwd)/tests/data/fixtures \
+    && snakemake -s workflow/Snakefile \
+    --configfile config/config.yaml \
+    --config samples=config/samples.csv 'variant_calling={tool: repadapt}' \
     --use-conda --conda-prefix $(pwd)/.snakemake/conda \
     --conda-create-envs-only --cores 1 \
     --directory $(pwd)/tests/data/fixtures"""

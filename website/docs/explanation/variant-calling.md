@@ -1,14 +1,15 @@
 # Variant calling
 
-snpArcher supports five variant calling backends.
+snpArcher supports six variant calling backends.
 This page explains what each one does, when to choose it, and how snpArcher's approach to joint genotyping and hard filtering works.
 
-## The five supported callers
+## The supported callers
 
 | Caller | Type | License | Hardware | Joint genotyping path |
 |--------|------|---------|----------|----------------------|
 | **GATK HaplotypeCaller** | Local reassembly + PairHMM | Open source | CPU | gVCF -> GenomicsDB -> GenotypeGVCFs |
 | **bcftools** | Pileup-based (mpileup + call) | Open source | CPU | Direct multi-sample calling |
+| **RepAdapt model** | Pileup-based (bcftools 1.16, per-sample `call -G -`) | Open source | CPU | Direct multi-sample calling |
 | **DeepVariant** | Deep learning (CNN) | Open source | CPU (GPU optional) | gVCF -> GLnexus |
 | **Sentieon** | GATK-compatible, optimized | Commercial | CPU | gVCF -> GenomicsDB -> GenotypeGVCFs |
 | **Parabricks** | GPU-accelerated GATK | Commercial (NVIDIA) | GPU | gVCF -> GenomicsDB -> GenotypeGVCFs |
@@ -90,6 +91,52 @@ Additionally, bcftools is generally less sensitive for indels and in low-complex
     When `variant_calling.tool` is set to `bcftools`, sample rows with `input_type: gvcf` are not supported.
     bcftools works from BAM files, not gVCFs.
 
+## RepAdapt calling model
+
+`tool: repadapt` runs the calling model of [RepAdapt](https://github.com/RepAdapt/nextflow_snp_calling_linux)'s SNP-calling pipeline on snpArcher's BAMs.
+Use it to produce call sets that can be combined or compared with RepAdapt datasets.
+
+Per contig, snpArcher runs RepAdapt's command:
+
+```
+bcftools mpileup -Ou -f REF -r CONTIG BAM... -q 10 -I -a FMT/AD,FMT/DP \
+  | bcftools call -G - -f GQ -mv --ploidy PLOIDY
+```
+
+and then applies RepAdapt's filter, `AC=AN || MQ < 30`, as two soft filters in `results/vcfs/filtered.vcf.gz` (see [filtering](filtering.md)).
+
+**How it differs from bcftools calling.**
+`call -G -` calls each sample independently: a site is kept if any sample supports it, and each sample's genotype prior comes from its own reads rather than from a cohort-wide allele frequency under Hardy-Weinberg equilibrium.
+This avoids assuming one randomly mating population, which suits structured sample sets.
+The costs are more false-positive sites at low coverage, and genotypes that lean homozygous at low depth, because a heterozygous call needs reads from both alleles.
+`-I` skips indels, so the call set is SNPs only.
+Base quality and depth use bcftools' defaults (minimum base quality 1, maximum depth 250 per file), and the `variant_calling.bcftools` settings have no effect.
+
+**How it differs from RepAdapt's literal command.**
+RepAdapt filters its BAMs to MAPQ >= 10 before calling and runs mpileup with `-q 5`; snpArcher uses `-q 10` in mpileup instead, which selects the same reads.
+snpArcher also passes `--ploidy`, which gives identical calls for diploids.
+
+**Sample order at extreme depth.**
+At sites with extreme depth, such as collapsed repeats far above mpileup's 250-reads-per-file cap, bcftools' genotype likelihoods depend on the order in which BAMs are given.
+snpArcher passes BAMs in sample-sheet order, so its output is reproducible.
+RepAdapt passes them in the order its Nextflow tasks finish, which can change between runs.
+On 10 *Candida albicans* isolates called from RepAdapt's own BAMs, snpArcher matched RepAdapt's output exactly except for 4 of 296,311 records, all in the collapsed rDNA, where one sample's PL and GQ differed.
+With RepAdapt's sample order, all records were identical.
+
+**Pinned bcftools.**
+The caller uses bcftools 1.16, RepAdapt's version, with the exact package builds from RepAdapt's container image.
+bcftools 1.16 stores INFO/MQ as an integer and newer versions as a float, which can move sites across the `MQ < 30` filter.
+Those builds exist only for Linux, so full runs don't work on macOS (dry runs do).
+Newer bcftools versions used elsewhere in the pipeline warn that `MQ should be declared as Type=Float` when reading these VCFs; the warning is harmless.
+
+**Upstream differences.**
+With snpArcher's default mapping, the BAMs differ from RepAdapt's: snpArcher uses `bwa mem -M`, does not filter BAMs by MAPQ, marks duplicates with sambamba, and does not realign indels.
+The calling model is RepAdapt's, but the calls are "RepAdapt-adjacent" rather than identical.
+
+!!! warning
+    `tool: repadapt` supports `ploidy` 1 or 2 only (bcftools 1.16 accepts only its predefined ploidy aliases), and does not support samples with `input_type: gvcf`.
+    Because it calls SNPs only, `modules.postprocess.filtering.split_by_type` produces an empty `clean_indels.vcf.gz`; snpArcher warns about this.
+
 ## DeepVariant
 
 DeepVariant uses a convolutional neural network (CNN) to call variants.
@@ -148,7 +195,7 @@ Parabricks uses the same joint genotyping path as GATK (GenomicsDB -> GenotypeGV
 
 ## Joint genotyping: why it matters
 
-All five callers feed into joint genotyping, which is fundamental to how snpArcher works.
+All the callers feed into joint genotyping, which is fundamental to how snpArcher works.
 
 **The problem with single-sample calling:**
 If you call variants in each sample independently and then merge the VCFs, you face two issues.
@@ -218,6 +265,7 @@ See [filtering philosophy](filtering.md) for a detailed discussion of how to eva
 | Most projects | GATK | Well-validated, widely used, supports gVCF-based incremental analysis |
 | Maximum per-site accuracy | DeepVariant | Strongest in current benchmarks with GLnexus joint genotyping, but higher compute cost |
 | Preliminary exploration or very large datasets | bcftools | Fast; good for a first look before committing to a full GATK run |
+| Comparing or combining with RepAdapt datasets | RepAdapt model | RepAdapt's bcftools settings and filter, on snpArcher's BAMs |
 | Sentieon license available | Sentieon | Equivalent results to GATK, faster. Purely a performance decision. |
 | GPU nodes available | Parabricks | 10-30x speedup on GPU; useful when CPU queue times are long |
 

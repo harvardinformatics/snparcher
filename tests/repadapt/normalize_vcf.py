@@ -103,6 +103,11 @@ def repadapt_failed_filters(fields):
     return tuple(failed)
 
 
+def expected_repadapt_filter(fields):
+    """Return the FILTER value snpArcher's repadapt_filter should give a record."""
+    return ";".join(repadapt_failed_filters(fields)) or "PASS"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("vcf", nargs="+", type=Path)

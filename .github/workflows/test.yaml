@@ -65,7 +65,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .snakemake/conda
-          key: conda-envs-${{ hashFiles('workflow/**/*.yml', 'workflow/**/*.yaml', 'pyproject.toml') }}
+          key: conda-envs-${{ hashFiles('workflow/**/*.yml', 'workflow/**/*.yaml', 'workflow/**/*.pin.txt', 'pyproject.toml') }}
 
       - name: Create conda envs
         if: steps.conda-cache.outputs.cache-hit != 'true'
@@ -91,7 +91,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .snakemake/conda
-          key: conda-envs-${{ hashFiles('workflow/**/*.yml', 'workflow/**/*.yaml', 'pyproject.toml') }}
+          key: conda-envs-${{ hashFiles('workflow/**/*.yml', 'workflow/**/*.yaml', 'workflow/**/*.pin.txt', 'pyproject.toml') }}
           fail-on-cache-miss: true
 
       - name: Run unit tests
@@ -134,7 +134,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .snakemake/conda
-          key: conda-envs-${{ hashFiles('workflow/**/*.yml', 'workflow/**/*.yaml', 'pyproject.toml') }}
+          key: conda-envs-${{ hashFiles('workflow/**/*.yml', 'workflow/**/*.yaml', 'workflow/**/*.pin.txt', 'pyproject.toml') }}
           fail-on-cache-miss: true
 
       - name: Run full tests

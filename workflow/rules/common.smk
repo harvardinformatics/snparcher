@@ -469,7 +469,7 @@ for sample_id, group in samples_df.groupby("sample_id"):
                 "Only one row is supported for bam/gvcf inputs."
             )
 
-if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
+if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks", "repadapt"}:
     gvcf_samples = (
         samples_df[samples_df["input_type"] == "gvcf"]["sample_id"]
         .drop_duplicates()
@@ -489,6 +489,14 @@ if VARIANT_TOOL == "parabricks":
         raise ValueError(
             "variant_calling.parabricks.container_image is required when variant_calling.tool='parabricks'."
         )
+
+# The repadapt caller pins bcftools 1.16, whose `call --ploidy` accepts only
+# predefined aliases; of the numeric ones, only 1 and 2 exist.
+if VARIANT_TOOL == "repadapt" and config["variant_calling"]["ploidy"] not in (1, 2):
+    raise ValueError(
+        "variant_calling.tool 'repadapt' supports variant_calling.ploidy 1 or 2 only "
+        f"(got {config['variant_calling']['ploidy']})."
+    )
 
 samples_df["input_unit"] = (
     samples_df.groupby(["sample_id", "library_id"]).cumcount().add(1).map(lambda x: f"u{x}")
@@ -580,7 +588,7 @@ GATK_LONG_CONTIG_MODE = LONG_CONTIG_MODE and VARIANT_TOOL == "gatk"
 if LONG_CONTIG_MODE and VARIANT_TOOL in {"sentieon", "parabricks"}:
     raise ValueError(
         f"variant_calling.long_contig_mode is not implemented for the {VARIANT_TOOL} "
-        "backend. Use gatk, bcftools, or deepvariant for long-contig "
+        "backend. Use gatk, bcftools, deepvariant, or repadapt for long-contig "
         "references."
     )
 
@@ -617,11 +625,14 @@ FILTERED_VCF_WORK_INDEX = get_vcf_index(FILTERED_VCF_WORK)
 # --- Hard-filtering / final call set ---
 #
 # GATK hard filters key on GATK-style annotations (QD, FS, SOR, MQ, MQRankSum,
-# ReadPosRankSum), which only the GATK-lineage callers emit. bcftools and
-# DeepVariant produce a different annotation set, so hard filtering is skipped
-# for them and their raw VCF is the final call set.
+# ReadPosRankSum), which only the GATK-lineage callers emit. The repadapt
+# caller has its own filter (RepAdapt's AC=AN || MQ < 30, as soft filters).
+# bcftools and DeepVariant produce a different annotation set, so filtering is
+# skipped for them and their raw VCF is the final call set.
 GATK_LINEAGE_TOOLS = {"gatk", "sentieon", "parabricks"}
 GATK_LINEAGE_CALLER = VARIANT_TOOL in GATK_LINEAGE_TOOLS
+REPADAPT_CALLER = VARIANT_TOOL == "repadapt"
+FILTERING_CALLER = GATK_LINEAGE_CALLER or REPADAPT_CALLER
 
 # Config-gated outputs.
 GENERATE_FILTERED_VCF = bool(config["variant_calling"]["generate_filtered_vcf"])
@@ -629,24 +640,25 @@ POSTPROCESS_SPLIT_BY_TYPE = bool(
     config["modules"]["postprocess"]["filtering"]["split_by_type"]
 )
 
-if GENERATE_FILTERED_VCF and not GATK_LINEAGE_CALLER:
+if GENERATE_FILTERED_VCF and not FILTERING_CALLER:
     logger.warning(
         f"variant_calling.generate_filtered_vcf is true but caller '{VARIANT_TOOL}' "
-        "is not in the GATK family (gatk/sentieon/parabricks); GATK hard filters "
-        "require GATK-style annotations that this caller does not emit. Disabling "
+        "is not in the GATK family (gatk/sentieon/parabricks) or repadapt; GATK hard "
+        "filters require GATK-style annotations that this caller does not emit. Disabling "
         "generate_filtered_vcf; the raw VCF is the final call set for this caller."
     )
     GENERATE_FILTERED_VCF = False
 
-# Hard filtering runs only when the caller emits GATK-style annotations *and*
-# the user asked for the filtered call set. Setting generate_filtered_vcf to
-# false therefore skips filtering outright rather than producing a filtered VCF
-# that downstream consumers still depend on.
-APPLY_HARD_FILTERS = GATK_LINEAGE_CALLER and GENERATE_FILTERED_VCF
+# Filtering runs only when the caller has a filter *and* the user asked for the
+# filtered call set. Setting generate_filtered_vcf to false therefore skips
+# filtering outright rather than producing a filtered VCF that downstream
+# consumers still depend on.
+APPLY_GATK_HARD_FILTERS = GATK_LINEAGE_CALLER and GENERATE_FILTERED_VCF
+APPLY_REPADAPT_FILTER = REPADAPT_CALLER and GENERATE_FILTERED_VCF
 
 # The VCF that downstream consumers (postprocess, qc, `call_variants`) treat as
-# the final call set: hard-filtered when hard filtering runs, raw otherwise.
-FINAL_VCF = FILTERED_VCF if APPLY_HARD_FILTERS else RAW_VCF
+# the final call set: filtered when filtering runs, raw otherwise.
+FINAL_VCF = FILTERED_VCF if (APPLY_GATK_HARD_FILTERS or APPLY_REPADAPT_FILTER) else RAW_VCF
 
 
 # --- Sample lists ---
@@ -715,6 +727,14 @@ if POSTPROCESS_ENABLED and not CALLABLE_FINAL_BED_ENABLED:
         "will not be generated. Disabling postprocess."
     )
     POSTPROCESS_ENABLED = False
+
+if REPADAPT_CALLER and POSTPROCESS_ENABLED and POSTPROCESS_SPLIT_BY_TYPE:
+    logger.warning(
+        "variant_calling.tool is 'repadapt', which calls SNPs only (mpileup -I), but "
+        "modules.postprocess.filtering.split_by_type is true: "
+        "results/postprocess/clean_indels.vcf.gz will be empty. Set split_by_type "
+        "to false to skip it."
+    )
 
 CALLABLE_TARGETS = []
 

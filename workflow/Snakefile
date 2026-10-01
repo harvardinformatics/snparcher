@@ -20,7 +20,11 @@ elif VARIANT_TOOL == "gatk":
         include: "rules/variant_calling/gatk.smk"
         include: "rules/variant_calling/joint_gvcf.smk"
 elif VARIANT_TOOL == "bcftools":
+    include: "rules/variant_calling/contig_regions.smk"
     include: "rules/variant_calling/bcftools.smk"
+elif VARIANT_TOOL == "repadapt":
+    include: "rules/variant_calling/contig_regions.smk"
+    include: "rules/variant_calling/repadapt.smk"
 elif VARIANT_TOOL == "deepvariant":
     include: "rules/variant_calling/deepvariant.smk"
     include: "rules/variant_calling/glnexus_gvcf.smk"
@@ -30,7 +34,7 @@ elif VARIANT_TOOL == "parabricks":
 else:
     raise ValueError(f"Unsupported variant_calling.tool: {VARIANT_TOOL}")
 
-if APPLY_HARD_FILTERS:
+if APPLY_GATK_HARD_FILTERS:
     include: "rules/variant_calling/hard_filters.smk"
 
 
@@ -41,7 +45,7 @@ rule all:
     default_target: True
     input:
         RAW_VCF,
-        # Hard-filtered VCF as a default product (GATK-lineage only; validated in common.smk)
+        # Filtered VCF as a default product (GATK-lineage and repadapt only; validated in common.smk)
         FILTERED_VCF if GENERATE_FILTERED_VCF else [],
         "results/qc_metrics/qc_report.tsv",
         CALLABLE_TARGETS,
@@ -136,8 +140,8 @@ rule map_samples:
 
 
 rule call_variants:
-    """Run variant calling through to the final call set (hard-filtered VCF for
-    GATK-lineage callers, raw VCF otherwise)."""
+    """Run variant calling through to the final call set (filtered VCF for
+    GATK-lineage callers and repadapt, raw VCF otherwise)."""
     input:
         FINAL_VCF,
 

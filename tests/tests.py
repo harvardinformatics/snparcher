@@ -79,6 +79,47 @@ def load_repadapt_normalizer():
     return module
 
 
+def write_repadapt_config(base_config, out_dir, *, replacements=(), name="config_repadapt.yaml"):
+    """Write a copy of a config with tool: repadapt plus extra text replacements."""
+    text = Path(base_config).read_text()
+    for old, new in [('tool: "gatk"', 'tool: "repadapt"'), *replacements]:
+        if old not in text:
+            raise AssertionError(f"Expected {old!r} in {base_config}")
+        text = text.replace(old, new, 1)
+    out_path = Path(out_dir) / name
+    out_path.write_text(text)
+    return out_path
+
+
+def flatten_whitespace(text):
+    """Collapse runs of whitespace, as Snakemake prints continued shell lines."""
+    return " ".join(text.split())
+
+
+def assert_repadapt_call_set(raw_vcf, filtered_vcf):
+    """Check a repadapt raw/filtered VCF pair: pinned bcftools 1.16, SNPs only,
+    AD/DP/GQ annotations, and FILTER labels that match RepAdapt's filter."""
+    normalizer = load_repadapt_normalizer()
+    for vcf in (raw_vcf, filtered_vcf):
+        with gzip.open(vcf, "rt") as handle:
+            header = [line.rstrip("\n") for line in handle if line.startswith("##")]
+        assert "##bcftools_callVersion=1.16+htslib-1.16" in header, vcf
+        for tag in ("AD", "DP", "GQ"):
+            assert any(line.startswith(f"##FORMAT=<ID={tag},") for line in header), (vcf, tag)
+
+    raw = list(iter_vcf_records(raw_vcf))
+    filtered = list(iter_vcf_records(filtered_vcf))
+    assert raw, "no raw records"
+    # mpileup -I: no indels.
+    assert all(len(f[3]) == 1 and all(len(a) == 1 for a in f[4].split(",")) for f in raw)
+    assert {f[6] for f in raw} == {"."}
+    # Soft filters keep every record; labels follow AC=AN / MQ<30.
+    assert [f[:6] for f in filtered] == [f[:6] for f in raw]
+    for fields in filtered:
+        assert fields[6] == normalizer.expected_repadapt_filter(fields), fields[:8]
+    return filtered
+
+
 def scheduled_rule_present(output, rule):
     return f"rule {rule}:" in output or f"checkpoint {rule}:" in output
 
@@ -1597,6 +1638,10 @@ def test_bcftools_dry_run(request):
         # call_variants resolves to the raw VCF and variant_filtration never runs.
         assert "variant_filtration" not in output
         assert "results/vcfs/raw.vcf.gz" in output
+        # The repadapt caller shares the region checkpoint but not its rules
+        # or its per-sample (-G -) calling.
+        assert "rule repadapt_" not in output
+        assert "-G -" not in workflow_source("rules", "variant_calling", "bcftools.smk")
 
 
 @pytest.mark.dry_run
@@ -1938,7 +1983,7 @@ def test_parabricks_dry_run(request):
 
 
 @pytest.mark.dry_run
-@pytest.mark.parametrize("tool", ["bcftools", "deepvariant", "parabricks"])
+@pytest.mark.parametrize("tool", ["bcftools", "deepvariant", "parabricks", "repadapt"])
 def test_gvcf_input_rejected_for_new_callers(request, tool):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -3328,3 +3373,237 @@ def test_repadapt_golden_records_are_consistent():
     assert normalizer.normalized_records([REPADAPT_GOLDEN_DIR / "final_variants.vcf.gz"], reference) == final
     for sample in REPADAPT_SAMPLES:
         assert (REPADAPT_GOLDEN_DIR / f"{sample}_sorted_RG_dedup_realigned.bam").stat().st_size > 0
+
+
+# --- RepAdapt calling model (variant_calling.tool: repadapt) ------------------
+
+
+@pytest.mark.dry_run
+def test_repadapt_dry_run(request):
+    """call_variants builds the soft-filtered VCF through the repadapt rules,
+    reusing the bcftools region checkpoint and no GATK filtering."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_repadapt_config(get_config_file(), tmpdir)
+
+        result = smk.dry_run(target="call_variants", configfile=cfg, samples=get_samples_file())
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        for rule in (
+            "bcftools_regions",
+            "repadapt_region_list",
+            "repadapt_concat_regions",
+            "repadapt_filter",
+        ):
+            assert scheduled_rule_present(output, rule), rule
+        assert not scheduled_rule_present(output, "bcftools_concat_regions")
+        assert "variant_filtration" not in output
+        assert "Disabling generate_filtered_vcf" not in output
+        assert re.search(r"rule call_variants:\n    input: results/vcfs/filtered\.vcf\.gz\n", output)
+
+        commands = flatten_whitespace(output)
+        assert (
+            "bcftools concat -f results/vcfs/regions/repadapt/regions.list "
+            "-Oz -o results/vcfs/raw.vcf.gz"
+        ) in commands
+        assert "bcftools index -f -t results/vcfs/raw.vcf.gz" in commands
+        assert (
+            "bcftools filter -s AllHomAlt -e 'AC=AN' -Ou results/vcfs/raw.vcf.gz "
+            "2> logs/repadapt_filter.txt | bcftools filter -m + -s LowMQ -e 'MQ<30' "
+            "-Oz -o results/vcfs/filtered.vcf.gz -"
+        ) in commands
+        assert "bcftools index -f -t results/vcfs/filtered.vcf.gz" in commands
+
+
+@pytest.mark.dry_run
+def test_repadapt_region_command_flags(request):
+    """The per-contig command is RepAdapt's, with -q 10 and --ploidy, and
+    bcftools 1.16's defaults for base quality, depth and threads."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        smk = SnakemakeRunner(tmpdir, use_conda=not no_conda)
+        smk.link_fixtures("config", "data", "results/reference", "results/bams/markdup")
+        # Seed the checkpoint output so the per-region job and its command
+        # appear in the dry run.
+        regions = tmpdir / "results/vcfs/regions/regions.tsv"
+        regions.parent.mkdir(parents=True, exist_ok=True)
+        regions.write_text("L000000\tchr2l\n")
+        cfg = write_repadapt_config(FIXTURES_DIR / "config" / "config.yaml", tmpdir)
+
+        result = smk.dry_run(
+            target="results/vcfs/regions/repadapt/L000000.vcf.gz",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert scheduled_rule_present(output, "repadapt_call")
+        commands = flatten_whitespace(output)
+        bams = " ".join(f"results/bams/markdup/sample{i}.bam" for i in range(5))
+        mpileup = (
+            f"bcftools mpileup -Ou -f results/reference/my_organism.fa.gz -r chr2l {bams} "
+            "-q 10 -I -a FMT/AD,FMT/DP 2> logs/repadapt_call/L000000.txt"
+        )
+        call = (
+            "| bcftools call -G - -f GQ -mv --ploidy 2 "
+            "-Oz -o results/vcfs/regions/repadapt/L000000.vcf.gz -"
+        )
+        assert f"{mpileup} {call}" in commands
+        source = workflow_source("rules", "variant_calling", "repadapt.smk")
+        shell_block = source.split("rule repadapt_call:", 1)[1].split("rule ", 1)[0]
+        for flag in (" -Q ", " -d ", "--threads"):
+            assert flag not in shell_block, flag
+        assert 'conda:\n        "../../envs/repadapt/bcftools.yaml"' in shell_block
+
+
+def test_repadapt_bcftools_env_is_pinned():
+    """The repadapt env pins bcftools 1.16, with an exact linux-64 package list
+    taken from RepAdapt's image."""
+    envs = WORKFLOW_DIR / "envs" / "repadapt"
+    assert "bcftools=1.16" in (envs / "bcftools.yaml").read_text()
+    pin = (envs / "bcftools.linux-64.pin.txt").read_text().splitlines()
+    assert "@EXPLICIT" in pin
+    assert (
+        "https://conda.anaconda.org/bioconda/linux-64/bcftools-1.16-hfe4b78e_1.tar.bz2"
+        "#be03e1f9478c474f6645b3841a3c23da"
+    ) in pin
+    assert any("/htslib-1.16-" in line for line in pin)
+
+
+@pytest.mark.dry_run
+def test_repadapt_long_contig_uses_csi(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        smk.link_fixtures("config", "data", "results/reference", "results/bams/markdup")
+        cfg = write_long_contig_config(FIXTURES_DIR / "config" / "config.yaml", tmpdir, "repadapt")
+
+        result = smk.dry_run(
+            target="call_variants",
+            configfile=cfg,
+            samples=FIXTURES_DIR / "config" / "samples.csv",
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "results/vcfs/raw.vcf.gz.csi" in output
+        assert "results/vcfs/filtered.vcf.gz.csi" in output
+        assert ".vcf.gz.tbi" not in output
+        commands = flatten_whitespace(output)
+        assert "bcftools index -f -c results/vcfs/raw.vcf.gz" in commands
+        assert "bcftools index -f -c results/vcfs/filtered.vcf.gz" in commands
+
+
+@pytest.mark.dry_run
+def test_repadapt_generate_filtered_vcf_false_uses_raw(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_repadapt_config(
+            get_config_file(),
+            tmpdir,
+            replacements=[('tool: "repadapt"', 'tool: "repadapt"\n  generate_filtered_vcf: false')],
+        )
+
+        for target in ("all", "call_variants"):
+            result = smk.dry_run(target=target, configfile=cfg, samples=get_samples_file())
+            result.assert_success()
+            output = result.stdout + result.stderr
+            assert not scheduled_rule_present(output, "repadapt_filter"), target
+            assert "results/vcfs/filtered.vcf.gz" not in output, target
+        assert re.search(r"rule call_variants:\n    input: results/vcfs/raw\.vcf\.gz\n", output)
+
+
+@pytest.mark.dry_run
+def test_repadapt_rejects_unsupported_ploidy(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_repadapt_config(get_config_file(), tmpdir, replacements=[("ploidy: 2", "ploidy: 3")])
+
+        result = smk.dry_run(target="call_variants", configfile=cfg, samples=get_samples_file())
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "supports variant_calling.ploidy 1 or 2 only (got 3)" in output
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize("split_by_type", [True, False])
+def test_repadapt_split_by_type_warns_empty_indels(request, split_by_type):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        replacements = []
+        if not split_by_type:
+            replacements.append(
+                ('exclude_scaffolds: "mtDNA,Y"', 'exclude_scaffolds: "mtDNA,Y"\n      split_by_type: false')
+            )
+        cfg = write_repadapt_config(get_postprocess_config(), tmpdir, replacements=replacements)
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=get_samples_file())
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        warned = "clean_indels.vcf.gz will be empty" in output
+        assert warned == split_by_type
+
+
+@pytest.mark.full_run
+def test_repadapt_golden_bams(request):
+    """Calling on RepAdapt's own realigned BAMs reproduces RepAdapt's calls:
+    raw records equal its pre-filter calls, and PASS records equal its output."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.run(
+            target=["call_variants", "results/vcfs/raw.vcf.gz"],
+            configfile=CONFIGS_DIR / "repadapt.yaml",
+            samples=SAMPLES_DIR / "repadapt_golden_bams.csv",
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools")
+        result.assert_success()
+
+        raw_vcf = Path(tmpdir) / "results/vcfs/raw.vcf.gz"
+        filtered_vcf = Path(tmpdir) / "results/vcfs/filtered.vcf.gz"
+        filtered = assert_repadapt_call_set(raw_vcf, filtered_vcf)
+        assert {f[6] for f in filtered} == {"PASS", "AllHomAlt", "LowMQ", "AllHomAlt;LowMQ"}
+
+        normalizer = load_repadapt_normalizer()
+        reference = REPADAPT_DATA_DIR / "reference.fasta"
+        golden_raw = (REPADAPT_GOLDEN_DIR / "raw_records.tsv").read_text().splitlines()
+        golden_final = (REPADAPT_GOLDEN_DIR / "final_records.tsv").read_text().splitlines()
+        assert normalizer.normalized_records([raw_vcf], reference) == golden_raw
+        assert normalizer.normalized_records([filtered_vcf], reference, pass_only=True) == golden_final
+
+
+@pytest.mark.full_run
+def test_full_pipeline_repadapt(request):
+    """tool: repadapt on snpArcher's default mapping: raw and filtered VCFs,
+    the QC report and callable sites are all produced."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_repadapt_config(get_config_file(), tmpdir)
+
+        result = smk.run(target=["all", "call_variants"], configfile=cfg, samples=get_samples_file())
+        skip_if_arm64_packages_unavailable(result, "bcftools")
+        result.assert_success()
+        result.assert_output_exists(
+            "results/vcfs/raw.vcf.gz",
+            "results/vcfs/raw.vcf.gz.tbi",
+            "results/vcfs/filtered.vcf.gz",
+            "results/vcfs/filtered.vcf.gz.tbi",
+            "results/qc_metrics/qc_report.tsv",
+            "results/callable_sites/callable_sites.bed",
+        )
+        assert_repadapt_call_set(
+            Path(tmpdir) / "results/vcfs/raw.vcf.gz",
+            Path(tmpdir) / "results/vcfs/filtered.vcf.gz",
+        )
+

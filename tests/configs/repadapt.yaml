@@ -1,0 +1,9 @@
+samples: "samples.csv"
+
+reference:
+  name: "repadapt_fixture"
+  source: "tests/data/repadapt/reference.fasta"
+
+variant_calling:
+  tool: "repadapt"
+  ploidy: 2
