@@ -113,6 +113,14 @@ A mapping pipeline turns a sample's staged per-row reads into one coordinate-sor
 - **Keep every existing rule name** so profiles and tests don't change: `fastp, bwa_mem, markdup_library, merge_library_bams, merge_dedup_libraries, merge_library_level_bams, bam_stats, sentieon_map, sentieon_dedup_library, sentieon_bam_stats, stage_external_bam, index_bam_csi`.
 - `USE_SENTIEON` currently serves both mapping and calling. After the refactor, mapping code keys off `MAPPING_PIPELINE`, and calling code keeps using `VARIANT_TOOL`.
 - **Extending later:** a variant that only changes flags (for example, preserving today's `-M` behavior as `legacy` if #346 changes the default) is a new table entry that reuses an existing rule file with a different settings dict. A pipeline with different steps is a new rule file.
+- **As implemented in PR 2:**
+  - **Registry entries:** each pipeline in `MAPPING_PIPELINES` has `rules`, `final_bam`, `qc_json` and `extra_qc`.
+  - **No validation hook yet:** neither `default` nor `sentieon` needs one, so PR 3 adds it with its first user (repadapt's long-contig and caller checks). Pipeline/caller compatibility is checked in `resolve_mapping_pipeline`.
+  - **Shared helpers:** `bwa_mem_input`, `get_read_group` (`LB:{library}`) and the per-library merge helpers and rules are in `rules/mapping/common.smk`. Repadapt needs its own read group (`LB:{sample}_LB`) and a per-sample merge.
+  - **Stays put:** `parse_sentieon_stats` remains in `qc_metrics.smk`.
+  - **Schema:** the enum is `default | sentieon`. PR 3 adds `repadapt` and the `mapping.repadapt` block, in both the schema and the `DEFAULTS` dict in `common.smk`.
+  - **Bugs fixed on the way:** `tool: sentieon` couldn't run under Snakemake 9. One output was named `insert`, which Snakemake reserves, and the env file was `sentieon.yml` while the rules ask for `sentieon.yaml`.
+  - **Gotcha 22 checked:** `include: MAPPING["rules"]` works, Snakemake's lint output is unchanged, and snakefmt accepts a computed include. snakefmt already failed to parse the Snakefile before this change.
 
 ### 2.4 The `repadapt` mapping pipeline, PR 3
 
@@ -334,6 +342,8 @@ PRs 1 and 2 can proceed in parallel. When starting a sub-branch, update `feat/re
 - Add the envs to the CI env build. Update profiles and docs; the docs should explain the QC metric definitions, per-sample duplicate removal, the one library tag per sample, and the limitations.
 
 ## 4. Codebase map (at `09a58b7`; line numbers approximate)
+
+PR 2 moved `rules/mapping.smk` and the `fastp` rule into `rules/mapping/` (section 2.3).
 
 - **`workflow/Snakefile`:**
   - includes: common, reference, intervals, fastq, mapping, qc_metrics, callable_sites

@@ -7,7 +7,8 @@ include: "rules/common.smk"
 include: "rules/reference.smk"
 include: "rules/intervals.smk"
 include: "rules/fastq.smk"
-include: "rules/mapping.smk"
+include: "rules/mapping/common.smk"
+include: MAPPING["rules"]
 include: "rules/qc_metrics.smk"
 include: "rules/callable_sites.smk"
 

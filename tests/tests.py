@@ -443,6 +443,20 @@ def write_config_for_tool(base_config, out_dir, tool, parabricks_image=None):
     return out_path
 
 
+def write_mapping_config(base_config, out_dir, pipeline, tool="gatk"):
+    """Write a config copy with mapping.pipeline set and variant_calling.tool overridden."""
+    text = Path(base_config).read_text()
+    text = text.replace('tool: "gatk"', f'tool: "{tool}"', 1)
+    if "\nvariant_calling:\n" not in text:
+        raise AssertionError("Expected a variant_calling block")
+    text = text.replace(
+        "\nvariant_calling:\n", f'\nmapping:\n  pipeline: "{pipeline}"\n\nvariant_calling:\n', 1
+    )
+    out_path = Path(out_dir) / f"config_mapping_{pipeline}_{tool}.yaml"
+    out_path.write_text(text)
+    return out_path
+
+
 def write_long_contig_config(base_config, out_dir, tool="gatk", mode="true"):
     """Write a config copy with long-contig mode enabled or set to auto."""
     text = Path(base_config).read_text()
@@ -1642,6 +1656,88 @@ def test_bcftools_dry_run(request):
         # or its per-sample (-G -) calling.
         assert "rule repadapt_" not in output
         assert "-G -" not in workflow_source("rules", "variant_calling", "bcftools.smk")
+
+
+@pytest.mark.dry_run
+def test_sentieon_dry_run(request):
+    """tool: sentieon maps and dedups with Sentieon, and its insert-size QC
+    feeds the QC report."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "sentieon")
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs.csv")
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        for rule in (
+            "sentieon_map",
+            "sentieon_dedup_library",
+            "sentieon_bam_stats",
+            "parse_sentieon_stats",
+            "sentieon_haplotyper",
+        ):
+            assert scheduled_rule_present(output, rule), rule
+        for rule in ("bwa_mem", "markdup_library"):
+            assert not scheduled_rule_present(output, rule), rule
+        # tool: sentieon selects the sentieon mapping pipeline on its own.
+        assert "Mapping pipeline:   sentieon" in output
+        assert re.search(
+            r"rule combine_qc_metrics:\n    input: [^\n]*results/qc_metrics/sentieon/sample1\.json",
+            output,
+        )
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "tool, pipeline, mapper",
+    [("gatk", "default", "bwa_mem"), ("sentieon", "sentieon", "sentieon_map")],
+)
+def test_mapping_pipeline_selects_mapping_rules(request, tool, pipeline, mapper):
+    """An explicit mapping.pipeline is a known config key and selects its
+    mapping rules."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_mapping_config(get_config_file(), tmpdir, pipeline, tool=tool)
+
+        result = smk.dry_run(target="map_samples", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs.csv")
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert f"Mapping pipeline:   {pipeline}" in output
+        assert "Ignoring unsupported config key" not in output
+        assert scheduled_rule_present(output, "fastp")
+        assert scheduled_rule_present(output, mapper)
+
+
+@pytest.mark.dry_run
+def test_mapping_pipeline_sentieon_requires_sentieon_caller(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_mapping_config(get_config_file(), tmpdir, "sentieon", tool="gatk")
+
+        result = smk.dry_run(target="map_samples", configfile=cfg, samples=get_samples_file())
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "mapping.pipeline 'sentieon' is only supported with variant_calling.tool 'sentieon'" in output
+
+
+@pytest.mark.dry_run
+def test_mapping_pipeline_rejects_unknown_value(request):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_mapping_config(get_config_file(), tmpdir, "bogus")
+
+        result = smk.dry_run(target="map_samples", configfile=cfg, samples=get_samples_file())
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "- mapping.pipeline: 'bogus' is not one of" in output
 
 
 @pytest.mark.dry_run
