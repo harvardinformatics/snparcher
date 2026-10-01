@@ -38,7 +38,8 @@ An optional key is also accepted at the top level:
 
 | Key | Type | Default | Allowed values | Description |
 |-----|------|---------|----------------|-------------|
-| `mapping.pipeline` | string | `"default"` | `default`, `sentieon` | How reads become each sample's final BAM. `default`: fastp, `bwa mem` and per-library duplicate marking with sambamba. `sentieon`: Sentieon's `bwa mem` and Dedup; selected automatically with `variant_calling.tool: sentieon`, and only supported with it. Samples supplied as BAMs are used as they are. |
+| `mapping.pipeline` | string | `"default"` | `default`, `sentieon`, `repadapt` | How reads become each sample's final BAM. `default`: fastp, `bwa mem` and per-library duplicate marking with sambamba. `sentieon`: Sentieon's `bwa mem` and Dedup; selected automatically with `variant_calling.tool: sentieon`, and only supported with it. `repadapt`: RepAdapt's processing with its pinned tools (fastp 0.20.1, bwa 0.7.17, MAPQ >= 10 filter, Picard duplicate removal per sample, GATK3 indel realignment); any caller except `sentieon`. Samples supplied as BAMs are used as they are. See [mapping pipelines](../explanation/mapping.md). |
+| `mapping.repadapt.indel_realignment` | boolean or `"auto"` | `"auto"` | `true`, `false`, `"auto"` | GATK3 indel realignment in the `repadapt` pipeline. `"auto"` realigns unless `long_contig_mode` is on, then skips it with a warning (GATK3 needs BAI indexes, which can't index contigs longer than 2^29); `true` errors in long-contig mode; `false` always skips it. |
 
 ## `variant_calling`
 

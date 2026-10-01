@@ -457,6 +457,32 @@ def write_mapping_config(base_config, out_dir, pipeline, tool="gatk"):
     return out_path
 
 
+def write_repadapt_mapping_config(base_config, out_dir, *, tool=None, indel_realignment=None):
+    """Write a config copy with mapping.pipeline: repadapt, optionally setting
+    variant_calling.tool and mapping.repadapt.indel_realignment."""
+    text = Path(base_config).read_text()
+    if tool is not None:
+        text = re.sub(r'tool: "[^"]+"', f'tool: "{tool}"', text, count=1)
+    block = 'mapping:\n  pipeline: "repadapt"\n'
+    if indel_realignment is not None:
+        block += f"  repadapt:\n    indel_realignment: {indel_realignment}\n"
+    if "\nvariant_calling:\n" not in text:
+        raise AssertionError("Expected a variant_calling block")
+    text = text.replace("\nvariant_calling:\n", f"\n{block}\nvariant_calling:\n", 1)
+    out_path = Path(out_dir) / f"{Path(base_config).stem}_repadapt_mapping.yaml"
+    out_path.write_text(text)
+    return out_path
+
+
+def write_bam_and_fastq_sample_sheet(out_dir):
+    """Write the local FASTQ sheet plus one sample supplied as a BAM."""
+    rows = (SAMPLES_DIR / "local_fastqs.csv").read_text().strip().splitlines()
+    rows.append(f"sample_bam,bam,{FIXTURES_DIR / 'results/bams/markdup/sample0.bam'},,true")
+    out_path = Path(out_dir) / "bam_and_fastq_samples.csv"
+    out_path.write_text("\n".join(rows) + "\n")
+    return out_path
+
+
 def write_long_contig_config(base_config, out_dir, tool="gatk", mode="true"):
     """Write a config copy with long-contig mode enabled or set to auto."""
     text = Path(base_config).read_text()
@@ -3702,4 +3728,232 @@ def test_full_pipeline_repadapt(request):
             Path(tmpdir) / "results/vcfs/raw.vcf.gz",
             Path(tmpdir) / "results/vcfs/filtered.vcf.gz",
         )
+
+
+# --- RepAdapt mapping pipeline (mapping.pipeline: repadapt) -------------------
+
+
+GATK3_REALIGNER_PATTERN = (
+    r"gatk3 -Xmx\S+m -Djava\.io\.tmpdir=\S+ -T {tool} -R results/reference/{ref}\.fa "
+    r"-I results/bams/repadapt/{stage}/{sample}\.bam"
+)
+
+
+@pytest.mark.dry_run
+def test_repadapt_mapping_commands(request):
+    """The repadapt pipeline runs RepAdapt's commands, in RepAdapt's order."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_repadapt_mapping_config(CONFIGS_DIR / "repadapt.yaml", tmpdir)
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=SAMPLES_DIR / "repadapt_fastqs.csv")
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "Mapping pipeline:   repadapt" in output
+        commands = flatten_whitespace(output)
+        log = "logs/bwa_mem/S1/S1/u1.txt"
+        assert (
+            "fastp -i tests/data/repadapt/fastq/S1_1.fastq.gz -I tests/data/repadapt/fastq/S1_2.fastq.gz "
+            "-o results/filtered_fastqs/S1/S1/u1_1.fastq.gz -O results/filtered_fastqs/S1/S1/u1_2.fastq.gz "
+            "-w 1 -j results/fastp/S1/S1/u1.json -h /dev/null"
+        ) in commands
+        assert "--detect_adapter_for_pe" not in output
+        assert (
+            "bwa mem -K 40000000 -t 1 -R '@RG\\tID:S1.u1\\tSM:S1\\tLB:S1_LB\\tPL:ILLUMINA' "
+            "results/reference/repadapt_fixture.fa.gz results/filtered_fastqs/S1/S1/u1_1.fastq.gz "
+            f"results/filtered_fastqs/S1/S1/u1_2.fastq.gz 2>> {log} "
+            f'| tee "$tmp/sam" | samtools view -u -q 10 - 2>> {log} '
+            f'| samtools sort -n -u -T "$tmp/name" - 2>> {log} '
+            f"| samtools fixmate -m - - 2>> {log} "
+            f'| samtools sort -T "$tmp/coord" -o results/bams/raw/S1/S1/u1.bam - 2>> {log}'
+        ) in commands
+        assert 'samtools flagstat -O tsv "$tmp/sam" > results/qc_metrics/repadapt/flagstat/S1/S1/u1.tsv' in commands
+        assert "bwa mem -M" not in output
+        assert re.search(
+            r"picard -Xmx\S+m MarkDuplicates -INPUT results/bams/raw/S1/S1/u1\.bam "
+            r"-OUTPUT results/bams/repadapt/dedup/S1\.bam -METRICS_FILE results/qc_metrics/repadapt/S1_duplicates\.txt "
+            r"-REMOVE_DUPLICATES true --VALIDATION_STRINGENCY SILENT --TMP_DIR ",
+            commands,
+        )
+        assert "samtools index -b results/bams/repadapt/dedup/S1.bam results/bams/repadapt/dedup/S1.bam.bai" in commands
+        assert "bgzip -dc results/reference/repadapt_fixture.fa.gz > results/reference/repadapt_fixture.fa" in commands
+        realigner = GATK3_REALIGNER_PATTERN.format(tool="{tool}", ref="repadapt_fixture", stage="dedup", sample="S1")
+        assert re.search(realigner.format(tool="RealignerTargetCreator") + r" -o results/bams/repadapt/realign/S1\.intervals", commands)
+        assert re.search(
+            realigner.format(tool="IndelRealigner")
+            + r" -targetIntervals results/bams/repadapt/realign/S1\.intervals --consensusDeterminationModel USE_READS"
+            r" -o results/bams/repadapt/realigned/S1\.bam",
+            commands,
+        )
+        assert " -nt " not in commands
+        assert "samtools index -c results/bams/repadapt/realigned/S1.bam" in commands
+        assert re.search(r"rule combine_qc_metrics:\n    input: [^\n]*results/qc_metrics/repadapt/S1\.json", output)
+        source = workflow_source("rules", "mapping", "repadapt.smk")
+        assert source.count("-Xmx{resources.mem_mb_reduced}m") == 3
+
+
+@pytest.mark.dry_run
+def test_repadapt_mapping_multirow_sample(request):
+    """Rows are mapped separately with one library tag per sample, then
+    deduplicated together in one Picard job."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_repadapt_mapping_config(get_config_file(), tmpdir, tool="bcftools")
+
+        result = smk.dry_run(
+            target="map_samples", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs_multirow_multi_library.csv"
+        )
+        result.assert_success()
+
+        commands = flatten_whitespace(result.stdout + result.stderr)
+        for library in ("libA", "libB"):
+            assert f"'@RG\\tID:{library}.u1\\tSM:sample_multi_lib\\tLB:sample_multi_lib_LB\\tPL:ILLUMINA'" in commands
+        assert re.search(
+            r"MarkDuplicates -INPUT results/bams/raw/sample_multi_lib/libA/u1\.bam "
+            r"-INPUT results/bams/raw/sample_multi_lib/libB/u1\.bam -OUTPUT results/bams/repadapt/dedup/sample_multi_lib\.bam",
+            commands,
+        )
+        assert commands.count("MarkDuplicates") == 1
+
+
+@pytest.mark.dry_run
+def test_repadapt_mapping_no_dedup(request):
+    """mark_duplicates: false skips Picard; the merged rows are realigned."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_repadapt_mapping_config(get_config_file(), tmpdir, tool="bcftools")
+
+        result = smk.dry_run(target="map_samples", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs_no_dedup.csv")
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert not scheduled_rule_present(output, "repadapt_remove_duplicates")
+        commands = flatten_whitespace(output)
+        assert "samtools merge results/bams/repadapt/merged/sample1.bam results/bams/raw/sample1/sample1/u1.bam" in commands
+        assert re.search(
+            GATK3_REALIGNER_PATTERN.format(tool="IndelRealigner", ref="test_genome", stage="merged", sample="sample1"),
+            commands,
+        )
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "long_contig, setting, outcome",
+    [(False, "false", "skip"), (True, "auto", "warn"), (True, "true", "error")],
+)
+def test_repadapt_mapping_realignment_settings(request, long_contig, setting, outcome):
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        base = get_config_file()
+        if long_contig:
+            base = write_long_contig_config(base, tmpdir, "repadapt")
+        cfg = write_repadapt_mapping_config(base, tmpdir, tool="repadapt", indel_realignment=setting)
+
+        result = smk.dry_run(target="map_samples", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs.csv")
+        output = result.stdout + result.stderr
+
+        if outcome == "error":
+            assert not result.succeeded
+            assert "mapping.repadapt.indel_realignment is true, but GATK3 indel realignment needs BAI" in output
+            return
+        result.assert_success()
+        for rule in ("repadapt_reference_fasta", "repadapt_index_bai", "repadapt_realigner_targets", "repadapt_indel_realigner"):
+            assert not scheduled_rule_present(output, rule), rule
+        assert re.search(r"rule map_samples:\n    input: results/bams/repadapt/dedup/sample1\.bam", output)
+        assert ("Skipping GATK3 indel realignment" in output) == (outcome == "warn")
+
+
+@pytest.mark.dry_run
+def test_repadapt_mapping_bam_inputs(request):
+    """A sample supplied as a BAM is used as it is, with the shared QC, while
+    FASTQ samples get the repadapt QC JSON."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_repadapt_mapping_config(get_config_file(), tmpdir, tool="bcftools")
+
+        result = smk.dry_run(target="qc_report", configfile=cfg, samples=write_bam_and_fastq_sample_sheet(tmpdir))
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert scheduled_rule_present(output, "stage_external_bam")
+        assert "results/bams/repadapt/realigned/sample_bam.bam" not in output
+        assert "results/bams/raw/sample_bam/" not in output
+        qc_inputs = re.search(r"rule combine_qc_metrics:\n    input: ([^\n]*)", output).group(1)
+        assert "results/qc_metrics/bam/sample_bam.json" in qc_inputs
+        assert "results/qc_metrics/repadapt/sample1.json" in qc_inputs
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize("tool", ["gatk", "bcftools", "sentieon"])
+def test_repadapt_mapping_callers(request, tool):
+    """Every caller except Sentieon's can call from repadapt-mapped BAMs."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_repadapt_mapping_config(get_config_file(), tmpdir, tool=tool)
+
+        result = smk.dry_run(target="map_samples", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs.csv")
+
+        output = result.stdout + result.stderr
+        if tool == "sentieon":
+            assert not result.succeeded
+            assert "mapping.pipeline 'repadapt' is not supported with variant_calling.tool 'sentieon'" in output
+        else:
+            result.assert_success()
+            assert scheduled_rule_present(output, "repadapt_indel_realigner")
+
+
+@pytest.mark.full_run
+def test_repadapt_mapping_golden(request):
+    """mapping.pipeline: repadapt + tool: repadapt on the fixture reads
+    reproduces RepAdapt's raw and PASS records, realigns indels, and reports
+    pre-filter mapping QC."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        smk = SnakemakeRunner(tmpdir, use_conda=not no_conda)
+        cfg = write_repadapt_mapping_config(CONFIGS_DIR / "repadapt.yaml", tmpdir)
+
+        result = smk.run(target="all", configfile=cfg, samples=SAMPLES_DIR / "repadapt_fastqs.csv")
+        skip_if_arm64_packages_unavailable(result, "fastp", "picard", "gatk", "bcftools")
+        result.assert_success()
+        result.assert_output_exists("results/callable_sites/callable_sites.bed")
+
+        raw_vcf = tmpdir / "results/vcfs/raw.vcf.gz"
+        filtered_vcf = tmpdir / "results/vcfs/filtered.vcf.gz"
+        assert_repadapt_call_set(raw_vcf, filtered_vcf)
+        normalizer = load_repadapt_normalizer()
+        reference = REPADAPT_DATA_DIR / "reference.fasta"
+        assert normalizer.normalized_records([raw_vcf], reference) == (
+            (REPADAPT_GOLDEN_DIR / "raw_records.tsv").read_text().splitlines()
+        )
+        assert normalizer.normalized_records([filtered_vcf], reference, pass_only=True) == (
+            (REPADAPT_GOLDEN_DIR / "final_records.tsv").read_text().splitlines()
+        )
+
+        # Realignment barely changes the fixture's calls, so check it ran: an
+        # OC tag (original CIGAR) is BAM bytes "OCZ" then the CIGAR's digits.
+        realigned_reads = 0
+        for sample in REPADAPT_SAMPLES:
+            with gzip.open(tmpdir / f"results/bams/repadapt/realigned/{sample}.bam", "rb") as handle:
+                realigned_reads += len(re.findall(rb"OCZ[0-9]", handle.read()))
+        assert realigned_reads > 0
+
+        rows = [line.split("\t") for line in (tmpdir / "results/qc_metrics/qc_report.tsv").read_text().splitlines()]
+        header = rows[0]
+        for row in rows[1:]:
+            qc = dict(zip(header, row, strict=True))
+            # Mapping rates come from bwa's output before the MAPQ filter: the
+            # fixture's unmappable mates keep them below 100%.
+            assert 90 < float(qc["percent_mapped"]) < 100, qc
+            assert 0 < float(qc["percent_properly_paired"]) <= 100, qc
+            # About 50 duplicate pairs per sample, counted by Picard.
+            assert 60 <= int(qc["num_duplicates"]) <= 110, qc
+            assert float(qc["mean_depth"]) > 5, qc
 

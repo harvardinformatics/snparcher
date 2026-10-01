@@ -1,3 +1,39 @@
+def parse_samtools_coverage(path):
+    """Return (mean depth weighted by contig length, covered bases) from
+    samtools coverage output."""
+    num_sites = []
+    depths = []
+    covered_bases = 0
+
+    with open(path) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            fields = line.strip().split("\t")
+            start, end = int(fields[1]), int(fields[2])
+            num_sites.append(end - start + 1)
+            depths.append(float(fields[6]))
+            covered_bases += int(fields[4])
+
+    total_sites = sum(num_sites)
+    mean_depth = sum(d * n / total_sites for d, n in zip(depths, num_sites)) if total_sites > 0 else 0
+    return mean_depth, covered_bases
+
+
+def read_picard_metrics(path):
+    """Return the rows of a Picard metrics file's METRICS section as dicts."""
+    with open(path) as handle:
+        lines = handle.read().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("## METRICS CLASS"))
+    header = lines[start + 1].split("\t")
+    rows = []
+    for line in lines[start + 2:]:
+        if not line.strip():
+            break
+        rows.append(dict(zip(header, line.split("\t"))))
+    return rows
+
+
 rule parse_bam_stats:
     input:
         coverage="results/qc_metrics/bam/{sample}_coverage.txt",
@@ -8,24 +44,9 @@ rule parse_bam_stats:
         "logs/parse_bam_stats/{sample}.txt"
     run:
         import json
-        
-        # Parse coverage - weighted average across scaffolds
-        num_sites = []
-        depths = []
-        covered_bases = 0
-        
-        with open(input.coverage) as f:
-            for line in f:
-                if line.startswith("#"):
-                    continue
-                fields = line.strip().split("\t")
-                start, end = int(fields[1]), int(fields[2])
-                num_sites.append(end - start + 1)
-                depths.append(float(fields[6]))
-                covered_bases += int(fields[4])
-        
-        total_sites = sum(num_sites)
-        mean_depth = sum(d * n / total_sites for d, n in zip(depths, num_sites)) if total_sites > 0 else 0
+
+        # Coverage: weighted average across scaffolds
+        mean_depth, covered_bases = parse_samtools_coverage(input.coverage)
         
         # Parse flagstat
         with open(input.flagstat) as f:

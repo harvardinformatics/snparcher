@@ -13,6 +13,7 @@ The main stages are:
 2. **Read preprocessing**: Adapter trimming and quality filtering with fastp.
 3. **Alignment**: Reads are mapped to the reference genome with BWA-MEM.
 4. **Duplicate marking**: PCR and optical duplicates are flagged (can be disabled per sample for amplicon protocols).
+   Steps 2–4 make up the [mapping pipeline](mapping.md), which `mapping.pipeline` can swap for Sentieon's or a RepAdapt-equivalent one.
 5. **Per-sample variant calling**: Each sample is genotyped independently, producing a gVCF (genomic VCF) that records genotype likelihoods at every site, not just variant positions.
 6. **Database import**: Per-sample gVCFs are combined into a GenomicsDB datastore, which is an efficient on-disk format for storing multi-sample genotype data.
 7. **Joint genotyping**: All samples are genotyped simultaneously from the GenomicsDB, producing a raw multi-sample VCF.

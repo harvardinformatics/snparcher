@@ -32,14 +32,33 @@ properties:
     properties:
       pipeline:
         type: string
-        enum: ["default", "sentieon"]
+        enum: ["default", "sentieon", "repadapt"]
         default: "default"
         description: >
           How reads become each sample's final BAM. "default" is fastp, bwa mem
           and sambamba duplicate marking. "sentieon" is Sentieon's mapping and
           Dedup, and is used automatically with variant_calling.tool: sentieon
-          (the only caller it supports). Samples supplied as BAMs are used as
-          they are.
+          (the only caller it supports). "repadapt" reproduces RepAdapt's
+          processing with its pinned tools: fastp 0.20.1, bwa 0.7.17, a MAPQ >= 10
+          filter, Picard duplicate removal per sample and GATK3 indel
+          realignment; it works with every caller except sentieon. Samples
+          supplied as BAMs are used as they are.
+      repadapt:
+        type: object
+        additionalProperties: false
+        default: {}
+        properties:
+          indel_realignment:
+            oneOf:
+              - type: boolean
+              - type: string
+                enum: ["auto"]
+            default: "auto"
+            description: >
+              GATK3 indel realignment in the repadapt pipeline. "auto" realigns
+              unless long_contig_mode is on (GATK3 needs BAI indexes, which
+              can't index contigs longer than 2^29), and then skips it with a
+              warning; true errors in long-contig mode; false always skips it.
 
   reference:
     type: object

@@ -58,7 +58,8 @@ v2.0 is a major rewrite of snpArcher with breaking changes to the sample sheet s
 - **Parabricks support:** GPU-accelerated variant calling via NVIDIA Parabricks.
 - **DeepVariant support:** Deep learning variant caller with GLnexus joint genotyping.
 - **bcftools pathway:** Region-parallelized bcftools mpileup/call as an alternative to GATK.
-- **Mapping pipelines:** `mapping.pipeline` selects how reads become each sample's final BAM (`default` or `sentieon`).
+- **Mapping pipelines:** `mapping.pipeline` selects how reads become each sample's final BAM (`default`, `sentieon` or `repadapt`).
+- **RepAdapt mapping pipeline:** `mapping.pipeline: repadapt` reproduces RepAdapt's read processing with its pinned tools (fastp 0.20.1, bwa 0.7.17, MAPQ >= 10 filter, Picard duplicate removal per sample, GATK3 indel realignment). With `tool: repadapt` it gives RepAdapt-equivalent calls from reads.
 - **RepAdapt calling model:** `variant_calling.tool: repadapt` runs RepAdapt's bcftools 1.16 calling (`call -G -`, SNPs only) on snpArcher's BAMs, with RepAdapt's filter as `AllHomAlt`/`LowMQ` soft filters in `filtered.vcf.gz`.
 
 ### Deprecated aliases

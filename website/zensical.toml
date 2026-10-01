@@ -38,6 +38,7 @@ nav = [
   { "Concepts" = [
     "explanation/index.md",
     { "Pipeline architecture" = "explanation/architecture.md" },
+    { "Mapping pipelines" = "explanation/mapping.md" },
     { "Variant calling" = "explanation/variant-calling.md" },
     { "Parallelization" = "explanation/parallelization.md" },
     { "QC metrics" = "explanation/qc-metrics.md" },

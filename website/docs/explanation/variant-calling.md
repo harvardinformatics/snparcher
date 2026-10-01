@@ -131,7 +131,8 @@ Newer bcftools versions used elsewhere in the pipeline warn that `MQ should be d
 
 **Upstream differences.**
 With snpArcher's default mapping, the BAMs differ from RepAdapt's: snpArcher uses `bwa mem -M`, does not filter BAMs by MAPQ, marks duplicates with sambamba, and does not realign indels.
-The calling model is RepAdapt's, but the calls are "RepAdapt-adjacent" rather than identical.
+The calling model is then RepAdapt's, but the calls are "RepAdapt-adjacent" rather than identical.
+For RepAdapt-equivalent calls from reads, also set `mapping.pipeline: repadapt`; see [mapping pipelines](mapping.md#the-repadapt-pipeline).
 
 !!! warning
     `tool: repadapt` supports `ploidy` 1 or 2 only (bcftools 1.16 accepts only its predefined ploidy aliases), and does not support samples with `input_type: gvcf`.
