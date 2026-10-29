@@ -3123,6 +3123,34 @@ def test_qc_ad_only_vcf_computes_finite_depth(request):
 
 
 @pytest.mark.full_run
+def test_qc_min_depth_removing_all_samples_fails_clearly(request):
+    """QC should stop at the sample filter, naming min_depth, when no sample passes it."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.run(
+            target="results/qc/individuals.samps.txt",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "vcf": str(TEST_DATA_DIR / "qc" / "raw.vcf.gz"),
+                "fai": str(TEST_DATA_DIR / "qc" / "ref.fai"),
+                "min_depth": "100000",
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "vcftools")
+        assert not result.succeeded, "QC should fail when min_depth removes every sample"
+
+        output = result.stdout + result.stderr
+        assert "min_depth filter removed all" in output
+        assert "modules.qc.min_depth (100000)" in output
+
+
+@pytest.mark.full_run
 def test_qc_ad_only_vcf_renders_dashboard(request):
     """AD-only VCFs should still render the complete QC dashboard."""
     no_conda = request.config.getoption("--no-conda")
