@@ -198,11 +198,13 @@ The default threshold (0.01) removes singletons and very rare variants, which ar
 ### Missingness
 
 The missingness filter removes sites where too many samples lack a genotype call.
-The default threshold (0.75) means at least 75% of samples must have a called genotype.
+The threshold is the maximum fraction of samples that may lack a genotype call at a site.
+The default (0.75) removes sites where more than 75% of samples are missing, so a site is kept if at least 25% of samples have a called genotype.
+Set it to 1 to disable the filter.
 
 **Trade-offs:**
 
-- **Stringent missingness filter (e.g., 0.95)**: Retains only well-genotyped sites, but may drastically reduce the number of variants, especially if depth varies across samples.
+- **Stringent missingness filter (e.g., 0.05)**: Retains only well-genotyped sites (at least 95% of samples called), but may drastically reduce the number of variants, especially if depth varies across samples.
 - **Lenient missingness filter (e.g., 0.50)**: Retains more sites, but some will have genotypes from only half the samples.
   This can bias allele frequency estimates.
 

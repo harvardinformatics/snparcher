@@ -68,7 +68,7 @@ Sample exclusion is controlled via the `exclude` column in the [sample metadata 
 | `modules.postprocess.enabled` | boolean | `false` | | Enable the module. |
 | `modules.postprocess.filtering.contig_size` | integer | `10000` | >= 0 | Exclude SNPs on contigs with length equal to or smaller than this value (bp). Set to `0` to disable. |
 | `modules.postprocess.filtering.maf` | number | `0.01` | 0 to 1 | Minimum minor allele frequency threshold. |
-| `modules.postprocess.filtering.missingness` | number | `0.75` | 0 to 1 | Minimum genotyping rate (fraction of samples with a called genotype). |
+| `modules.postprocess.filtering.missingness` | number | `0.75` | 0 to 1 | Maximum fraction of samples with a missing genotype. Sites with a higher missing fraction are excluded. Set to 1 to disable. |
 | `modules.postprocess.filtering.exclude_scaffolds` | string | `"mtDNA,Y"` | | Comma-separated scaffold/contig names to exclude. |
 | `modules.postprocess.filtering.split_by_type` | boolean | `true` | | Also emit `clean_snps.vcf.gz` and `clean_indels.vcf.gz` (strict-filtered VCF split by variant type). |
 | `modules.postprocess.filtering.keep_basic_filter` | boolean | `false` | | Retain the intermediate `results/postprocess/basic.vcf.gz` instead of treating it as temporary. |
