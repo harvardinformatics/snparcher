@@ -261,11 +261,16 @@ rule mappability_bed:
 
 
 rule callable_sites_bed:
-    """Combine enabled callable site sources into a final callable BED."""
+    """Intersect enabled callable site sources into a final callable BED."""
     input:
         beds=get_callable_source_beds,
     output:
         bed="results/callable_sites/callable_sites.bed",
+    params:
+        # A site is callable only if every enabled source passes it.
+        intersect=lambda wc, input: " ".join(
+            f"| bedtools intersect -a - -b {bed}" for bed in input.beds[1:]
+        ),
     conda:
         "../envs/bedtools.yaml"
     benchmark:
@@ -274,7 +279,7 @@ rule callable_sites_bed:
         "logs/callable_sites_bed.txt"
     shell:
         """
-        cat {input.beds} 2> {log} \
+        (cat {input.beds[0]} {params.intersect}) 2> {log} \
             | bedtools sort -i - 2>> {log} \
             | bedtools merge -i - > {output.bed} 2>> {log}
         """

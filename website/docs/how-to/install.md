@@ -67,21 +67,27 @@ A single clone can serve multiple independent projects.
 
 ## Verify the installation
 
-Run the bundled example dataset to confirm everything is working:
+Run the bundled example dataset from the root of your clone to confirm everything is working:
 
 ```bash
 conda activate snparcher
-snakemake --use-conda --cores 4 --directory snpArcher/example/
+cd snpArcher
+snakemake --use-conda --cores 4 --directory example/ \
+    --workflow-profile workflow-profiles/default
 ```
 
 This processes five simulated samples against a small reference genome.
 It should complete in about five minutes on a machine with four cores.
 A successful run produces output files under `example/results/` with no error messages.
 
+The `--workflow-profile` flag is required: it supplies the memory and thread settings that pipeline rules expect.
+The default profile gives Java tools (GATK and Picard) a heap of about 7 GB, so run the example on a machine or interactive session with at least 8 GB of memory.
+
 To do a faster check without actually running any jobs, use the dry-run flag:
 
 ```bash
-snakemake --use-conda --dry-run --directory snpArcher/example/
+snakemake --use-conda --dry-run --directory example/ \
+    --workflow-profile workflow-profiles/default
 ```
 
 This resolves the full dependency graph and reports which jobs would be run, without executing them.
