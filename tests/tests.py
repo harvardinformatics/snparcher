@@ -2224,6 +2224,9 @@ def test_long_contig_qc_consumes_filtered_vcf_full_run(request):
         result.assert_output_exists(*targets)
         result.assert_output_exists("results/vcfs/filtered.vcf.gz.csi")
 
+        samps = Path(tmpdir) / "results" / "qc" / "individuals.samps.txt"
+        assert samps.read_text().split(), "QC sample filter kept no samples"
+
 
 @pytest.mark.full_run
 def test_long_contig_multistage_interval_gather(request):
