@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -615,9 +616,11 @@ def write_numeric_qc_inputs(out_dir):
             "G",
             "60",
             "PASS",
-            "AF=0.0104;ReadPosRankSum=0;FS=0;SOR=0;MQ=60;MQRankSum=0",
+            "AF=0.0133;ReadPosRankSum=0;FS=0;SOR=0;MQ=60;MQRankSum=0",
             "GT",
-            *(["0/1", "0/1"] + ["0/0"] * (len(sample_names) - 2)),
+            # 4 hets in 150 samples (AF 0.0133), so it passes MAF >= 0.01:
+            # QC recomputes AF from genotypes rather than trusting INFO/AF.
+            *(["0/1"] * 4 + ["0/0"] * (len(sample_names) - 4)),
         ]
         dst.write("\t".join(extra_variant) + "\n")
 
@@ -685,7 +688,7 @@ def write_qc_vcf_without_gatk_annotations(out_dir):
         "G",
         "60",
         "PASS",
-        "AF=0.02;MQ=50",
+        "AF=0.0133;MQ=50",
         "GT:DP",
         *genotypes,
     ]
@@ -697,6 +700,61 @@ def write_qc_vcf_without_gatk_annotations(out_dir):
         handle.write("\n")
 
     return out_vcf, sample_names
+
+
+def write_qc_cohort(out_dir, *, contig_names, n_samples, filter_label=None):
+    """Derive QC inputs from the standalone QC fixture.
+
+    Renames the fixture's two contigs to `contig_names`, keeps the `n_samples`
+    samples with the highest mean FORMAT/DP (well above min_depth), and can
+    relabel unfiltered records (FILTER ".") as `filter_label`. Returns the VCF,
+    FAI and sample sheet paths, and the number of records.
+    """
+    out_dir = Path(out_dir)
+    source_vcf = TEST_DATA_DIR / "qc" / "raw.vcf.gz"
+    with open(TEST_DATA_DIR / "qc" / "ref.fai") as handle:
+        source_contigs = [line.split()[0] for line in handle if line.strip()]
+    rename = dict(zip(source_contigs, contig_names, strict=True))
+
+    with gzip.open(source_vcf, "rt") as handle:
+        lines = handle.read().splitlines()
+    header = [line for line in lines if line.startswith("#")]
+    records = [line.split("\t") for line in lines if not line.startswith("#")]
+    samples = header[-1].split("\t")[9:]
+
+    dp_index = records[0][8].split(":").index("DP")
+    depth = [0] * len(samples)
+    for fields in records:
+        for i, call in enumerate(fields[9:]):
+            parts = call.split(":")
+            if len(parts) > dp_index and parts[dp_index] not in ("", "."):
+                depth[i] += int(parts[dp_index])
+    keep = sorted(sorted(range(len(samples)), key=lambda i: -depth[i])[:n_samples])
+
+    out_vcf = out_dir / "cohort_raw.vcf.gz"
+    with gzip.open(out_vcf, "wt") as dst:
+        for line in header[:-1]:
+            for old, new in rename.items():
+                line = line.replace(f"##contig=<ID={old},", f"##contig=<ID={new},")
+            dst.write(line + "\n")
+        dst.write("\t".join(header[-1].split("\t")[:9] + [samples[i] for i in keep]) + "\n")
+        for fields in records:
+            fields = fields[:9] + [fields[9 + i] for i in keep]
+            fields[0] = rename[fields[0]]
+            if filter_label and fields[6] == ".":
+                fields[6] = filter_label
+            dst.write("\t".join(fields) + "\n")
+
+    out_fai = out_dir / "cohort_ref.fai"
+    with open(TEST_DATA_DIR / "qc" / "ref.fai") as src, open(out_fai, "w") as dst:
+        for line in src:
+            fields = line.split()
+            if fields:
+                dst.write("\t".join([rename[fields[0]]] + fields[1:]) + "\n")
+
+    out_samples = out_dir / "cohort_samples.csv"
+    out_samples.write_text("sample_id\n" + "".join(f"{samples[i]}\n" for i in keep))
+    return out_vcf, out_fai, out_samples, len(records)
 
 
 def write_ad_only_qc_vcf(out_dir):
@@ -3075,7 +3133,8 @@ def test_qc_subsample_snps_allows_missing_gatk_annotations(request):
         first = rows[0]
         assert first[0] == contig
         assert first[1] == "1"
-        assert first[3] == "0.02"
+        # QC recomputes AF over the samples it keeps: 4 hets in 150 samples.
+        assert first[3] == "0.0133333"
         assert first[4] == "60"
         assert first[5:8] == [".", ".", "."]
         assert first[8] == "50"
@@ -3242,6 +3301,277 @@ def test_qc_standalone_full_run(request):
         dashboard = Path(tmpdir) / "results" / "qc" / "qc_dashboard.html"
         if dashboard.exists():
             shutil.copy2(dashboard, artifacts_dir / "qc_dashboard.html")
+
+
+@pytest.mark.full_run
+def test_qc_plink_handles_sex_organelle_contigs_and_small_cohorts(request):
+    """PLINK and ADMIXTURE run on chrX/MT contigs with only 5 samples.
+
+    plink2 needs sex information for chrX and rejects MT, so contigs are always
+    renamed for PLINK. It also cannot compute 10 PCs from 5 samples, so the
+    PC count follows the samples that remain (min(10, n - 1)).
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        vcf, fai, samples, _ = write_qc_cohort(tmpdir, contig_names=["chrX", "MT"], n_samples=5)
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.run(
+            target=["results/qc/plink.eigenvec", "results/qc/plink.3.Q"],
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={"samples": str(samples), "vcf": str(vcf), "fai": str(fai)},
+        )
+        skip_if_arm64_packages_unavailable(result, "admixture", "plink2", "plink")
+        result.assert_success()
+
+        qc_dir = Path(tmpdir) / "results" / "qc"
+        n_samples = len((qc_dir / "plink.fam").read_text().splitlines())
+        header = (qc_dir / "plink.eigenvec").read_text().splitlines()[0].split()
+        assert n_samples == 5
+        assert [col for col in header if col.startswith("PC")] == [f"PC{i}" for i in range(1, 5)]
+        # ADMIXTURE gets integer codes in its own copy; plink.bim keeps the
+        # PLINK names that plink.bed and the dashboard were built with.
+        bim_contigs = {line.split("\t", 1)[0] for line in (qc_dir / "plink.bim").read_text().splitlines()}
+        assert bim_contigs <= {"qcctg1", "qcctg2"}, bim_contigs
+
+
+@pytest.mark.full_run
+def test_qc_dashboard_counts_pass_records_and_many_clusters(request):
+    """The dashboard's numbers, text and map match the data.
+
+    Passing records are labelled PASS, as tools such as bcftools filter and
+    GATK's ApplyVQSR write them (snpArcher's own GATK hard filtering leaves
+    them "."), and there are 12 clusters (more than the palette's 10 colours). The module runs from a
+    copy whose scripts directory is read-only, as in a shared or read-only
+    install: the dashboard must render without writing there. One sample is
+    in Europe, so the map must not be scoped to North America.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        module_copy = Path(tmpdir) / "qc_module"
+        shutil.copytree(WORKFLOW_DIR / "modules" / "qc", module_copy)
+        scripts_dir = module_copy / "scripts"
+        with open(TEST_DATA_DIR / "qc" / "ref.fai") as handle:
+            contigs = [line.split()[0] for line in handle if line.strip()]
+        vcf, fai, samples, n_records = write_qc_cohort(
+            tmpdir, contig_names=contigs, n_samples=150, filter_label="PASS"
+        )
+        metadata = Path(tmpdir) / "metadata_with_europe.csv"
+        metadata.write_text(
+            (TEST_DATA_DIR / "qc" / "sample_metadata.csv").read_text().replace(
+                "test_A01,34.05,-118.24", "test_A01,52.52,13.40"
+            )
+        )
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=module_copy / "Snakefile",
+        )
+        scripts_dir.chmod(0o555)
+        try:
+            result = smk.run(
+                target="all",
+                configfile=module_copy / "config" / "config.yaml",
+                config_overrides={
+                    "samples": str(samples),
+                    "sample_metadata": str(metadata),
+                    "vcf": str(vcf),
+                    "fai": str(fai),
+                    "qc_report": str(TEST_DATA_DIR / "qc" / "qc_report.tsv"),
+                    "clusters": "12",
+                    "min_depth": "1.5",
+                },
+            )
+        finally:
+            scripts_dir.chmod(0o755)
+        skip_if_arm64_packages_unavailable(
+            result, "admixture", "plink2", "plink", "r-ggmap", "r-ape", "bioconductor-ggtree"
+        )
+        result.assert_success()
+
+        qc_dir = Path(tmpdir) / "results" / "qc"
+        html = (qc_dir / "qc_dashboard.html").read_text()
+        n_pruned = len((qc_dir / "plink.bim").read_text().splitlines())
+        n_analyzed = len((qc_dir / "plink.fam").read_text().splitlines())
+        assert f"In total, {n_records} variants were discovered" in html
+        assert "NA variants" not in html
+        assert f"(in this report, {n_pruned})" in html
+        assert f"Of the 150 samples in the VCF, {n_analyzed} passed" in html
+        assert "mean depth of 1.5x or less" in html
+        assert '"scope":"world"' in html
+
+
+def run_qc_site_filter(request, tmpdir, kept, dropped, rows):
+    """Run only subsample_snps on a small VCF; return the positions it keeps.
+
+    `rows` maps POS to (kept genotypes, dropped genotypes, INFO/AF). Only the
+    `kept` samples are in individuals.samps.txt, as if they alone had passed
+    the depth filter.
+    """
+    tmp_path = Path(tmpdir)
+    vcf = tmp_path / "subset_raw.vcf.gz"
+    with gzip.open(vcf, "wt") as handle:
+        handle.write("##fileformat=VCFv4.2\n##contig=<ID=ctg1,length=10000>\n")
+        handle.write('##INFO=<ID=AF,Number=A,Type=Float,Description="AF">\n')
+        handle.write('##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n')
+        handle.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t")
+        handle.write("\t".join(kept + dropped) + "\n")
+        for pos, (kept_gts, dropped_gts, af) in rows.items():
+            handle.write(f"ctg1\t{pos}\t.\tA\tG\t50\t.\tAF={af:.3f}\tGT\t")
+            handle.write("\t".join(kept_gts + dropped_gts) + "\n")
+    fai = tmp_path / "subset_ref.fai"
+    fai.write_text("ctg1\t10000\t6\t60\t61\n")
+    samples = tmp_path / "subset_samples.csv"
+    samples.write_text("sample_id\n" + "".join(f"{s}\n" for s in kept + dropped))
+    samps = tmp_path / "results" / "qc" / "individuals.samps.txt"
+    samps.parent.mkdir(parents=True)
+    samps.write_text("".join(f"{s}\n" for s in kept))
+
+    smk = SnakemakeRunner(
+        tmp_path,
+        use_conda=not request.config.getoption("--no-conda"),
+        snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+    )
+    result = smk.run(
+        target="results/qc/snpqc.txt",
+        configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+        config_overrides={"samples": str(samples), "vcf": str(vcf), "fai": str(fai)},
+        extra_args=["--allowed-rules", "subsample_snps"],
+    )
+    skip_if_arm64_packages_unavailable(result, "bcftools")
+    result.assert_success()
+    snpqc = (tmp_path / "results" / "qc" / "snpqc.txt").read_text().splitlines()
+    return [int(line.split("\t")[1]) for line in snpqc]
+
+
+@pytest.mark.full_run
+def test_qc_site_filters_use_only_kept_samples(request):
+    """AF and missingness filters are evaluated over the samples QC keeps.
+
+    4 samples pass the depth filter; 13 do not. Site 100 is monomorphic in the
+    kept samples (its INFO/AF counts the others) and must go. Site 200 is
+    polymorphic and fully called in the kept samples, but missing in all 13
+    others (13/17 > 0.75), and must stay.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        positions = run_qc_site_filter(
+            request,
+            tmpdir,
+            kept=[f"k{i}" for i in range(4)],
+            dropped=[f"d{i}" for i in range(13)],
+            rows={
+                100: (["0/0"] * 4, ["1/1"] * 13, 26 / 34),
+                200: (["0/1", "0/0", "0/0", "0/0"], ["./."] * 13, 1 / 8),
+                300: (["0/1", "0/1", "0/0", "0/0"], ["0/0"] * 13, 2 / 34),
+            },
+        )
+    assert positions == [200, 300]
+
+
+@pytest.mark.full_run
+def test_qc_maf_filter_applies_to_either_allele(request):
+    """A site whose REF allele is the rare one is filtered like any other.
+
+    With 60 kept samples, site 100 has ALT frequency 119/120 = 0.992, so its
+    minor allele (REF) is at 0.008 < 0.01 and the site must go. Site 200 has
+    ALT frequency 118/120 = 0.983 (minor 0.017) and stays.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        positions = run_qc_site_filter(
+            request,
+            tmpdir,
+            kept=[f"k{i}" for i in range(60)],
+            dropped=[],
+            rows={
+                100: (["0/1"] + ["1/1"] * 59, [], 119 / 120),
+                200: (["0/1"] * 2 + ["1/1"] * 58, [], 118 / 120),
+            },
+        )
+    assert positions == [200]
+
+
+@pytest.mark.full_run
+def test_qc_coords_rebuild_when_metadata_changes(request):
+    """Editing sample coordinates reruns generate_coords_file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        metadata = Path(tmpdir) / "metadata.csv"
+        metadata.write_text((TEST_DATA_DIR / "qc" / "sample_metadata.csv").read_text())
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=False,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        kwargs = dict(
+            target="results/qc/coords.txt",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "sample_metadata": str(metadata),
+            },
+        )
+        smk.run(**kwargs).assert_success()
+
+        time.sleep(1.1)
+        metadata.write_text(metadata.read_text().replace("34.05,-118.24", "35.00,-118.00"))
+        result = smk.dry_run(**kwargs)
+        result.assert_success()
+        assert scheduled_rule_present(result.stdout + result.stderr, "generate_coords_file")
+
+
+@pytest.mark.dry_run
+def test_qc_module_runs_without_a_configfile():
+    """The module's documented standalone command works from any directory.
+
+    With a `configfile: "config/config.yaml"` directive it failed unless the
+    working directory happened to contain that file (and then silently read
+    it, e.g. a project's main config).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [
+                "snakemake", "-n",
+                "-s", str(WORKFLOW_DIR / "modules" / "qc" / "Snakefile"),
+                "--directory", tmpdir,
+                "--config",
+                f"samples={TEST_DATA_DIR / 'qc' / 'samples.csv'}",
+                f"vcf={TEST_DATA_DIR / 'qc' / 'raw.vcf.gz'}",
+                f"fai={TEST_DATA_DIR / 'qc' / 'ref.fai'}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.dry_run
+def test_qc_subsample_snps_command(request):
+    """AF is recomputed after subsetting, pruning is seeded, and scaffolds are quoted."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.dry_run(
+            target="results/qc/pruned.vcf.gz",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "vcf": str(TEST_DATA_DIR / "qc" / "raw.vcf.gz"),
+                "fai": str(TEST_DATA_DIR / "qc" / "ref.fai"),
+                "exclude_scaffolds": "'mtDNA, Y'",
+            },
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "bcftools +fill-tags -Ou -- -t AF" in output
+        assert "--random-seed 42" in output
+        assert "-t '^mtDNA,Y'" in output
 
 
 @pytest.mark.full_run
