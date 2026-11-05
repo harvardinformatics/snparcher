@@ -109,8 +109,8 @@ Produced when `callable_sites.coverage.enabled` and/or `callable_sites.mappabili
 | `results/callable_sites/depths/{sample}.per-base.d4` | D4 | coverage enabled | Per-sample per-base depth (mosdepth D4). Temporary. |
 | `results/callable_sites/depths/{sample}.mosdepth.summary.txt` | Text | coverage enabled | Per-sample mosdepth summary. |
 | `results/callable_sites/depths.zarr` | Zarr | coverage enabled | Combined depth data in Zarr format. |
-| `results/callable_sites/coverage_thresholds.tsv` | TSV | coverage enabled | Per-sample min/max coverage thresholds (computed or user-specified). |
-| `results/callable_sites/callable_loci.zarr` | Zarr | coverage enabled | Callable loci mask in Zarr format. |
+| `results/callable_sites/coverage_thresholds.tsv` | TSV | coverage enabled | The coverage thresholds that were applied: median summed depth, the summed-depth cutoff, and the number of samples that need data. |
+| `results/callable_sites/callable_loci.zarr` | Zarr | coverage enabled | clam callable counts: per site, the number of samples with data, zero where the site fails the coverage rules. Use it with `clam stat`. |
 | `results/callable_sites/coverage.bed` | BED | coverage enabled | Coverage-based callable sites BED. |
 | `results/callable_sites/genmap_index/` | Directory | mappability enabled | GenMap index of the reference genome. |
 | `results/callable_sites/mappability.bedgraph` | BedGraph | mappability enabled | Raw mappability scores from GenMap. |

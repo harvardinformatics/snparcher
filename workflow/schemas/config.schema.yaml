@@ -202,25 +202,26 @@ properties:
           enabled:
             type: boolean
             default: true
+          min_sample_depth:
+            type: integer
+            minimum: 1
+            default: 1
           fraction:
             type: number
             minimum: 0
             maximum: 1
-            default: 1.0
-          min_coverage:
+            default: 0.25
+          max_depth:
             anyOf:
               - type: number
-                minimum: 0
+                minimum: 1
               - type: string
                 enum: ["auto"]
             default: "auto"
-          max_coverage:
-            anyOf:
-              - type: number
-                minimum: 0
-              - type: string
-                enum: ["auto"]
-            default: "auto"
+          max_depth_k:
+            type: number
+            exclusiveMinimum: 0
+            default: 4
           merge_distance:
             type: integer
             minimum: 0

@@ -1,133 +1,172 @@
 #!/usr/bin/env python3
-"""Compute cohort-wide callable coverage thresholds from mosdepth summaries."""
+"""Choose the clam loci thresholds for the callable-sites coverage mask.
+
+A site is coverage-callable when
+  * its depth summed over all samples is at most the upper cutoff, and
+  * at least `fraction` of samples have at least `min_sample_depth` reads.
+
+The upper cutoff is anchored on the genome-wide median of summed depth over
+mappable sites with data. Most of a genome is single-copy, so that median is
+the cohort's single-copy depth. With --max-depth auto the cutoff is an outlier
+test: the median plus K robust standard deviations, measured on the
+square-root scale where read-count noise is roughly constant. A number
+instead sets the cutoff to that multiple of the median.
+
+clam applies the thresholds. This script only picks them, and writes them as
+a key/value TSV that the clam_loci rule reads and users can inspect.
+"""
 
 from __future__ import annotations
 
 import argparse
+import json
 import math
-import statistics
 import sys
+from fractions import Fraction
 from pathlib import Path
+
+import numpy as np
+
+# 1.4826 * MAD estimates a normal standard deviation.
+MAD_TO_SD = 1.4826
+# sqrt(Poisson) has standard deviation of about 1/2 at any mean, so summed
+# depth can never be less dispersed than this. It keeps the cutoff sensible
+# when the observed spread is degenerate (e.g. near-constant depth).
+MIN_SQRT_SD = 0.5
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Compute cohort-wide min/max callable coverage thresholds from mosdepth "
-            "summary files."
-        )
-    )
-    parser.add_argument(
-        "summaries",
-        nargs="+",
-        type=Path,
-        help="Mosdepth summary files to aggregate.",
-    )
-    parser.add_argument(
-        "--min-coverage",
-        required=True,
-        help="Minimum coverage threshold or 'auto'.",
-    )
-    parser.add_argument(
-        "--max-coverage",
-        required=True,
-        help="Maximum coverage threshold or 'auto'.",
-    )
-    parser.add_argument(
-        "--output",
-        required=True,
-        type=Path,
-        help="Output TSV path.",
-    )
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("depths_zarr", type=Path, help="Depth store from `clam collect`.")
+    parser.add_argument("--mappability-bed", type=Path, help="Restrict the depth distribution to these regions.")
+    parser.add_argument("--max-depth", required=True, help="'auto' or a multiple of the median summed depth.")
+    parser.add_argument("--max-depth-k", type=float, required=True, help="Robust SDs above the median for 'auto'.")
+    parser.add_argument("--min-sample-depth", type=int, required=True)
+    parser.add_argument("--fraction", type=float, required=True)
+    parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
 
-def die(message: str) -> int:
-    print(f"error: {message}", file=sys.stderr)
-    return 1
-
-
-def parse_total_mean(summary_path: Path) -> float:
-    if not summary_path.exists():
-        raise FileNotFoundError(f"Summary file does not exist: {summary_path}")
-
-    total_mean = None
-    fallback_mean = None
-    with summary_path.open(encoding="utf-8") as handle:
+def read_bed(path: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Sorted, merged BED intervals per contig."""
+    intervals: dict[str, list[tuple[int, int]]] = {}
+    with path.open() as handle:
         for line in handle:
-            fields = line.rstrip("\n").split("\t")
-            if len(fields) < 4:
+            if not line.strip() or line.startswith(("#", "track", "browser")):
                 continue
-            if fields[0] == "chrom":
-                continue
-            try:
-                mean = float(fields[3])
-            except ValueError:
-                continue
-            fallback_mean = mean
-            if fields[0].lower() == "total":
-                total_mean = mean
-
-    if total_mean is not None:
-        return total_mean
-    if fallback_mean is not None:
-        return fallback_mean
-    raise ValueError(f"Could not parse mean coverage from mosdepth summary: {summary_path}")
+            contig, start, end = line.split("\t")[:3]
+            intervals.setdefault(contig, []).append((int(start), int(end)))
+    return {
+        contig: (np.array([s for s, _ in sorted(ivs)]), np.array([e for _, e in sorted(ivs)]))
+        for contig, ivs in intervals.items()
+    }
 
 
-def parse_threshold(raw_value: str, *, auto_value: float, label: str) -> float:
-    if raw_value == "auto":
-        return auto_value
-
-    try:
-        value = float(raw_value)
-    except ValueError as exc:
-        raise ValueError(f"{label} must be numeric or 'auto', got {raw_value!r}") from exc
-
-    if value < 0:
-        raise ValueError(f"{label} must be >= 0, got {value}")
-    return value
+def interval_mask(starts: np.ndarray, ends: np.ndarray, lo: int, hi: int) -> np.ndarray:
+    """Boolean mask of [lo, hi) positions covered by the intervals."""
+    mask = np.zeros(hi - lo, dtype=bool)
+    first = np.searchsorted(ends, lo, side="right")
+    last = np.searchsorted(starts, hi, side="left")
+    for start, end in zip(starts[first:last], ends[first:last]):
+        mask[max(start, lo) - lo : min(end, hi) - lo] = True
+    return mask
 
 
-def format_threshold(value: float) -> str:
-    if value.is_integer():
-        return str(int(value))
-    return str(value)
+def summed_depth_histogram(depths_zarr: Path, mappable) -> tuple[np.ndarray, int]:
+    """Histogram of per-site summed depth over mappable sites with data."""
+    import zarr
+
+    group = zarr.open_group(str(depths_zarr), mode="r")
+    metadata = group.attrs["clam_metadata"]
+    n_samples = len(metadata["column_names"])
+    hist = np.zeros(1, dtype=np.int64)
+
+    for contig in metadata["contigs"]:
+        name, length = contig["name"], contig["length"]
+        array = group[name]
+        rows = array.chunks[0]
+        for lo in range(0, length, rows):
+            hi = min(lo + rows, length)
+            summed = np.asarray(array[lo:hi, :], dtype=np.uint64).sum(axis=1)
+            keep = summed > 0
+            if mappable is not None:
+                if name not in mappable:
+                    continue
+                keep &= interval_mask(*mappable[name], lo, hi)
+            counts = np.bincount(summed[keep].astype(np.int64))
+            if len(counts) > len(hist):
+                hist = np.pad(hist, (0, len(counts) - len(hist)))
+            hist[: len(counts)] += counts
+
+    return hist, n_samples
+
+
+def weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
+    order = np.argsort(values, kind="stable")
+    cumulative = np.cumsum(weights[order])
+    return float(values[order][np.searchsorted(cumulative, cumulative[-1] / 2)])
 
 
 def main() -> int:
     args = parse_args()
-
     try:
-        means = [parse_total_mean(path) for path in args.summaries]
-        cohort_mean = statistics.fmean(means)
-        auto_min = float(max(1, math.floor(cohort_mean / 2)))
-        auto_max = float(math.ceil(cohort_mean * 2))
-        min_coverage = parse_threshold(
-            args.min_coverage,
-            auto_value=auto_min,
-            label="--min-coverage",
-        )
-        max_coverage = parse_threshold(
-            args.max_coverage,
-            auto_value=auto_max,
-            label="--max-coverage",
-        )
-        if max_coverage < min_coverage:
-            raise ValueError(
-                f"Computed max coverage {max_coverage} is lower than min coverage {min_coverage}"
-            )
+        if not 0.0 <= args.fraction <= 1.0:
+            raise ValueError(f"--fraction must be between 0 and 1, got {args.fraction}")
+
+        mappable = read_bed(args.mappability_bed) if args.mappability_bed else None
+        hist, n_samples = summed_depth_histogram(args.depths_zarr, mappable)
+        sites = int(hist.sum())
+        if sites == 0:
+            raise ValueError("No mappable sites with read data; cannot estimate the depth distribution.")
+
+        depth_values = np.flatnonzero(hist)
+        weights = hist[depth_values]
+        median = weighted_median(depth_values.astype(float), weights)
+        sqrt_median = math.sqrt(median)
+        sqrt_mad = weighted_median(np.abs(np.sqrt(depth_values) - sqrt_median), weights)
+        sqrt_sd = max(MAD_TO_SD * sqrt_mad, MIN_SQRT_SD)
+
+        if args.max_depth == "auto":
+            cutoff = (sqrt_median + args.max_depth_k * sqrt_sd) ** 2
+        else:
+            multiple = float(args.max_depth)
+            if multiple < 1:
+                raise ValueError(f"--max-depth must be 'auto' or >= 1, got {multiple}")
+            cutoff = multiple * median
+        summed_cutoff = math.floor(cutoff)
+
+        # Fraction(str(...)) keeps 0.55 * 200 at exactly 110; in binary
+        # floating point it is 110.00000000000001 and the ceiling would be 111.
+        min_samples = math.ceil(Fraction(str(args.fraction)) * n_samples)
+
+        # clam compares in floating point, and rounds the -d boundary the same
+        # wrong way (it drops a site with exactly 110 of 200 samples at 0.55).
+        # Both thresholds are integers, so pass each half a unit inside its
+        # boundary, where floating-point error cannot land.
+        thresholds = {
+            "samples": n_samples,
+            "sites_in_distribution": sites,
+            "median_summed_depth": median,
+            "sqrt_scale_sd": round(sqrt_sd, 6),
+            "max_depth": args.max_depth,
+            "max_depth_k": args.max_depth_k,
+            "summed_depth_cutoff": summed_cutoff,
+            "cutoff_over_median": round(summed_cutoff / median, 4),
+            "min_sample_depth": args.min_sample_depth,
+            "fraction": args.fraction,
+            "min_samples_with_data": min_samples,
+            "clam_max_mean_depth": (summed_cutoff + 0.5) / n_samples,
+            "clam_min_proportion": max(0.0, (min_samples - 0.5) / n_samples),
+        }
 
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("w", encoding="utf-8") as handle:
-            handle.write("cohort_mean_coverage\tmin_coverage\tmax_coverage\n")
-            handle.write(
-                f"{cohort_mean:.6f}\t{format_threshold(min_coverage)}\t"
-                f"{format_threshold(max_coverage)}\n"
-            )
+            for key, value in thresholds.items():
+                handle.write(f"{key}\t{value}\n")
+        print(json.dumps(thresholds, indent=2), file=sys.stderr)
     except Exception as exc:
-        return die(str(exc))
-
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

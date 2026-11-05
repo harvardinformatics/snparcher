@@ -105,9 +105,10 @@ callable_sites:
   generate_bed_file: true
   coverage:
     enabled: true
-    fraction: 1.0  # fraction of samples that must be callable
-    min_coverage: auto  # "auto" = floor(mean_depth / 2)
-    max_coverage: auto  # "auto" = ceil(mean_depth * 2)
+    min_sample_depth: 1  # reads a sample needs at a site to count as having data
+    fraction: 0.25       # fraction of samples that must have data at a site
+    max_depth: auto      # "auto" = outlier cutoff on summed depth; or a multiple of its median, e.g. 1.5
+    max_depth_k: 4       # robust SDs above the median when max_depth is "auto"
     merge_distance: 100
   mappability:
     enabled: true
@@ -173,9 +174,10 @@ callable_sites:
   generate_bed_file: true
   coverage:
     enabled: true
-    fraction: 1.0
-    min_coverage: auto
-    max_coverage: auto
+    min_sample_depth: 1
+    fraction: 0.25
+    max_depth: auto
+    max_depth_k: 4
   mappability:
     enabled: true
     kmer: 150
