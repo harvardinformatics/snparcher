@@ -2224,6 +2224,9 @@ def test_long_contig_qc_consumes_filtered_vcf_full_run(request):
         result.assert_output_exists(*targets)
         result.assert_output_exists("results/vcfs/filtered.vcf.gz.csi")
 
+        samps = Path(tmpdir) / "results" / "qc" / "individuals.samps.txt"
+        assert samps.read_text().split(), "QC sample filter kept no samples"
+
 
 @pytest.mark.full_run
 def test_long_contig_multistage_interval_gather(request):
@@ -3120,6 +3123,34 @@ def test_qc_ad_only_vcf_computes_finite_depth(request):
         assert rows, "Expected AD-derived depth rows"
         assert all(int(row[nsites_index]) > 0 for row in rows)
         assert all(math.isfinite(float(row[mean_depth_index])) for row in rows)
+
+
+@pytest.mark.full_run
+def test_qc_min_depth_removing_all_samples_fails_clearly(request):
+    """QC should stop at the sample filter, naming min_depth, when no sample passes it."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.run(
+            target="results/qc/individuals.samps.txt",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "vcf": str(TEST_DATA_DIR / "qc" / "raw.vcf.gz"),
+                "fai": str(TEST_DATA_DIR / "qc" / "ref.fai"),
+                "min_depth": "100000",
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "vcftools")
+        assert not result.succeeded, "QC should fail when min_depth removes every sample"
+
+        output = result.stdout + result.stderr
+        assert "min_depth filter removed all" in output
+        assert "modules.qc.min_depth (100000)" in output
 
 
 @pytest.mark.full_run

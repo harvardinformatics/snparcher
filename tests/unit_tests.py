@@ -408,6 +408,38 @@ def test_coverage_bed(request):
 
 
 @pytest.mark.unit
+def test_callable_sites_bed_is_intersection(request):
+    """The final callable BED keeps only sites passing coverage AND mappability.
+
+    The sources are written directly, and --allowed-rules stops Snakemake from
+    rebuilding them, so only callable_sites_bed runs. A union of the two
+    sources would yield chr2l:0-300 rather than the two overlapping pieces.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures("config", "data", "results/reference")
+
+        callable_dir = Path(tmpdir) / "results" / "callable_sites"
+        callable_dir.mkdir(parents=True)
+        # Coverage BED is written in reference order, not sorted.
+        (callable_dir / "coverage.bed").write_text("chr2l\t200\t300\nchr2l\t0\t100\n")
+        (callable_dir / "mappability.bed").write_text("chr2l\t50\t250\n")
+
+        result = smk.run(
+            target="results/callable_sites/callable_sites.bed",
+            samples=SAMPLES,
+            extra_args=["--allowed-rules", "callable_sites_bed"],
+        )
+        result.print_log()
+        result.assert_success()
+
+        bed = (callable_dir / "callable_sites.bed").read_text()
+        assert bed == "chr2l\t50\t100\nchr2l\t200\t250\n", bed
+
+
+@pytest.mark.unit
 def test_download_sra_completeness(request):
     """download_sra emits every read the archive holds.
 

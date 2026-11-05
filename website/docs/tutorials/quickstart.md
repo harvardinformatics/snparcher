@@ -32,7 +32,8 @@ It contains a pre-configured sample sheet and config file that point to five sim
 A dry run verifies that the configuration files parse correctly and that Snakemake can build the full dependency graph, without executing any jobs.
 
 ```bash
-snakemake --use-conda --dry-run --directory example/
+snakemake --use-conda --dry-run --directory example/ \
+    --workflow-profile workflow-profiles/default
 ```
 
 You should see output listing all the rules that Snakemake would run, along with the total number of jobs.
@@ -48,7 +49,8 @@ If you see an error instead, double-check that you activated the `snparcher` con
 Run the pipeline with `--cores 4`:
 
 ```bash
-snakemake --use-conda --cores 4 --directory example/
+snakemake --use-conda --cores 4 --directory example/ \
+    --workflow-profile workflow-profiles/default
 ```
 
 !!! note "First run takes longer"

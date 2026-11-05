@@ -286,6 +286,16 @@ rule vcftools_individuals:
                         "No finite per-sample SNP depth values were available; "
                         "skipping min_depth sample filter and retaining all VCF samples.\n"
                     )
+            elif not passing:
+                message = (
+                    f"The QC min_depth filter removed all {finite_depths} samples: none has "
+                    f"a mean SNP depth above modules.qc.min_depth ({min_depth}); see "
+                    f"{depth_path} for per-sample depths. Lower modules.qc.min_depth "
+                    "for low-depth or downsampled data, or disable the QC module.\n"
+                )
+                with open(log_path, "a") as handle:
+                    handle.write(message)
+                raise ValueError(message)
             with open(samps_path, "w") as handle:
                 for sample in passing:
                     handle.write(f"{sample}\n")

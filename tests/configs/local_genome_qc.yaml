@@ -39,7 +39,7 @@ modules:
   qc:
     enabled: true
     clusters: 3
-    min_depth: 2
+    min_depth: 0  # the test reads average below 2x, so a real threshold drops every sample
     google_api_key: ""
     exclude_scaffolds: ""
   postprocess:
