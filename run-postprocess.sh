@@ -5,7 +5,7 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  run-postprocess.sh <snparcher_path> <samples_csv> <vcf> <reference_fai> <callable_sites_bed> [--sample-metadata <metadata_csv>] [--contig-size <bp>] [--maf <float>] [--missingness <float>] [--exclude-scaffolds <csv>] [--cores <n>]
+  run-postprocess.sh <snparcher_path> <samples_csv> <vcf> <reference_fai> <callable_sites_bed> [--sample-metadata <metadata_csv>] [--contig-size <bp>] [--maf <float>] [--missingness <float>] [--exclude-scaffolds <csv>] [--long-contig-mode] [--cores <n>]
 
 Description:
   Run the standalone snpArcher postprocess module against an existing VCF.
@@ -24,6 +24,7 @@ Optional arguments:
   --maf               MAF threshold override for postprocess filtering
   --missingness       Missingness threshold override for postprocess filtering
   --exclude-scaffolds Comma-separated scaffold list override (use "" to disable)
+  --long-contig-mode  Write CSI indexes, needed for contigs longer than 2^29 bp
   --cores             Number of cores to pass to Snakemake (default: 4)
   -h, --help          Show this help message
 EOF
@@ -56,6 +57,7 @@ missingness=""
 missingness_set=false
 exclude_scaffolds=""
 exclude_scaffolds_set=false
+long_contig_mode=false
 cores=4
 
 while [[ $# -gt 0 ]]; do
@@ -89,6 +91,10 @@ while [[ $# -gt 0 ]]; do
             exclude_scaffolds=$2
             exclude_scaffolds_set=true
             shift 2
+            ;;
+        --long-contig-mode)
+            long_contig_mode=true
+            shift
             ;;
         --cores)
             [[ $# -ge 2 ]] || { echo "Missing value for --cores" >&2; exit 1; }
@@ -159,6 +165,10 @@ fi
 
 if [[ "$exclude_scaffolds_set" == true ]]; then
     config_args+=("exclude_scaffolds=$exclude_scaffolds")
+fi
+
+if [[ "$long_contig_mode" == true ]]; then
+    config_args+=("long_contig_mode=true")
 fi
 
 cmd=(
