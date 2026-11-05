@@ -3409,8 +3409,9 @@ def test_qc_plink_handles_sex_organelle_contigs_and_small_cohorts(request):
 def test_qc_dashboard_counts_pass_records_and_many_clusters(request):
     """The dashboard's numbers, text and map match the data.
 
-    GATK hard filtering labels passing records PASS, not ".", and there are
-    12 clusters (more than the palette's 10 colours). The module runs from a
+    Passing records are labelled PASS, as tools such as bcftools filter and
+    GATK's ApplyVQSR write them (snpArcher's own GATK hard filtering leaves
+    them "."), and there are 12 clusters (more than the palette's 10 colours). The module runs from a
     copy whose scripts directory is read-only, as in a shared or read-only
     install: the dashboard must render without writing there. One sample is
     in Europe, so the map must not be scoped to North America.
