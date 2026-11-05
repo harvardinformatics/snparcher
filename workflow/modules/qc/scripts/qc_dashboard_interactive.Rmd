@@ -156,16 +156,14 @@ genome_size <- sum(df_fai$V2)
 sum_path <- paste0(vcf_prefix, ".FILTER.summary")
 df_sum <- read.table(sum_path, header =T, check.names = FALSE, stringsAsFactors = FALSE)
 
-#total number of SNPs found by pipeline
-first_line <- df_sum %>% filter(FILTER == ".")
-snps_remain <- first_line[1,2]
+#total number of SNPs found by pipeline. Records that passed are "." when no
+#filters were applied and "PASS" after GATK hard filtering.
+retained <- df_sum$FILTER %in% c(".", "PASS")
+snps_remain <- sum(df_sum$N_VARIANTS[retained])
 snps_remain.m <- round(snps_remain / 1000000,1)
 
 #how many SNPs got filtered
-other_lines <- df_sum %>%
-  filter(FILTER!=".") %>%
-  summarise(sum_snps = sum(N_VARIANTS))
-fil_snps <- other_lines[1,1]
+fil_snps <- sum(df_sum$N_VARIANTS[!retained])
 tot_snps <- snps_remain + fil_snps
 
 proj_name <- basename(qc_dir)
@@ -260,6 +258,13 @@ df.depth <- df.depth %>%  mutate_if(is.numeric, round, digits = 2)
 
 df.pca <- left_join(df.pca, df.depth, by = c("IID" = "INDV"))
 
+# kmeans needs at least as many distinct points as clusters, and every plot
+# colours by cluster, so extend the palette when more clusters are requested.
+input$clusters <- min(input$clusters, nrow(unique(df.pca[, c("PC1", "PC2")])))
+if (input$clusters > length(set.colors)) {
+  set.colors <- grDevices::colorRampPalette(set.colors)(input$clusters)
+}
+
 set.seed(42)
 k <- kmeans(df.pca[,c("PC1","PC2")], input$clusters, nstart = 25, iter.max = 100)
 df.pca$cluster <- paste("cluster",k$cluster, sep = "_")
@@ -278,7 +283,7 @@ df.pca$cluster <- paste("cluster",k$cluster, sep = "_")
 
 ```
 
-> Fig. 1: The first step is to run a principal component analysis of the genotypes to identify broad clustering patterns in the data. In order to aid the visualization of sample groupings throughout the document, a k-means clustering of 3 is applied. This means that throughout the document the three colors in each plot refer to the three clusters identified in the genomic PCA. This is a good first pass to look for outlier samples, which may either be problematic or interesting samples. The following analyses help to distinguish among these possibilities. **Note these 3 clusters may or may not have any meaningful biological relevance!**.
+> Fig. 1: The first step is to run a principal component analysis of the genotypes to identify broad clustering patterns in the data. In order to aid the visualization of sample groupings throughout the document, a k-means clustering with `r input$clusters` clusters is applied. This means that throughout the document the colors in each plot refer to the clusters identified in the genomic PCA. This is a good first pass to look for outlier samples, which may either be problematic or interesting samples. The following analyses help to distinguish among these possibilities. **Note these clusters may or may not have any meaningful biological relevance!**.
 
 ### Depth and PC Correlation
 
