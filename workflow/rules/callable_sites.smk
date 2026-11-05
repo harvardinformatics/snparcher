@@ -172,7 +172,6 @@ rule genmap_index:
     output:
         idx=directory("results/callable_sites/genmap_index"),
     params:
-        ref_decompressed=lambda wc, input: input.ref.replace(".gz", ""),
         sampling_threshold_bytes=GENMAP_SAMPLING_THRESHOLD_BYTES,
         skew_threshold_bytes=GENMAP_SKEW_THRESHOLD_BYTES,
         sampling_value=GENMAP_SAMPLING_VALUE,
@@ -186,8 +185,12 @@ rule genmap_index:
         """
         set -euo pipefail
 
-        REF_FASTA="{params.ref_decompressed}"
-        trap 'rm -f "$REF_FASTA"' EXIT
+        # GenMap needs an uncompressed FASTA. Decompress it into a job-private
+        # directory: results/reference/{{name}}.fa can be a FASTA that the user
+        # or another rule owns, and this job must not overwrite or delete it.
+        WORK=$(mktemp -d "{resources.tmpdir}/genmap_index_XXXXXX")
+        trap 'rm -rf "$WORK"' EXIT
+        REF_FASTA="$WORK/$(basename "{input.ref}" .gz)"
 
         gunzip -c "{input.ref}" > "$REF_FASTA"
         SIZE_BYTES=$(wc -c < "$REF_FASTA" | tr -d '[:space:]')

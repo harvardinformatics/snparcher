@@ -440,6 +440,34 @@ def test_callable_sites_bed_is_intersection(request):
 
 
 @pytest.mark.unit
+def test_genmap_index_leaves_reference_fasta_alone(request):
+    """genmap_index must not touch results/reference/{name}.fa.
+
+    It used to decompress the reference to exactly that path and delete it on
+    exit, destroying any FASTA already there.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures("config", "data", "results/reference/my_organism.fa.gz")
+
+        fasta = Path(tmpdir) / "results" / "reference" / "my_organism.fa"
+        fasta.write_text(">user_owned\nACGT\n")
+
+        result = smk.run(
+            target="results/callable_sites/genmap_index",
+            samples=SAMPLES,
+            extra_args=["--allowed-rules", "genmap_index"],
+        )
+        result.print_log()
+        result.assert_success()
+
+        assert fasta.read_text() == ">user_owned\nACGT\n"
+        assert any((Path(tmpdir) / "results" / "callable_sites" / "genmap_index").iterdir())
+
+
+@pytest.mark.unit
 def test_download_sra_completeness(request):
     """download_sra emits every read the archive holds.
 
