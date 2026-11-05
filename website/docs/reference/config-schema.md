@@ -126,9 +126,10 @@ Callable-sites BED generation settings.
 | Key | Type | Default | Constraints | Description |
 |-----|------|---------|-------------|-------------|
 | `callable_sites.coverage.enabled` | boolean | `true` | | Enable coverage-based callable site detection. |
-| `callable_sites.coverage.fraction` | number | `1.0` | 0 to 1 | Fraction of samples that must meet coverage thresholds at a site for it to be called "callable". |
-| `callable_sites.coverage.min_coverage` | number or `"auto"` | `"auto"` | >= 0 or `"auto"` | Minimum per-sample depth threshold. `"auto"` computes the threshold from the depth distribution. |
-| `callable_sites.coverage.max_coverage` | number or `"auto"` | `"auto"` | >= 0 or `"auto"` | Maximum per-sample depth threshold. `"auto"` computes the threshold from the depth distribution. |
+| `callable_sites.coverage.min_sample_depth` | integer | `1` | >= 1 | Reads a sample needs at a site to count as having data there. |
+| `callable_sites.coverage.fraction` | number | `0.25` | 0 to 1 | Fraction of samples that must have data (at least `min_sample_depth` reads) at a site for it to be callable. |
+| `callable_sites.coverage.max_depth` | number or `"auto"` | `"auto"` | >= 1 or `"auto"` | Upper bound on depth summed across samples. `"auto"` excludes sites whose summed depth is an outlier above the genome-wide median (see `max_depth_k`); a number sets the bound to that multiple of the median, e.g. `1.5`. |
+| `callable_sites.coverage.max_depth_k` | number | `4` | > 0 | With `max_depth: auto`, how many robust standard deviations (square-root scale) above the median summed depth the cutoff sits. |
 | `callable_sites.coverage.merge_distance` | integer | `100` | >= 0 | Merge callable regions within this many bases of each other. |
 
 ### `callable_sites.mappability`
@@ -214,9 +215,10 @@ callable_sites:
   generate_bed_file: true
   coverage:
     enabled: true
-    fraction: 1.0
-    min_coverage: auto
-    max_coverage: auto
+    min_sample_depth: 1
+    fraction: 0.25
+    max_depth: auto
+    max_depth_k: 4
     merge_distance: 100
   mappability:
     enabled: true

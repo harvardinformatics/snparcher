@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.3 (unreleased)
+
+### Breaking changes
+
+- **Callable sites coverage mask redesigned.**
+  `callable_sites.coverage.min_coverage` and `max_coverage` are replaced by `max_depth`, `max_depth_k` and `min_sample_depth`, and the default `fraction` changes from 1.0 to 0.25.
+  A site is now coverage-callable when its depth summed across samples is not an outlier above the genome-wide median (or, with a numeric `max_depth`, not above that multiple of the median), and at least `fraction` of samples have `min_sample_depth` reads there.
+  The old per-sample thresholds kept only a small fraction of the genome in realistic cohorts.
+  Configs that still set the old keys skip callable sites, and postprocess with it, with a warning; the rest of the workflow runs.
+- **`callable_loci.zarr` now holds clam population counts** (samples with data per site) instead of per-sample masks, so it can be used directly with `clam stat`.
+
+### Fixes
+
+- `coverage.bed` no longer misplaces callable sites. clam's per-sample masks were decoded in the wrong bit order whenever the number of samples was not a multiple of 8; the masks are no longer used.
+- `fraction` now converts to an exact sample count: 0.55 of 200 samples requires 110, not 111.
+- GenMap no longer overwrites or deletes `results/reference/{name}.fa`.
+- Samples marked `exclude` in the sample metadata are left out of the coverage mask.
+
 ## v2.0
 
 v2.0 is a major rewrite of snpArcher with breaking changes to the sample sheet schema, config structure, and module interfaces.

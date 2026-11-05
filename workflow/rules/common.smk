@@ -100,9 +100,10 @@ DEFAULTS = {
         "generate_bed_file": True,
         "coverage": {
             "enabled": True,
-            "fraction": 1.0,
-            "min_coverage": "auto",
-            "max_coverage": "auto",
+            "min_sample_depth": 1,
+            "fraction": 0.25,
+            "max_depth": "auto",
+            "max_depth_k": 4,
             "merge_distance": 100,
         },
         "mappability": {
@@ -235,6 +236,22 @@ def normalize_supported_config_aliases(cfg):
         gatk_cfg.pop("ploidy", None)
 
 
+def pop_replaced_coverage_keys(cfg):
+    """Remove the coverage thresholds that the summed-depth mask replaced.
+
+    Returns their full names. They only stop callable sites from running (see
+    CALLABLE_SITES_BLOCKED), so the rest of the workflow is unaffected.
+    """
+    callable_cfg = cfg.get("callable_sites")
+    coverage_cfg = callable_cfg.get("coverage") if isinstance(callable_cfg, dict) else None
+    if not isinstance(coverage_cfg, dict):
+        return []
+    replaced = [key for key in ("min_coverage", "max_coverage") if key in coverage_cfg]
+    for key in replaced:
+        coverage_cfg.pop(key)
+    return [f"callable_sites.coverage.{key}" for key in replaced]
+
+
 def remove_unsupported_module_blocks(cfg):
     """Warn about removed module blocks and drop them before validation."""
     modules_cfg = cfg.get("modules")
@@ -327,6 +344,7 @@ if v1_markers:
     )
 
 normalize_supported_config_aliases(config)
+REPLACED_COVERAGE_KEYS = pop_replaced_coverage_keys(config)
 remove_unsupported_module_blocks(config)
 set_defaults(config, DEFAULTS)
 validate_config_with_warnings(config, CONFIG_SCHEMA_PATH)
@@ -667,12 +685,47 @@ SAMPLES_WITH_GVCF = samples_df[
 ]["sample_id"].unique().tolist()
 
 CALLABLE_COVERAGE_REQUESTED = bool(config["callable_sites"]["coverage"]["enabled"])
+CALLABLE_MAPPABILITY_ENABLED = bool(config["callable_sites"]["mappability"]["enabled"])
+CALLABLE_GENERATE_BED_FILE = bool(config["callable_sites"]["generate_bed_file"])
+
+REPLACED_COVERAGE_KEYS_MESSAGE = (
+    " and ".join(REPLACED_COVERAGE_KEYS)
+    + " are no longer supported. The coverage mask now uses depth summed across "
+    "samples: set callable_sites.coverage.max_depth ('auto', or a multiple of the "
+    "median summed depth) and min_sample_depth (reads a sample needs at a site to "
+    "count toward fraction). See the callable sites section of the filtering docs."
+)
+
+# Replaced settings stop only callable sites, so a stale config still maps and
+# calls variants. Skipping all of callable sites, not just coverage, avoids
+# producing a mappability-only callable_sites.bed that looks like the real one.
+CALLABLE_SITES_BLOCKED = bool(REPLACED_COVERAGE_KEYS) and CALLABLE_COVERAGE_REQUESTED
+if CALLABLE_SITES_BLOCKED:
+    logger.warning(
+        REPLACED_COVERAGE_KEYS_MESSAGE
+        + " Callable sites will not be generated for this run; the rest of the "
+        "workflow is unaffected."
+    )
+    CALLABLE_COVERAGE_REQUESTED = False
+    CALLABLE_MAPPABILITY_ENABLED = False
+    CALLABLE_GENERATE_BED_FILE = False
+elif REPLACED_COVERAGE_KEYS:
+    logger.warning(
+        REPLACED_COVERAGE_KEYS_MESSAGE
+        + " They are ignored because callable_sites.coverage.enabled is false."
+    )
+
+
+def check_callable_sites_not_blocked():
+    """Fail a requested callable-sites target when replaced settings block it."""
+    if CALLABLE_SITES_BLOCKED:
+        raise WorkflowError(REPLACED_COVERAGE_KEYS_MESSAGE)
+
+
 CALLABLE_COVERAGE_STATS_ENABLED = CALLABLE_COVERAGE_REQUESTED and bool(SAMPLES_WITH_BAM)
 CALLABLE_COVERAGE_BED_ENABLED = (
     CALLABLE_COVERAGE_STATS_ENABLED and not bool(SAMPLES_WITH_GVCF)
 )
-CALLABLE_MAPPABILITY_ENABLED = bool(config["callable_sites"]["mappability"]["enabled"])
-CALLABLE_GENERATE_BED_FILE = bool(config["callable_sites"]["generate_bed_file"])
 
 if CALLABLE_COVERAGE_REQUESTED and SAMPLES_WITH_GVCF:
     gvcf_summary = ", ".join(SAMPLES_WITH_GVCF)

@@ -436,8 +436,8 @@ def write_callable_sites_config(
     coverage_enabled,
     mappability_enabled,
     fraction="1.0",
-    min_coverage="auto",
-    max_coverage="auto",
+    min_sample_depth="1",
+    max_depth="auto",
 ):
     """Write a config copy with callable-sites toggles overridden."""
     text = Path(base_config).read_text()
@@ -446,8 +446,8 @@ def write_callable_sites_config(
   coverage:
     enabled: {"true" if coverage_enabled else "false"}
     fraction: {fraction}
-    min_coverage: {min_coverage}
-    max_coverage: {max_coverage}
+    min_sample_depth: {min_sample_depth}
+    max_depth: {max_depth}
     merge_distance: 100
   mappability:
     enabled: {"true" if mappability_enabled else "false"}
@@ -461,8 +461,6 @@ def write_callable_sites_config(
         r"  coverage:\n"
         r"    enabled: (?:true|false)\n"
         r"    fraction: .*\n"
-        r"    min_coverage: .*\n"
-        r"    max_coverage: .*\n"
         r"    merge_distance: 100\n"
         r"  mappability:\n"
         r"    enabled: (?:true|false)\n"
@@ -1241,8 +1239,8 @@ def test_callable_sites_numeric_thresholds_validate(request):
             coverage_enabled=True,
             mappability_enabled=False,
             fraction="0.75",
-            min_coverage="5",
-            max_coverage="40",
+            min_sample_depth="5",
+            max_depth="1.5",
         )
 
         result = smk.dry_run(
@@ -1282,7 +1280,8 @@ def test_callable_sites_invalid_fraction_fails_validation(request):
 
 
 @pytest.mark.dry_run
-def test_clam_loci_uses_per_sample_and_thresholds(request):
+def test_clam_loci_uses_population_counts_and_thresholds(request):
+    """clam loci runs in count mode on thresholds chosen from the config."""
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
@@ -1291,9 +1290,10 @@ def test_clam_loci_uses_per_sample_and_thresholds(request):
             tmpdir,
             generate_bed_file=True,
             coverage_enabled=True,
-            mappability_enabled=False,
-            min_coverage="5",
-            max_coverage="40",
+            mappability_enabled=True,
+            fraction="0.5",
+            min_sample_depth="3",
+            max_depth="2",
         )
 
         result = smk.dry_run(
@@ -1304,9 +1304,76 @@ def test_clam_loci_uses_per_sample_and_thresholds(request):
         result.assert_success()
 
         output = result.stdout + result.stderr
-        assert "--per-sample" in output
-        assert '--min-coverage 5' in output or "min_coverage\t5" in output
-        assert '--max-coverage 40' in output or "max_coverage\t40" in output
+        assert "--per-sample" not in output
+        assert "--max-depth 2 " in output
+        assert "--min-sample-depth 3 " in output
+        assert "--fraction 0.5 " in output
+        assert "--mappability-bed results/callable_sites/mappability.bed" in output
+        assert '--max-mean-depth "$(threshold clam_max_mean_depth)"' in output
+        assert '-d "$(threshold clam_min_proportion)"' in output
+
+
+@pytest.mark.dry_run
+def test_replaced_coverage_keys_block_only_callable_sites(request):
+    """min_coverage/max_coverage skip callable sites but not the rest of the run.
+
+    The default target still maps and calls variants, with no callable-sites
+    rules. Asking for callable sites explicitly fails with the migration message.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_callable_sites_config(
+            get_config_file(),
+            tmpdir,
+            coverage_enabled=True,
+            mappability_enabled=True,
+        )
+        cfg.write_text(
+            cfg.read_text().replace(
+                "    merge_distance: 100\n  mappability:",
+                "    merge_distance: 100\n    max_coverage: 40\n  mappability:",
+                1,
+            )
+        )
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=get_samples_file())
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "callable_sites.coverage.max_coverage are no longer supported" in output
+        assert "Callable sites will not be generated for this run" in output
+        assert scheduled_rule_present(output, "bwa_mem")
+        for rule in ("mosdepth", "clam_loci", "genmap_index", "callable_sites_bed"):
+            assert not scheduled_rule_present(output, rule), rule
+
+        result = smk.dry_run(
+            target="callable_sites", configfile=cfg, samples=get_samples_file()
+        )
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "callable_sites.coverage.max_coverage are no longer supported" in output
+
+
+@pytest.mark.dry_run
+def test_callable_sites_leaves_out_excluded_samples(request):
+    """Samples excluded in sample_metadata do not enter the coverage mask."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+
+        result = smk.dry_run(
+            target="results/callable_sites/depths.zarr",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+            config_overrides={
+                "sample_metadata": str(METADATA_DIR / "exclude_and_outgroup.csv"),
+            },
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "results/callable_sites/depths/sample2.per-base.d4" in output
+        assert "results/callable_sites/depths/sample1." not in output
 
 
 @pytest.mark.dry_run

@@ -33,8 +33,6 @@ callable_sites:
   coverage:
     enabled: true
     fraction: 1.0
-    min_coverage: auto
-    max_coverage: auto
     merge_distance: 100
   mappability:
     enabled: true
