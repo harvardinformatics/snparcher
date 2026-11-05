@@ -1331,6 +1331,31 @@ def test_gatk_without_intervals_dry_run(request):
         assert_haplotypecaller_uses_explicit_bam_csi_index(source, expected_count=2)
 
 
+@pytest.mark.full_run
+@pytest.mark.parametrize("long_contig", [False, True], ids=["standard", "long_contig"])
+def test_gatk_without_intervals_full_run(request, long_contig):
+    """GATK joint calling runs end to end with intervals disabled.
+
+    With intervals off, one GenomicsDBImport covers the whole genome. It was
+    given the reference .fai as -L, which GATK rejects as an interval file, so
+    every such run died after HaplotypeCaller; only dry runs covered this path.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_intervals_config(get_config_file(), tmpdir, enabled=False)
+        if long_contig:
+            cfg = write_long_contig_config(cfg, tmpdir, "gatk")
+        index = ".csi" if long_contig else ".tbi"
+
+        result = smk.run(target="call_variants", configfile=cfg, samples=get_samples_file())
+        result.assert_success()
+        result.assert_output_exists(
+            "results/vcfs/filtered.vcf.gz", f"results/vcfs/filtered.vcf.gz{index}"
+        )
+        assert list(iter_vcf_records(Path(tmpdir) / "results/vcfs/filtered.vcf.gz"))
+
+
 @pytest.mark.dry_run
 def test_joint_genomicsdb_import_dry_run_uses_profile_heap_and_contig_merge_guard(request):
     no_conda = request.config.getoption("--no-conda")
