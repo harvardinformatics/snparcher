@@ -19,7 +19,7 @@ ref_fai: "results/reference/my_organism.fa.gz.fai"
 callable_sites_bed: "results/callable_sites/callable_sites.bed"
 
 # Filtering parameters
-contig_size: 10000       # Contigs this size or smaller are excluded. Set to 0 to disable.
+contig_size: 10000       # Contigs shorter than this are excluded. Set to 0 to disable.
 maf: 0.01                # SNPs with MAF below this value are removed. Set to 0 to disable.
 missingness: 0.75        # SNPs with missingness above this value are removed. Set to 1 to disable.
 exclude_scaffolds: "mtDNA,Y"  # Comma-separated scaffolds to exclude. Set to "" to disable.
