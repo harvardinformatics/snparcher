@@ -299,7 +299,7 @@ properties:
               maf:
                 type: number
                 minimum: 0
-                maximum: 1
+                maximum: 0.5
                 default: 0.01
               missingness:
                 type: number
