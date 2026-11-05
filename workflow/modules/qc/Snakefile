@@ -5,7 +5,8 @@ Produces an interactive QC dashboard (PCA, admixture, NJ tree, relatedness,
 mapping rate, heterozygosity, geographic maps) from a raw VCF.
 
 Can run standalone:
-    snakemake --snakefile workflow/modules/qc/Snakefile --config vcf=path/to/raw.vcf.gz fai=path/to/ref.fai
+    snakemake --snakefile workflow/modules/qc/Snakefile \
+        --config samples=path/to/samples.csv vcf=path/to/raw.vcf.gz fai=path/to/ref.fai
 
 Or imported by the main workflow via Snakemake's `module` directive
 (config is passed in, overriding the configfile below).
@@ -34,9 +35,10 @@ import shlex
 import tempfile
 import pandas as pd
 
-# When imported via `module ... config: config`, this configfile is ignored.
-configfile: "config/config.yaml"
-
+# No configfile directive: it resolved against the working directory, so a
+# standalone run failed outside a project, or silently read the project's
+# main config. Pass --configfile workflow/modules/qc/config/config.yaml (as
+# run-qc.sh does) or --config; anything unset falls back to these defaults.
 _QC_DEFAULTS = {
     "samples": "config/samples.csv",
     "sample_metadata": "",
@@ -526,21 +528,26 @@ rule admixture:
     output:
         admix3="results/qc/plink.3.Q",
         admix2="results/qc/plink.2.Q",
-    params:
-        outdir=lambda wc, input: os.path.dirname(input.bed),
     log:
         "logs/qc/admixture.txt",
     conda:
         "envs/admixture.yml"
     shell:
         """
-        cp {input.bim_fixed} {input.bim} 2> {log}
+        # ADMIXTURE needs integer chromosome codes and writes its results to
+        # the working directory. Give it a private directory holding the
+        # integer-coded .bim, rather than overwriting plink.bim (an upstream
+        # output) and moving files out of the workflow root.
+        WORK=$(mktemp -d results/qc/admixture_XXXXXX)
+        trap 'rm -rf "$WORK"' EXIT
+        ln -s "$(realpath {input.bed})" "$WORK/plink.bed"
+        ln -s "$(realpath {input.fam})" "$WORK/plink.fam"
+        cp {input.bim_fixed} "$WORK/plink.bim"
 
-        admixture {input.bed} 2 &>> {log}
-        admixture {input.bed} 3 &>> {log}
+        (cd "$WORK" && admixture plink.bed 2 && admixture plink.bed 3) &> {log}
 
-        mv plink.2.* {params.outdir} &>> {log}
-        mv plink.3.* {params.outdir} &>> {log}
+        mv "$WORK/plink.2.Q" {output.admix2}
+        mv "$WORK/plink.3.Q" {output.admix3}
         """
 
 
@@ -549,6 +556,9 @@ rule generate_coords_file:
     Generate coordinates file from sample metadata (lat/long columns).
     Only runs when metadata with lat/long is available.
     """
+    input:
+        # Rebuild when the metadata changes; the rule only runs when it is set.
+        metadata=lambda wc: config["sample_metadata"] or [],
     output:
         coords="results/qc/coords.txt",
     run:
@@ -587,6 +597,7 @@ rule qc_dashboard:
     params:
         qc_dir="results/qc",
         clusters=config["clusters"],
+        min_depth=config["min_depth"],
         google_api_key=config["google_api_key"],
         has_qc_report=_has_qc_report(),
     output:

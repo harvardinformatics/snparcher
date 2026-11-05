@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-render_qcplots <- function(qc_dir, nClusters, GMKey, has_qc_report){
+render_qcplots <- function(qc_dir, nClusters, minDepth, GMKey, has_qc_report){
     workd <- getwd()
 
     output.path <- file.path(workd, snakemake@output[["dashboard"]])
@@ -17,6 +17,7 @@ render_qcplots <- function(qc_dir, nClusters, GMKey, has_qc_report){
     rmarkdown::render(script.in,
                     params = list(qc_dir = qc_dir,
                                   nClusters = nClusters,
+                                  minDepth = minDepth,
                                   GMKey = GMKey,
                                   has_qc_report = has_qc_report),
                     knit_root_dir = workd,
@@ -27,5 +28,6 @@ render_qcplots <- function(qc_dir, nClusters, GMKey, has_qc_report){
 
 render_qcplots(snakemake@params[["qc_dir"]],
                snakemake@params[["clusters"]],
+               snakemake@params[["min_depth"]],
                snakemake@params[["google_api_key"]],
                snakemake@params[["has_qc_report"]])

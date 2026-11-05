@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -3331,15 +3332,21 @@ def test_qc_plink_handles_sex_organelle_contigs_and_small_cohorts(request):
         header = (qc_dir / "plink.eigenvec").read_text().splitlines()[0].split()
         assert n_samples == 5
         assert [col for col in header if col.startswith("PC")] == [f"PC{i}" for i in range(1, 5)]
+        # ADMIXTURE gets integer codes in its own copy; plink.bim keeps the
+        # PLINK names that plink.bed and the dashboard were built with.
+        bim_contigs = {line.split("\t", 1)[0] for line in (qc_dir / "plink.bim").read_text().splitlines()}
+        assert bim_contigs <= {"qcctg1", "qcctg2"}, bim_contigs
 
 
 @pytest.mark.full_run
 def test_qc_dashboard_counts_pass_records_and_many_clusters(request):
-    """The dashboard counts PASS records as retained and handles > 10 clusters.
+    """The dashboard's numbers, text and map match the data.
 
-    GATK hard filtering labels passing records PASS, not ".". The module runs
-    from a copy whose scripts directory is read-only, as in a shared or
-    read-only install: the dashboard must render without writing there.
+    GATK hard filtering labels passing records PASS, not ".", and there are
+    12 clusters (more than the palette's 10 colours). The module runs from a
+    copy whose scripts directory is read-only, as in a shared or read-only
+    install: the dashboard must render without writing there. One sample is
+    in Europe, so the map must not be scoped to North America.
     """
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -3350,6 +3357,12 @@ def test_qc_dashboard_counts_pass_records_and_many_clusters(request):
             contigs = [line.split()[0] for line in handle if line.strip()]
         vcf, fai, samples, n_records = write_qc_cohort(
             tmpdir, contig_names=contigs, n_samples=150, filter_label="PASS"
+        )
+        metadata = Path(tmpdir) / "metadata_with_europe.csv"
+        metadata.write_text(
+            (TEST_DATA_DIR / "qc" / "sample_metadata.csv").read_text().replace(
+                "test_A01,34.05,-118.24", "test_A01,52.52,13.40"
+            )
         )
         smk = SnakemakeRunner(
             Path(tmpdir),
@@ -3363,11 +3376,12 @@ def test_qc_dashboard_counts_pass_records_and_many_clusters(request):
                 configfile=module_copy / "config" / "config.yaml",
                 config_overrides={
                     "samples": str(samples),
-                    "sample_metadata": str(TEST_DATA_DIR / "qc" / "sample_metadata.csv"),
+                    "sample_metadata": str(metadata),
                     "vcf": str(vcf),
                     "fai": str(fai),
                     "qc_report": str(TEST_DATA_DIR / "qc" / "qc_report.tsv"),
                     "clusters": "12",
+                    "min_depth": "1.5",
                 },
             )
         finally:
@@ -3377,9 +3391,16 @@ def test_qc_dashboard_counts_pass_records_and_many_clusters(request):
         )
         result.assert_success()
 
-        html = (Path(tmpdir) / "results" / "qc" / "qc_dashboard.html").read_text()
-        assert f"In total, {n_records} SNPs were discovered" in html
-        assert "NA SNPs" not in html
+        qc_dir = Path(tmpdir) / "results" / "qc"
+        html = (qc_dir / "qc_dashboard.html").read_text()
+        n_pruned = len((qc_dir / "plink.bim").read_text().splitlines())
+        n_analyzed = len((qc_dir / "plink.fam").read_text().splitlines())
+        assert f"In total, {n_records} variants were discovered" in html
+        assert "NA variants" not in html
+        assert f"(in this report, {n_pruned})" in html
+        assert f"Of the 150 samples in the VCF, {n_analyzed} passed" in html
+        assert "mean depth of 1.5x or less" in html
+        assert '"scope":"world"' in html
 
 
 def run_qc_site_filter(request, tmpdir, kept, dropped, rows):
@@ -3469,6 +3490,59 @@ def test_qc_maf_filter_applies_to_either_allele(request):
             },
         )
     assert positions == [200]
+
+
+@pytest.mark.full_run
+def test_qc_coords_rebuild_when_metadata_changes(request):
+    """Editing sample coordinates reruns generate_coords_file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        metadata = Path(tmpdir) / "metadata.csv"
+        metadata.write_text((TEST_DATA_DIR / "qc" / "sample_metadata.csv").read_text())
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=False,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        kwargs = dict(
+            target="results/qc/coords.txt",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "sample_metadata": str(metadata),
+            },
+        )
+        smk.run(**kwargs).assert_success()
+
+        time.sleep(1.1)
+        metadata.write_text(metadata.read_text().replace("34.05,-118.24", "35.00,-118.00"))
+        result = smk.dry_run(**kwargs)
+        result.assert_success()
+        assert scheduled_rule_present(result.stdout + result.stderr, "generate_coords_file")
+
+
+@pytest.mark.dry_run
+def test_qc_module_runs_without_a_configfile():
+    """The module's documented standalone command works from any directory.
+
+    With a `configfile: "config/config.yaml"` directive it failed unless the
+    working directory happened to contain that file (and then silently read
+    it, e.g. a project's main config).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [
+                "snakemake", "-n",
+                "-s", str(WORKFLOW_DIR / "modules" / "qc" / "Snakefile"),
+                "--directory", tmpdir,
+                "--config",
+                f"samples={TEST_DATA_DIR / 'qc' / 'samples.csv'}",
+                f"vcf={TEST_DATA_DIR / 'qc' / 'raw.vcf.gz'}",
+                f"fai={TEST_DATA_DIR / 'qc' / 'ref.fai'}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.dry_run

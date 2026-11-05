@@ -10,6 +10,7 @@ editor_options:
 params:
   qc_dir: "results/qc"
   nClusters: 3
+  minDepth: 2
   GMKey: NULL
   has_qc_report: FALSE
 ---
@@ -169,7 +170,9 @@ tot_snps <- snps_remain + fil_snps
 proj_name <- basename(qc_dir)
 
 #num SNPs in pruned data
-nums.nps <- nrow(read.table(paste0(plink_prefix, ".bim"), header = T, check.names = FALSE, stringsAsFactors = FALSE))
+nums.nps <- nrow(read.table(paste0(plink_prefix, ".bim"), header = FALSE, check.names = FALSE, stringsAsFactors = FALSE))
+#samples left after the depth and missingness filters, which all analyses use
+num.analyzed <- nrow(read.table(paste0(plink_prefix, ".fam"), header = FALSE, check.names = FALSE, stringsAsFactors = FALSE))
 
 #estimate watterson's theta:
 depth.path <- paste0(vcf_prefix, ".idepth")
@@ -193,7 +196,7 @@ w_theta <- round((snps_remain/(Hn)) / genome_size, 3) * 100
 valueBox(num.samples, icon = "fa-check-double")
 ```
 
-### Mil. SNPs
+### Mil. variants
 
 ```{r}
 valueBox(snps_remain.m, icon = "fa-dna")
@@ -224,7 +227,7 @@ Column {.sidebar}
 -----------------------------------------------------------------------
 ### About
 
-This is an individual quality control report generated snpArcher for the dataset `r proj_name`. In total, `r tot_snps` SNPs were discovered before any filters were applied. The GATK best practices filters were then applied to this dataset and `r fil_snps` were removed, leaving `r snps_remain`. The approximate nucleotide diversity in the sample using the Watterson estimator is `r w_theta `%. For the purposes of this report, we apply several sensible filters including removing all indels, non-biallelic SNPs, SNPs with a minor allele frequency < 0.01, SNPs with >75% missing data, and samples with <2x sequencing depth. We then randomly selected SNPs within a set window size to end up with approximately 100k SNPs (in this report, `r nums.nps`). These are effectively an LD pruned set of SNPs. All analyses in this report are based on this set of 100k SNPs. **This should not be considered a final analyses and are solely intended to direct quality control of the dataset. **
+This is an individual quality control report generated snpArcher for the dataset `r proj_name`. In total, `r tot_snps` variants were discovered before any filters were applied. Variant filters, if any were applied to this call set, removed `r fil_snps`, leaving `r snps_remain`. The approximate nucleotide diversity in the sample using the Watterson estimator is `r w_theta `%. For the purposes of this report, we apply several sensible filters including removing all indels, non-biallelic SNPs, SNPs with a minor allele frequency < 0.01, SNPs with >75% missing data, and samples with mean depth of `r params$minDepth`x or less. Of the `r num.samples` samples in the VCF, `r num.analyzed` passed the depth and missingness filters and are used in the analyses below. We then randomly selected SNPs within a set window size to end up with approximately 100k SNPs (in this report, `r nums.nps`). These are effectively an LD pruned set of SNPs. All analyses in this report are based on this set of 100k SNPs. **This should not be considered a final analyses and are solely intended to direct quality control of the dataset. **
 
 Row
 -----------------------------------------------------------------------
@@ -591,8 +594,8 @@ if((file.exists(coords.path)) & (file.size(coords.path)>0)){
     df.coords <- read_table_preserve_ids(coords.path, id_cols = c("V1"))
     names(df.coords) <- c("sample.ID","long","lat")
 
-    if(max(df.coords$lat < 90) & min(df.coords$lat) > 0
-           & max(df.coords$long < -35) & min(df.coords$long > -180)){
+    if(max(df.coords$lat) < 90 && min(df.coords$lat) > 0
+           && max(df.coords$long) < -35 && min(df.coords$long) > -180){
       map_type = "north america"
     } else { map_type = "world"}
 
@@ -666,7 +669,6 @@ if(file.exists(coords.path)){
     df.coords <- left_join(df.pca, df.coords, by = c("IID" = "sample.ID"))
 
     df.coords <- df.coords %>% filter(!is.na(long))
-    num.missing <- df.coords %>% filter(is.na(long)) %>% nrow()
 
     df.coords$color <- set.colors[factor(df.coords$cluster)]
 
@@ -678,11 +680,14 @@ if(file.exists(coords.path)){
 
     register_google(key = input$GMKey)
 
-    us <- c(left = -125, bottom = 25.75, right = -67, top = 49)
+    # Centre and zoom the map on the samples' own extent.
+    lon.range <- range(as.numeric(df.coords$long))
+    lat.range <- range(as.numeric(df.coords$lat))
+    map.zoom <- min(ggmap::calc_zoom(lon.range, lat.range), 10)
+    base.map <- get_googlemap(center = c(lon = mean(lon.range), lat = mean(lat.range)),
+                              zoom = map.zoom, maptype = "terrain", scale = 4, size = c(640, 640))
 
-    cal.map <- get_googlemap("California", zoom = 6, maptype = "terrain", scale = 4, size = c(640, 640))
-
-    terrain.map <- cal.map %>%
+    terrain.map <- base.map %>%
       ggmap() +
         geom_point(data = df.coords, aes(x = Longitude, y = Latitude,
                    color = cluster, size = 2.5, label = IID), alpha = 0.8) +
