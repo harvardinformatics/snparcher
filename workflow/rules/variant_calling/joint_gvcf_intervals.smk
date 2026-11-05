@@ -251,8 +251,8 @@ rule concat_interval_vcfs:
         vcf=get_final_interval_vcf_stage_file,
         tbi=get_final_interval_vcf_stage_tbi,
     output:
-        vcf=RAW_VCF,
-        tbi=RAW_VCF_INDEX,
+        vcf=raw_vcf_output(RAW_VCF),
+        tbi=raw_vcf_output(RAW_VCF_INDEX),
     benchmark:
         "benchmarks/concat_interval_vcfs/benchmark.txt"
     log:

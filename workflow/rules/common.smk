@@ -649,6 +649,17 @@ APPLY_HARD_FILTERS = GATK_LINEAGE_CALLER and GENERATE_FILTERED_VCF
 FINAL_VCF = FILTERED_VCF if APPLY_HARD_FILTERS else RAW_VCF
 
 
+def raw_vcf_output(path):
+    """Declare the raw call set (or its index) as an output.
+
+    When hard filtering follows, filtered.vcf.gz carries every raw record
+    unchanged except FILTER, so the raw VCF is a temporary intermediate rather
+    than a second copy of the largest output. Otherwise the raw VCF is the
+    final call set and must persist, with its index.
+    """
+    return temp(path) if APPLY_HARD_FILTERS else path
+
+
 # --- Sample lists ---
 
 SAMPLES_ALL = samples_df["sample_id"].unique().tolist()

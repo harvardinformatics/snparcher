@@ -1554,13 +1554,16 @@ def test_full_pipeline(request):
         )
         result.assert_success()
         result.assert_output_exists(
-            "results/vcfs/raw.vcf.gz",
             # gatk is GATK-lineage and generate_filtered_vcf defaults true, so the
-            # hard-filtered VCF is a default product alongside raw.
+            # hard-filtered VCF is the final call set, with its index.
             "results/vcfs/filtered.vcf.gz",
+            "results/vcfs/filtered.vcf.gz.tbi",
             "results/qc_metrics/qc_report.tsv",
             "results/callable_sites/callable_sites.bed",
         )
+        # filtered.vcf.gz holds every raw record with FILTER set, so the raw
+        # VCF is a temporary intermediate, not a second copy of the call set.
+        assert not (Path(tmpdir) / "results/vcfs/raw.vcf.gz").exists()
 
 
 @pytest.mark.dry_run
@@ -2064,9 +2067,10 @@ def test_full_pipeline_bcftools(request):
         )
         result.assert_success()
         # bcftools is not GATK-lineage: no hard-filtered VCF is produced, and
-        # call_variants resolves to the raw VCF.
+        # call_variants resolves to the raw VCF, which must keep its index.
         result.assert_output_exists(
             "results/vcfs/raw.vcf.gz",
+            "results/vcfs/raw.vcf.gz.tbi",
             "results/qc_metrics/qc_report.tsv",
         )
         assert not (Path(tmpdir) / "results/vcfs/filtered.vcf.gz").exists()
@@ -2197,6 +2201,15 @@ def test_long_contig_hard_filters_full_run(request):
             if match
         }
         assert {"RPRS_filter", "FS_SOR_filter", "MQ_filter", "QUAL_filter"} <= declared
+
+        # The raw VCF is not a product when hard filtering runs, so nothing
+        # asks for it later. When `all` did, the deleted temp work VCF meant
+        # re-running joint genotyping for every interval to rebuild it.
+        result = smk.dry_run(target="all", configfile=configfile, samples=samples)
+        result.assert_success()
+        output = result.stdout + result.stderr
+        for rule in ("gatk_genotype_gvcfs", "concat_interval_vcfs", "compress_interval_raw_vcf"):
+            assert not scheduled_rule_present(output, rule), rule
 
 
 @pytest.mark.full_run

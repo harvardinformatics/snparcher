@@ -118,8 +118,8 @@ if LONG_CONTIG_MODE:
             vcf=RAW_VCF_WORK,
             idx=RAW_VCF_WORK_INDEX,
         output:
-            vcf=temp(RAW_VCF),
-            idx=temp(RAW_VCF_INDEX),
+            vcf=raw_vcf_output(RAW_VCF),
+            idx=raw_vcf_output(RAW_VCF_INDEX),
         params:
             index_args=BCFTOOLS_INDEX_ARGS,
         conda:
@@ -141,8 +141,8 @@ else:
             db="results/gatk_genomics_db.tar",
             **REF_FILES,
         output:
-            vcf=temp(RAW_VCF),
-            tbi=temp(RAW_VCF_INDEX),
+            vcf=raw_vcf_output(RAW_VCF),
+            tbi=raw_vcf_output(RAW_VCF_INDEX),
         params:
             het_prior=config["variant_calling"]["gatk"]["het_prior"],
             db_rel=lambda wc, input: subpath(input.db, strip_suffix=".tar"),

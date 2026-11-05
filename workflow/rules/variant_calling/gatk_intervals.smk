@@ -539,8 +539,8 @@ rule concat_interval_vcfs:
         vcf=get_final_interval_vcf_stage_file,
         tbi=get_final_interval_vcf_stage_tbi,
     output:
-        vcf=temp(RAW_VCF_WORK) if LONG_CONTIG_MODE else RAW_VCF,
-        idx=temp(RAW_VCF_WORK_INDEX) if LONG_CONTIG_MODE else RAW_VCF_INDEX,
+        vcf=temp(RAW_VCF_WORK) if LONG_CONTIG_MODE else raw_vcf_output(RAW_VCF),
+        idx=temp(RAW_VCF_WORK_INDEX) if LONG_CONTIG_MODE else raw_vcf_output(RAW_VCF_INDEX),
     benchmark:
         "benchmarks/concat_interval_vcfs/benchmark.txt"
     log:
@@ -560,8 +560,8 @@ if LONG_CONTIG_MODE:
             vcf=RAW_VCF_WORK,
             idx=RAW_VCF_WORK_INDEX,
         output:
-            vcf=temp(RAW_VCF),
-            idx=temp(RAW_VCF_INDEX),
+            vcf=raw_vcf_output(RAW_VCF),
+            idx=raw_vcf_output(RAW_VCF_INDEX),
         params:
             index_args=BCFTOOLS_INDEX_ARGS,
         conda:

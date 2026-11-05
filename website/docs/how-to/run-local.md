@@ -160,8 +160,8 @@ Key output files include:
 
 | Output | Path |
 |---|---|
-| Hard-filtered VCF | `results/vcfs/filtered.vcf.gz` |
-| Raw (unfiltered) VCF | `results/vcfs/raw.vcf.gz` |
+| Final call set: hard-filtered VCF (GATK-family callers) | `results/vcfs/filtered.vcf.gz` |
+| Final call set: raw VCF (bcftools, DeepVariant, or no hard filtering) | `results/vcfs/raw.vcf.gz` |
 | Per-sample BAMs | `results/bams/markdup/{sample}.bam` |
 | Per-sample gVCFs | `results/gvcfs/{sample}.g.vcf.gz` |
 | QC dashboard | `results/qc/qc_dashboard.html` |

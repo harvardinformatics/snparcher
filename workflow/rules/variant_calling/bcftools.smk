@@ -120,8 +120,8 @@ rule bcftools_concat_regions:
         vcfs=get_bcftools_region_vcfs,
         tbis=get_bcftools_region_vcf_tbis,
     output:
-        vcf=temp(RAW_VCF),
-        idx=temp(RAW_VCF_INDEX),
+        vcf=raw_vcf_output(RAW_VCF),
+        idx=raw_vcf_output(RAW_VCF_INDEX),
     params:
         index_args=BCFTOOLS_INDEX_ARGS,
     conda:
