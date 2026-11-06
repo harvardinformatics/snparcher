@@ -2395,6 +2395,13 @@ def test_long_contig_multistage_interval_gather(request):
             "gatk",
         )
         samples = get_samples_file()
+        # A small heap makes SortVcf's records-in-RAM differ from Picard's
+        # default, so the logs show it is sized from the heap and sample count.
+        small_heap = [
+            "--set-resources",
+            "concat_interval_gvcfs_stage:mem_mb_reduced=100",
+            "concat_interval_vcfs_stage:mem_mb_reduced=100",
+        ]
 
         result = smk.run(
             target="setup",
@@ -2411,10 +2418,11 @@ def test_long_contig_multistage_interval_gather(request):
             target=staged_gvcf_targets,
             configfile=configfile,
             samples=samples,
-            extra_args=["--notemp"],
+            extra_args=["--notemp", *small_heap],
         )
         result.assert_success()
         result.assert_output_exists(*staged_gvcf_targets)
+        gvcf_run_output = result.stdout + result.stderr
 
         staged_vcf_targets = [
             "results/vcfs/work/staged/r1/c0.vcf",
@@ -2424,7 +2432,7 @@ def test_long_contig_multistage_interval_gather(request):
             target=staged_vcf_targets,
             configfile=configfile,
             samples=samples,
-            extra_args=["--notemp"],
+            extra_args=["--notemp", *small_heap],
         )
         result.assert_success()
         result.assert_output_exists(*staged_vcf_targets)
@@ -2435,6 +2443,12 @@ def test_long_contig_multistage_interval_gather(request):
         vcf_log_text = vcf_log.read_text()
         assert "IndexFeatureFile" in gvcf_log_text
         assert "IndexFeatureFile" in vcf_log_text
+
+        # Half of a 100 MB heap: one sample per gVCF, two in the cohort VCF.
+        assert "-Xmx100m" in gvcf_run_output
+        assert "-Xmx100m" in result.stdout + result.stderr
+        assert "MAX_RECORDS_IN_RAM=22814" in gvcf_log_text
+        assert "MAX_RECORDS_IN_RAM=20576" in vcf_log_text
 
         source = workflow_source("rules", "variant_calling", "gatk_intervals.smk")
         assert "picard SortVcf" in source
