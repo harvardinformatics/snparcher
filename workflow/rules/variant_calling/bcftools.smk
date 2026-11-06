@@ -101,7 +101,7 @@ rule bcftools_call:
             -q {params.min_mapq} \
             -Q {params.min_baseq} \
             -d {params.max_depth} \
-            -r {params.contig} \
+            -r {params.contig:q} \
             --threads {threads} \
             -Ou {input.bams} 2> {log} \
         | bcftools call \
@@ -132,7 +132,13 @@ rule bcftools_concat_regions:
         "logs/bcftools_concat_regions.txt"
     shell:
         """
-        bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
+        # Each region VCF holds one contig, so nothing overlaps and concat can
+        # read the files one at a time; -a would open them all at once, which
+        # exceeds the open-file limit on fragmented assemblies.
+        LIST=$(mktemp "{resources.tmpdir}/bcftools_concat_regions_XXXXXX")
+        trap 'rm -f "$LIST"' EXIT
+        printf '%s\\n' {input.vcfs} > "$LIST"
+        bcftools concat -f "$LIST" -Ou 2> {log} \
             | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}
         bcftools index {params.index_args} {output.vcf} 2>> {log}
         """

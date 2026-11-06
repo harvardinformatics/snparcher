@@ -2219,6 +2219,30 @@ def test_full_pipeline_bcftools(request):
 
 
 @pytest.mark.full_run
+def test_bcftools_caller_quotes_contig_names(request):
+    """SAM allows shell metacharacters in contig names, and NCBI-style
+    gi|...| names are common. The per-contig mpileup must get the name quoted."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        contig = "gi|15829254|ref|AB011548.2|"
+        fasta = gzip.decompress((TEST_DATA_DIR / "reference" / "test_genome.fa.gz").read_bytes())
+        reference = tmp_path / "test_genome.fa"
+        reference.write_text(fasta.decode().replace(">AB011548.2 ", f">{contig} ", 1))
+
+        smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
+        cfg = write_reference_source_config(get_config_file(), tmpdir, source=str(reference))
+        cfg = write_config_for_tool(cfg, tmpdir, "bcftools")
+
+        result = smk.run(target="call_variants", configfile=cfg, samples=get_samples_file())
+        result.assert_success()
+        result.assert_output_exists("results/vcfs/raw.vcf.gz", "results/vcfs/raw.vcf.gz.tbi")
+        with gzip.open(tmp_path / "results/vcfs/raw.vcf.gz", "rt") as handle:
+            chroms = [line.split("\t", 1)[0] for line in handle if not line.startswith("#")]
+        assert contig in chroms
+
+
+@pytest.mark.full_run
 def test_incremental(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
