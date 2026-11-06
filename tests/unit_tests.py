@@ -223,6 +223,31 @@ FLAGSTAT_PAIRED = """\
 """
 
 
+# The same for three single-end reads, two of them mapped.
+FLAGSTAT_UNPAIRED = """\
+3\t0\ttotal (QC-passed reads + QC-failed reads)
+3\t0\tprimary
+0\t0\tsecondary
+0\t0\tsupplementary
+0\t0\tduplicates
+0\t0\tprimary duplicates
+2\t0\tmapped
+66.67%\tN/A\tmapped %
+2\t0\tprimary mapped
+66.67%\tN/A\tprimary mapped %
+0\t0\tpaired in sequencing
+0\t0\tread1
+0\t0\tread2
+0\t0\tproperly paired
+N/A\tN/A\tproperly paired %
+0\t0\twith itself and mate mapped
+0\t0\tsingletons
+N/A\tN/A\tsingletons %
+0\t0\twith mate mapped to a different chr
+0\t0\twith mate mapped to a different chr (mapQ>=5)
+"""
+
+
 def run_parse_bam_stats(request, tmpdir, flagstat, target):
     """Run only the BAM-stats parsing for one external-BAM sample, from given
     samtools outputs, so no BAM has to be built."""
@@ -268,6 +293,27 @@ def test_bam_stats_count_primary_records(request):
         assert stats["num_mapped"] == 5
         assert stats["percent_mapped"] == 83.33
         assert stats["percent_properly_paired"] == 66.67
+
+
+@pytest.mark.unit
+def test_bam_stats_unpaired_bam_reports_na(request):
+    """samtools flagstat prints N/A for the properly-paired percentage of an
+    unpaired BAM. Calling works on such BAMs, so QC must report NA, not crash."""
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = run_parse_bam_stats(
+            request, tmpdir, FLAGSTAT_UNPAIRED, "results/qc_metrics/qc_report.tsv"
+        )
+        result.print_log()
+        result.assert_success()
+
+        stats = json.loads((Path(tmpdir) / "results/qc_metrics/bam/sample_ext.json").read_text())
+        assert stats["total_reads"] == 3
+        assert stats["percent_properly_paired"] is None
+        header, row = (Path(tmpdir) / "results/qc_metrics/qc_report.tsv").read_text().splitlines()
+        report = dict(zip(header.split("\t"), row.split("\t")))
+        assert report["percent_properly_paired"] == "NA"
+        assert report["percent_mapped"] == "66.67"
 
 
 @pytest.mark.unit

@@ -35,7 +35,8 @@ rule parse_bam_stats:
                 flagstat[description] = passed
 
         def flagstat_percent(description):
-            return float(flagstat[description].rstrip("%"))
+            value = flagstat[description].rstrip("%")
+            return None if value == "N/A" else float(value)
 
         # Count primary records only. Secondary and supplementary records are
         # extra alignments of reads already counted, and would inflate the
@@ -44,6 +45,7 @@ rule parse_bam_stats:
         num_dups = int(flagstat["primary duplicates"])
         num_mapped = int(flagstat["primary mapped"])
         pct_mapped = flagstat_percent("primary mapped %") if total_reads > 0 else 0
+        # None (NA in the report) for an unpaired BAM, which has no pairs.
         pct_proper_paired = flagstat_percent("properly paired %") if total_reads > 0 else 0
         
         out = {
@@ -179,7 +181,11 @@ rule combine_qc_metrics:
                     f"{bam['percent_mapped']:.2f}",
                     str(bam["num_duplicates"]),
                     f"{bam['percent_duplicates']:.2f}",
-                    f"{bam['percent_properly_paired']:.2f}",
+                    (
+                        f"{bam['percent_properly_paired']:.2f}"
+                        if bam["percent_properly_paired"] is not None
+                        else "NA"
+                    ),
                     f"{bam['mean_depth']:.2f}",
                     str(bam["covered_bases"]),
                 ])
