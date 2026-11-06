@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -1087,6 +1088,52 @@ def test_multirow_same_library_dry_run(request):
         assert "merge_dedup_libraries" in output
         assert "input_unit=u1" in output
         assert "input_unit=u2" in output
+
+
+@pytest.mark.dry_run
+def test_dag_build_time_with_many_samples(request):
+    """Every DB-shard job lists every sample's gVCF, and the default shard count
+    is 7.5 per sample, so per-sample lookups that scanned the whole sheet made
+    building the job graph quadratic in samples. With 150 samples and 1,125
+    shards this dry run took about 155 s before those lookups were cached and
+    about 30 s after."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workdir = Path(tmpdir)
+        smk = SnakemakeRunner(workdir, use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals/gvcf",
+            "results/intervals/picard.interval_list",
+        )
+        n_samples, n_shards = 150, 1125
+        shard = FIXTURES_DIR / "results/intervals/db/0000-scattered.interval_list"
+        (workdir / "results/intervals/db").mkdir()
+        shard_lists = [f"results/intervals/db/{i:04d}-scattered.interval_list" for i in range(n_shards)]
+        for path in shard_lists:
+            (workdir / path).symlink_to(shard)
+        (workdir / "results/intervals/db/intervals.txt").write_text("\n".join(shard_lists) + "\n")
+        sheet = workdir / "many_samples.csv"
+        sheet.write_text(
+            "sample_id,input_type,input,library_id,mark_duplicates\n"
+            + "".join(
+                f"s{i},fastq,data/reads/Pop1_sample_{i % 5}_1.fq.gz;"
+                f"data/reads/Pop1_sample_{i % 5}_2.fq.gz,,true\n"
+                for i in range(n_samples)
+            )
+        )
+
+        start = time.monotonic()
+        result = smk.dry_run(
+            target="call_variants",
+            configfile=FIXTURES_DIR / "config" / "config.yaml",
+            samples=sheet,
+        )
+        elapsed = time.monotonic() - start
+        result.assert_success()
+        assert elapsed < 75, f"Dry run with {n_samples} samples took {elapsed:.0f} s"
 
 
 @pytest.mark.dry_run
