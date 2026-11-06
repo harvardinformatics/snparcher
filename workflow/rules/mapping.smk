@@ -82,6 +82,8 @@ rule stage_external_bam:
         bam=lambda wc: get_external_bam(wc.sample),
     output:
         bam="results/bams/input/{sample}.bam",
+    conda:
+        "../envs/samtools.yaml"
     log:
         "logs/stage_external_bam/{sample}.txt"
     run:
@@ -92,6 +94,32 @@ rule stage_external_bam:
 
         if not src.exists():
             raise FileNotFoundError(f"External BAM not found for sample {wildcards.sample}: {src}")
+
+        # bcftools and DeepVariant name each VCF sample column after the read
+        # group's SM, while the rest of the workflow uses sample_id, and two
+        # BAMs that share an SM are pooled into one column. So each external
+        # BAM must carry exactly one SM, equal to its sample_id.
+        header = shell("samtools view -H {src:q}", read=True)
+        names = sorted(
+            {
+                field[3:]
+                for line in header.splitlines()
+                if line.startswith("@RG\t")
+                for field in line.split("\t")[1:]
+                if field.startswith("SM:")
+            }
+        )
+        if names != [wildcards.sample]:
+            message = (
+                f"External BAM for sample '{wildcards.sample}' must have one read-group "
+                f"sample name (SM) equal to its sample_id; found: {', '.join(names) or 'none'}.\n"
+                f"BAM: {src}\n"
+                "Rewrite its read groups, for example:\n"
+                f"  samtools addreplacerg -m overwrite_all "
+                f"-r '@RG\\tID:{wildcards.sample}\\tSM:{wildcards.sample}' -o fixed.bam {src}"
+            )
+            Path(log[0]).write_text(message + "\n")
+            raise ValueError(message)
 
         if dest.exists() or dest.is_symlink():
             if dest.resolve() == src:

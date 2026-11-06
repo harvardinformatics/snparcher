@@ -26,7 +26,7 @@ The meaning of the `input` column depends on `input_type`:
 |--------------|----------------------|:------------------------:|-------|
 | `srr` | SRA run accession (e.g., `SRR12345678`) | yes | Each row represents one SRA run. FASTQ files are downloaded automatically. |
 | `fastq` | Semicolon-separated pair of FASTQ paths: `R1;R2` | yes | Paths can be absolute or relative to the working directory. Files must be gzipped (`.fastq.gz`). |
-| `bam` | Path to an aligned BAM file | no | Exactly one row per sample. The BAM is used directly (no alignment step). |
+| `bam` | Path to an aligned BAM file | no | Exactly one row per sample. The BAM is used directly (no alignment step). Its read groups must carry exactly one sample name (`SM`), equal to `sample_id`; fix a BAM with `samtools addreplacerg`. |
 | `gvcf` | Path to a gVCF file | no | Exactly one row per sample. Skips alignment and per-sample variant calling. |
 
 !!! warning "gVCF compatibility"

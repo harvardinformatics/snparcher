@@ -70,6 +70,14 @@ sample_B,bam,/data/bams/sample_B.bam
 
 Each sample must have exactly one BAM row.
 
+Each BAM's read groups must name a single sample (`SM`) equal to its `sample_id`.
+bcftools and DeepVariant name the VCF's sample columns after `SM`, and two BAMs that share an `SM` would be merged into one sample.
+snpArcher checks this when it stages the BAM and stops with a fix if they differ, for example:
+
+```bash
+samtools addreplacerg -m overwrite_all -r '@RG\tID:sample_A\tSM:sample_A' -o sample_A.fixed.bam sample_A.bam
+```
+
 ## From gVCF files
 
 To start from per-sample gVCF files (skipping everything up to joint genotyping):
