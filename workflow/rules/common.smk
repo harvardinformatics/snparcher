@@ -967,6 +967,11 @@ if config.get("sample_metadata"):
         config["sample_metadata"],
         dtype=SAMPLE_METADATA_DTYPES,
     )
+    # pandas reads yes/no as strings and 1/0 as numbers; the schema expects
+    # booleans, so parse these columns before validating.
+    for col in ("exclude", "outgroup"):
+        if col in metadata_df.columns:
+            metadata_df[col] = _parse_bool_column(metadata_df[col], col)
     validate(metadata_df, Path(workflow.basedir, "schemas/sample_metadata.schema.yaml"))
 
     # Validate sample_id values exist in the main sample sheet
@@ -975,11 +980,6 @@ if config.get("sample_metadata"):
         raise ValueError(
             f"sample_metadata contains sample_id(s) not in the samples CSV: {sorted(unknown)}"
         )
-
-    # Parse boolean columns if present
-    for col in ("exclude", "outgroup"):
-        if col in metadata_df.columns:
-            metadata_df[col] = _parse_bool_column(metadata_df[col], col)
 
     # Warn about samples without metadata
     missing = set(samples_df["sample_id"]) - set(metadata_df["sample_id"])
