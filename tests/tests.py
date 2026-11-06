@@ -1002,6 +1002,35 @@ def test_gvcfs_target_dry_run(request):
 
 
 @pytest.mark.dry_run
+def test_na_ids_stay_literal(request):
+    """pandas reads "NA" as a missing value by default. A library_id of "NA"
+    must stay its own library, not fall back to the sample_id and merge with
+    the sample's blank-library row; a sample_id of "NA" must stay a sample."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        sheet = Path(tmpdir) / "na_ids.csv"
+        sheet.write_text(
+            "sample_id,input_type,input,library_id,mark_duplicates\n"
+            "sample1,fastq,tests/data/fastq/sample1_1.fastq.gz;tests/data/fastq/sample1_2.fastq.gz,NA,true\n"
+            "sample1,fastq,tests/data/fastq/sample2_1.fastq.gz;tests/data/fastq/sample2_2.fastq.gz,,true\n"
+            "NA,fastq,tests/data/fastq/sample2_1.fastq.gz;tests/data/fastq/sample2_2.fastq.gz,,true\n"
+        )
+
+        result = smk.dry_run(
+            target="map_samples",
+            configfile=get_config_file(),
+            samples=sheet,
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "results/bams/library/sample1/NA.bam" in output
+        assert "results/bams/library/sample1/sample1.bam" in output
+        assert "results/bams/raw/NA/NA/u1.bam" in output
+
+
+@pytest.mark.dry_run
 def test_multirow_same_library_dry_run(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
