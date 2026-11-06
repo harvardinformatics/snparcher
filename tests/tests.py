@@ -2828,6 +2828,29 @@ def test_minimal_metadata_dry_run(request):
 
 
 @pytest.mark.dry_run
+def test_metadata_accepts_yes_no_and_1_0(request):
+    """The docs allow yes/no and 1/0 for boolean metadata columns. They must
+    be parsed before schema validation, which expects booleans."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        metadata = Path(tmpdir) / "metadata.csv"
+        metadata.write_text(
+            "sample_id,exclude,outgroup\n"
+            "sample1,yes,0\n"
+            "sample2,no,1\n"
+        )
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+            config_overrides={"sample_metadata": str(metadata)},
+        )
+        result.assert_success()
+
+
+@pytest.mark.dry_run
 def test_partial_metadata_warns(request):
     """Pipeline warns when some samples lack metadata rows."""
     no_conda = request.config.getoption("--no-conda")
