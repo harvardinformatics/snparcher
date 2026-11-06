@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 
 import pandas as pd
@@ -830,20 +831,30 @@ if (
 
 # --- Helper functions ---
 
+# The sample sheet is fixed once parsed. Input functions call these helpers for
+# every sample from every job, and the number of DB-shard jobs grows with the
+# sample count, so scanning the whole sheet on each call made building the job
+# graph quadratic in samples. Split the sheet by sample once and cache lookups.
+SAMPLE_ROWS = {
+    sample: rows for sample, rows in samples_df.groupby("sample_id", sort=False)
+}
+
+
 def get_sample_libraries(sample):
     """Get all library IDs for a sample."""
-    sample_rows = samples_df[samples_df["sample_id"] == sample]
-    return sample_rows["library_id"].drop_duplicates().tolist()
+    if sample not in SAMPLE_ROWS:
+        return []
+    return SAMPLE_ROWS[sample]["library_id"].drop_duplicates().tolist()
 
 
 def get_sample_rows(sample):
-    """Get all rows for a sample."""
-    sample_rows = samples_df[samples_df["sample_id"] == sample]
-    if sample_rows.empty:
+    """Get all rows for a sample. Callers must not modify the result."""
+    if sample not in SAMPLE_ROWS:
         raise ValueError(f"Sample '{sample}' not found in sample sheet")
-    return sample_rows
+    return SAMPLE_ROWS[sample]
 
 
+@cache
 def get_sample_scalar(sample, column):
     """Get a scalar metadata value that must be constant within a sample."""
     sample_rows = get_sample_rows(sample)
@@ -860,10 +871,11 @@ def get_sample_input_type(sample):
     return get_sample_scalar(sample, "input_type")
 
 
+@cache
 def get_sample_input_types(sample):
     """Get unique input_type values for a sample."""
     sample_rows = get_sample_rows(sample)
-    return sample_rows["input_type"].dropna().unique().tolist()
+    return tuple(sample_rows["input_type"].dropna().unique().tolist())
 
 
 def sample_has_input_type(sample, input_type):
