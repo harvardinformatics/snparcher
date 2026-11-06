@@ -145,7 +145,6 @@ REMOVED_MODULES = ("mk", "trackhub")
 V1_CONFIG_MARKERS = (
     "final_prefix",
     "resource_config",
-    "intervals",
     "sentieon",
     "sentieon_lic",
     "remote_reads_prefix",
@@ -194,8 +193,10 @@ def detect_v1_config_markers(cfg):
     """Return legacy v1-style keys when config does not have the v2 block structure."""
     found = [key for key in V1_CONFIG_MARKERS if key in cfg]
 
-    if isinstance(cfg.get("remote_reads"), bool):
-        found.append("remote_reads")
+    # These were booleans in v1; in v2, `intervals` is a block of settings.
+    for key in ("remote_reads", "intervals"):
+        if isinstance(cfg.get(key), bool):
+            found.append(key)
 
     if not found or _config_has_v2_blocks(cfg):
         return []
@@ -340,7 +341,8 @@ if v1_markers:
         "Detected a v1-style snpArcher config. "
         "This workflow expects the v2 config structure and will not auto-migrate v1 configs.\n"
         f"Legacy keys detected: {markers_text}\n"
-        "See docs/v2-migration.md for the v1 -> v2 mapping."
+        "See the v1 -> v2 key mapping at "
+        "https://snparcher.github.io/reference/changelog/#config-key-mapping-v1-to-v2"
     )
 
 normalize_supported_config_aliases(config)
