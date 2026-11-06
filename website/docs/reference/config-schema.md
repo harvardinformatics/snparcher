@@ -66,7 +66,7 @@ Applies when `variant_calling.tool` is `sentieon`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `variant_calling.sentieon.license` | string | `""` | Sentieon license server address or license file path. Required at runtime when `tool` is `sentieon`. |
+| `variant_calling.sentieon.license` | string | `""` | Sentieon license server address or license file path. Required when `tool` is `sentieon`: startup stops if it is empty. |
 
 ### `variant_calling.bcftools`
 

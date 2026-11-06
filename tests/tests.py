@@ -404,6 +404,8 @@ def write_long_contig_config(base_config, out_dir, tool="gatk", mode="true"):
             'container_image: "/tmp/parabricks.sif"',
             1,
         )
+    if tool == "sentieon":
+        text = text.replace('license: ""', 'license: "licsrvr.example.org:8990"', 1)
 
     out_path = Path(out_dir) / f"config_{tool}_long_{mode}.yaml"
     out_path.write_text(text)
@@ -1962,6 +1964,22 @@ def test_sentieon_dry_run(request):
             r"rule combine_qc_metrics:\n    input: [^\n]*results/qc_metrics/sentieon/sample1\.json",
             output,
         )
+
+
+@pytest.mark.dry_run
+def test_sentieon_requires_license(request):
+    """Every Sentieon rule exports SENTIEON_LICENSE from the config, so an empty
+    licence fails every Sentieon job. It must stop the run at startup."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "sentieon")
+        assert 'license: ""' in cfg.read_text()
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs.csv")
+
+        assert not result.succeeded
+        assert "variant_calling.sentieon.license is required" in result.stdout + result.stderr
 
 
 @pytest.mark.dry_run
