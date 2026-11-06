@@ -95,8 +95,9 @@ def test_markdup(request):
             "data",
             "results/reference",
             "results/intervals",
-            "results/bams/raw/sample0",
         )
+        # The raw BAMs are temp() inputs that Snakemake deletes after use.
+        smk.copy_fixtures("results/bams/raw/sample0")
 
         result = smk.run(
             target=[
@@ -110,6 +111,7 @@ def test_markdup(request):
             "results/bams/markdup/sample0.bam",
             "results/bams/markdup/sample0.bam.csi",
         )
+        assert (FIXTURES_DIR / "results/bams/raw/sample0/sample0/u1.bam").exists()
 
 
 @pytest.mark.unit
