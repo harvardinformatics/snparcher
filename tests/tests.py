@@ -1136,6 +1136,37 @@ def test_dag_build_time_with_many_samples(request):
         assert elapsed < 75, f"Dry run with {n_samples} samples took {elapsed:.0f} s"
 
 
+@pytest.mark.full_run
+def test_stale_interval_lists_are_refused(request):
+    """Input functions read existing interval lists straight from disk, so a
+    changed setting would never rebuild them. The lists record what they were
+    built from, and reusing them under other settings must stop the run."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        smk.link_fixtures("config", "data")
+        cfg = FIXTURES_DIR / "config" / "config.yaml"
+        samples = FIXTURES_DIR / "config" / "samples.csv"
+
+        result = smk.run(target="setup", configfile=cfg, samples=samples)
+        result.assert_success()
+
+        result = smk.dry_run(target="call_variants", configfile=cfg, samples=samples)
+        result.assert_success()
+
+        changed_cfg = Path(tmpdir) / "config_fewer_intervals.yaml"
+        text = cfg.read_text()
+        assert "num_gvcf_intervals: 50" in text
+        changed_cfg.write_text(text.replace("num_gvcf_intervals: 50", "num_gvcf_intervals: 20"))
+        result = smk.dry_run(target="call_variants", configfile=changed_cfg, samples=samples)
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "These interval lists were built with different settings" in output
+        assert "num_gvcf_intervals: 50 -> 20" in output
+        assert "scatter_count: 37 -> 15" in output
+
+
 @pytest.mark.dry_run
 def test_multirow_multi_library_dry_run(request):
     no_conda = request.config.getoption("--no-conda")

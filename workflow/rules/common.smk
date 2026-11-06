@@ -1,4 +1,5 @@
 from importlib.metadata import PackageNotFoundError, version
+import hashlib
 import logging
 import os
 import platform
