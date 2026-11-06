@@ -1810,6 +1810,38 @@ def test_interval_genomicsdb_import_profile_heap_override_is_authoritative(reque
         )
 
 
+@pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "source, accepted",
+    [
+        ("tests/data/reference/test_genom.fa.gz", False),
+        ("/no/such/dir/test_genome.fa.gz", False),
+        ("GCF_000002315.6", True),
+    ],
+)
+def test_reference_source_must_exist_or_be_an_accession(request, source, accepted):
+    """A mistyped local path must fail at startup, not be sent to NCBI as an
+    accession or fail later inside the reference job."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_reference_source_config(get_config_file(), tmpdir, source=source)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        output = result.stdout + result.stderr
+        if accepted:
+            result.assert_success()
+            assert "datasets download genome accession" in output
+        else:
+            assert not result.succeeded
+            assert f"reference.source '{source}' is not an existing file" in output
+
+
 @pytest.mark.full_run
 @pytest.mark.parametrize("compressed", [False, True])
 def test_reference_url_sources(request, compressed):
