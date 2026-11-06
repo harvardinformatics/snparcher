@@ -122,20 +122,45 @@ def test_external_bam_staging_and_indexing(request):
         external_bam = FIXTURES_DIR / "results/bams/markdup/sample0.bam"
         samples.write_text(
             "sample_id,input_type,input\n"
-            f"sample_ext,bam,{external_bam}\n"
+            f"sample0,bam,{external_bam}\n"
         )
 
         smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
 
         result = smk.run(
-            target="results/bams/input/sample_ext.bam.csi",
+            target="results/bams/input/sample0.bam.csi",
             samples=samples,
         )
         result.assert_success()
         result.assert_output_exists(
-            "results/bams/input/sample_ext.bam",
-            "results/bams/input/sample_ext.bam.csi",
+            "results/bams/input/sample0.bam",
+            "results/bams/input/sample0.bam.csi",
         )
+
+
+@pytest.mark.unit
+def test_external_bam_sample_name_must_match_sample_id(request):
+    """bcftools and DeepVariant name VCF columns by the read group's SM, and BAMs
+    sharing an SM are pooled. Staging must reject a BAM whose SM is not its
+    sample_id (the fixture BAM's SM is sample0)."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        samples = tmpdir / "external_bam_samples.csv"
+        external_bam = FIXTURES_DIR / "results/bams/markdup/sample0.bam"
+        samples.write_text(
+            "sample_id,input_type,input\n"
+            f"sample_ext,bam,{external_bam}\n"
+        )
+
+        smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
+        result = smk.run(target="results/bams/input/sample_ext.bam", samples=samples)
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "must have one read-group sample name (SM) equal to its sample_id; found: sample0" in output
+        assert "samtools addreplacerg" in output
 
 
 @pytest.mark.unit
