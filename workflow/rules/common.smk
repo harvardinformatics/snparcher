@@ -431,17 +431,20 @@ def _parse_mark_duplicates(values, default):
     return pd.Series(parsed, index=values.index, dtype=bool)
 
 
-SAMPLE_SHEET_DTYPES = {
-    "sample_id": "string",
-    "library_id": "string",
+# Read ID columns as plain text. pandas would otherwise read IDs such as "NA",
+# "null" or "None" as missing values; a library_id of "NA" would then fall
+# back to the sample_id and merge libraries the user declared separate.
+SAMPLE_SHEET_CONVERTERS = {
+    "sample_id": str,
+    "library_id": str,
 }
 
-SAMPLE_METADATA_DTYPES = {
-    "sample_id": "string",
+SAMPLE_METADATA_CONVERTERS = {
+    "sample_id": str,
 }
 
 
-samples_df = pd.read_csv(config["samples"], dtype=SAMPLE_SHEET_DTYPES)
+samples_df = pd.read_csv(config["samples"], converters=SAMPLE_SHEET_CONVERTERS)
 global_mark_duplicates = bool(config["reads"]["mark_duplicates"])
 
 if "library_id" not in samples_df.columns:
@@ -1052,7 +1055,7 @@ metadata_df = None
 if config.get("sample_metadata"):
     metadata_df = pd.read_csv(
         config["sample_metadata"],
-        dtype=SAMPLE_METADATA_DTYPES,
+        converters=SAMPLE_METADATA_CONVERTERS,
     )
     # pandas reads yes/no as strings and 1/0 as numbers; the schema expects
     # booleans, so parse these columns before validating.

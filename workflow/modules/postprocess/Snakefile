@@ -101,23 +101,25 @@ def _maybe_temp(path):
 
 # ---------- Sample sheet + metadata ------------------------------------------
 
-_SAMPLE_SHEET_DTYPES = {
-    "sample_id": "string",
-    "library_id": "string",
+# Read ID columns as plain text, so IDs such as "NA" are not read as missing
+# (matches common.smk).
+_SAMPLE_SHEET_CONVERTERS = {
+    "sample_id": str,
+    "library_id": str,
 }
 
-_SAMPLE_METADATA_DTYPES = {
-    "sample_id": "string",
+_SAMPLE_METADATA_CONVERTERS = {
+    "sample_id": str,
 }
 
 
-_samples_df = pd.read_csv(config["samples"], dtype=_SAMPLE_SHEET_DTYPES)
+_samples_df = pd.read_csv(config["samples"], converters=_SAMPLE_SHEET_CONVERTERS)
 _ALL_SAMPLES = _samples_df["sample_id"].unique().tolist()
 
 _metadata_df = None
 _meta_path = config.get("sample_metadata", "")
 if _meta_path:
-    _metadata_df = pd.read_csv(_meta_path, dtype=_SAMPLE_METADATA_DTYPES)
+    _metadata_df = pd.read_csv(_meta_path, converters=_SAMPLE_METADATA_CONVERTERS)
 
 
 def _parse_bool(series, col_name):
