@@ -1,4 +1,5 @@
 import gzip
+import json
 import re
 import subprocess
 import tempfile
@@ -190,6 +191,79 @@ def test_qc_metrics(request):
         result.assert_output_exists(
             "results/qc_metrics/bam/sample0.json",
         )
+
+
+# samtools 1.24 `flagstat -O tsv` for three read pairs (one marked duplicate,
+# one with an unmapped mate) plus two secondary and one supplementary record.
+FLAGSTAT_PAIRED = """\
+9\t0\ttotal (QC-passed reads + QC-failed reads)
+6\t0\tprimary
+2\t0\tsecondary
+1\t0\tsupplementary
+3\t0\tduplicates
+2\t0\tprimary duplicates
+8\t0\tmapped
+88.89%\tN/A\tmapped %
+5\t0\tprimary mapped
+83.33%\tN/A\tprimary mapped %
+6\t0\tpaired in sequencing
+3\t0\tread1
+3\t0\tread2
+4\t0\tproperly paired
+66.67%\tN/A\tproperly paired %
+4\t0\twith itself and mate mapped
+1\t0\tsingletons
+16.67%\tN/A\tsingletons %
+0\t0\twith mate mapped to a different chr
+0\t0\twith mate mapped to a different chr (mapQ>=5)
+"""
+
+
+def run_parse_bam_stats(request, tmpdir, flagstat, target):
+    """Run only the BAM-stats parsing for one external-BAM sample, from given
+    samtools outputs, so no BAM has to be built."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    tmpdir = Path(tmpdir)
+    samples = tmpdir / "bam_samples.csv"
+    samples.write_text(
+        "sample_id,input_type,input\n"
+        f"sample_ext,bam,{FIXTURES_DIR / 'results/bams/markdup/sample0.bam'}\n"
+    )
+    stats_dir = tmpdir / "results/qc_metrics/bam"
+    stats_dir.mkdir(parents=True)
+    (stats_dir / "sample_ext_flagstat.txt").write_text(flagstat)
+    (stats_dir / "sample_ext_coverage.txt").write_text(
+        "#rname\tstartpos\tendpos\tnumreads\tcovbases\tcoverage\tmeandepth\tmeanbaseq\tmeanmapq\n"
+        "chr1\t1\t1000\t5\t50\t5\t0.25\t40\t60\n"
+    )
+
+    smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
+    smk.link_fixtures("config", "data", "results/reference")
+    return smk.run(
+        target=target,
+        samples=samples,
+        extra_args=["--allowed-rules", "parse_bam_stats", "combine_qc_metrics"],
+    )
+
+
+@pytest.mark.unit
+def test_bam_stats_count_primary_records(request):
+    """Secondary and supplementary records are extra alignments of reads already
+    counted, so read totals and rates must come from the primary records."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = run_parse_bam_stats(
+            request, tmpdir, FLAGSTAT_PAIRED, "results/qc_metrics/bam/sample_ext.json"
+        )
+        result.print_log()
+        result.assert_success()
+
+        stats = json.loads((Path(tmpdir) / "results/qc_metrics/bam/sample_ext.json").read_text())
+        assert stats["total_reads"] == 6
+        assert stats["num_duplicates"] == 2
+        assert stats["num_mapped"] == 5
+        assert stats["percent_mapped"] == 83.33
+        assert stats["percent_properly_paired"] == 66.67
 
 
 @pytest.mark.unit
