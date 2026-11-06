@@ -327,6 +327,123 @@ def test_db_interval_split_rewrites_pathological_contig_shards(tmp_path):
     assert read_interval_header(shard_paths[0]) == read_interval_header(input_path)
 
 
+def split_db_shards(raw_dir, out_dir, max_intervals, max_contigs, merge_threshold):
+    """Run split-db and return the output shard paths in order."""
+    run_interval_list_tool(
+        "split-db",
+        "--input-dir",
+        raw_dir,
+        "--output-dir",
+        out_dir,
+        "--fof",
+        out_dir / "intervals.txt",
+        "--max-intervals-per-shard",
+        max_intervals,
+        "--max-contigs-per-shard",
+        max_contigs,
+        "--merge-contigs-threshold",
+        merge_threshold,
+    )
+    return [Path(line) for line in (out_dir / "intervals.txt").read_text().splitlines()]
+
+
+def assert_shards_disjoint(shard_paths):
+    """Fail if two shard records overlap, since that sequence is genotyped twice."""
+    spans = sorted(
+        (contig, int(start), int(end), path.name)
+        for path in shard_paths
+        for contig, start, end, *_ in (
+            record.split("\t") for record in read_interval_records(path)
+        )
+    )
+    overlaps = [
+        f"{contig} overlaps between {shard} and {next_shard}"
+        for (contig, _, end, shard), (next_contig, next_start, _, next_shard) in zip(
+            spans, spans[1:]
+        )
+        if contig == next_contig and next_start <= end
+    ]
+    assert not overlaps, "\n".join(overlaps)
+
+
+def test_db_interval_split_rewrite_leaves_contigs_split_by_gatk(tmp_path):
+    """Only contigs wholly inside a many-contig shard are rewritten.
+
+    In a chromosome-level assembly GATK often puts the last chromosome's tail in
+    the same shard as the unplaced scaffolds. Rewriting that tail to the whole
+    chromosome would genotype the head of the chromosome in two shards.
+    """
+    raw_dir = tmp_path / "raw"
+    out_dir = tmp_path / "out"
+    raw_dir.mkdir()
+    scaffolds = [f"scaf{i:03d}" for i in range(100)]
+    contig_lengths = {"chr10": 100_000, **dict.fromkeys(scaffolds, 2000), "big1": 80_000}
+    write_interval_list(
+        raw_dir / "0000-scattered.interval_list",
+        contig_lengths,
+        [("chr10", 1, 90_000)],
+    )
+    write_interval_list(
+        raw_dir / "0001-scattered.interval_list",
+        contig_lengths,
+        [
+            ("chr10", 90_001, 100_000),
+            *[(scaffold, 1, 1500) for scaffold in scaffolds],
+            ("big1", 1, 40_000),
+        ],
+    )
+    write_interval_list(
+        raw_dir / "0002-scattered.interval_list",
+        contig_lengths,
+        [("big1", 40_001, 80_000)],
+    )
+
+    shard_paths = split_db_shards(raw_dir, out_dir, 200, 200, 50)
+
+    assert_shards_disjoint(shard_paths)
+    assert [read_interval_records(path) for path in shard_paths] == [
+        ["chr10\t1\t90000\t+\tACGTmer"],
+        ["chr10\t90001\t100000\t+\tACGTmer"],
+        [f"{scaffold}\t1\t2000\t+\t{scaffold}" for scaffold in scaffolds],
+        ["big1\t1\t40000\t+\tACGTmer"],
+        ["big1\t40001\t80000\t+\tACGTmer"],
+    ]
+    # The scaffold shard is still all whole contigs, so GenomicsDB merges them.
+    result = run_interval_list_tool(
+        "genomicsdb-merge-contigs-arg",
+        "--input",
+        shard_paths[2],
+        "--threshold",
+        50,
+    )
+    assert result.stdout.strip() == "--merge-contigs-into-num-partitions 50"
+
+
+def test_db_interval_split_rewrite_leaves_contigs_split_by_cap(tmp_path):
+    """The per-shard interval cap can split a gappy contig; it stays partial too."""
+    raw_dir = tmp_path / "raw"
+    out_dir = tmp_path / "out"
+    raw_dir.mkdir()
+    scaffolds = [f"scaf{i:03d}" for i in range(60)]
+    gappy = [("gappy", start, start + 49) for start in range(1, 25_000, 100)]
+    write_interval_list(
+        raw_dir / "0000-scattered.interval_list",
+        {**dict.fromkeys(scaffolds, 2000), "gappy": 100_000},
+        [*[(scaffold, 1, 1500) for scaffold in scaffolds], *gappy],
+    )
+
+    shard_paths = split_db_shards(raw_dir, out_dir, 200, 200, 50)
+
+    assert_shards_disjoint(shard_paths)
+    gappy_records = [f"gappy\t{start}\t{end}\t+\tACGTmer" for _, start, end in gappy]
+    assert len(gappy_records) == 250
+    assert [read_interval_records(path) for path in shard_paths] == [
+        [f"{scaffold}\t1\t2000\t+\t{scaffold}" for scaffold in scaffolds],
+        gappy_records[:140],
+        gappy_records[140:],
+    ]
+
+
 def test_genomicsdb_merge_contigs_arg_only_for_whole_contig_pathology(tmp_path):
     whole_path = tmp_path / "whole.interval_list"
     partial_path = tmp_path / "partial.interval_list"
