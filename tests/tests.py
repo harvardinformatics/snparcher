@@ -2138,6 +2138,45 @@ def test_gvcf_input_rejected_for_new_callers(request, tool):
 
 
 @pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "tool, ploidy, accepted",
+    [
+        ("bcftools", 4, False),
+        ("parabricks", 3, False),
+        ("deepvariant", 1, False),
+        ("bcftools", 1, True),
+        ("parabricks", 1, True),
+        ("deepvariant", 2, True),
+        ("gatk", 4, True),
+    ],
+)
+def test_ploidy_validated_against_caller(request, tool, ploidy, accepted):
+    """bcftools call and Parabricks HaplotypeCaller support only haploid and
+    diploid calling, and DeepVariant always calls diploid genotypes. Any other
+    ploidy must stop the run at startup, not fail in the caller or be ignored."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, tool)
+        cfg.write_text(cfg.read_text().replace("ploidy: 2", f"ploidy: {ploidy}", 1))
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=get_samples_file(),
+            extra_args=["--use-apptainer"] if tool == "deepvariant" else None,
+        )
+
+        if accepted:
+            result.assert_success()
+        else:
+            assert not result.succeeded
+            output = result.stdout + result.stderr
+            assert f"'{tool}' supports variant_calling.ploidy" in output
+            assert f"(got {ploidy})" in output
+
+
+@pytest.mark.dry_run
 def test_callable_sites_coverage_warns_for_gvcf_only_inputs(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:

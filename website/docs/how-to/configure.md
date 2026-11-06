@@ -78,6 +78,10 @@ variant_calling:
   expected_coverage: "low"  # "low" for <30x, "high" for >30x
 ```
 
+`gatk` and `sentieon` accept any ploidy.
+`bcftools` and `parabricks` support haploid or diploid calling only (1 or 2), and `deepvariant` always calls diploid genotypes (2).
+snpArcher stops at startup if the ploidy doesn't suit the selected caller.
+
 The `expected_coverage` setting controls internal caller tuning.
 Use `low` for most resequencing projects (5-15x per sample) and `high` for datasets with consistently deep coverage (>30x).
 

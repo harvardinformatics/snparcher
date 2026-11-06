@@ -483,6 +483,19 @@ if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
             "Use 'gatk' or 'sentieon', or provide FASTQ/BAM inputs for all samples."
         )
 
+# Ploidies each caller can honor; callers not listed take any ploidy. bcftools
+# call and Parabricks HaplotypeCaller support only haploid and diploid calling,
+# and DeepVariant always calls diploid genotypes.
+SUPPORTED_PLOIDY = {"bcftools": (1, 2), "parabricks": (1, 2), "deepvariant": (2,)}
+if VARIANT_TOOL in SUPPORTED_PLOIDY:
+    supported = SUPPORTED_PLOIDY[VARIANT_TOOL]
+    ploidy = config["variant_calling"]["ploidy"]
+    if ploidy not in supported:
+        raise ValueError(
+            f"variant_calling.tool '{VARIANT_TOOL}' supports variant_calling.ploidy "
+            f"{' or '.join(map(str, supported))} only (got {ploidy})."
+        )
+
 if VARIANT_TOOL == "parabricks":
     image = config["variant_calling"]["parabricks"]["container_image"].strip()
     if not image:
