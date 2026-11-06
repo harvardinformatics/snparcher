@@ -859,8 +859,35 @@ def test_v1_style_config_exits_with_migration_message(request):
         assert not result.succeeded
         output = result.stdout + result.stderr
         assert "Detected a v1-style snpArcher config" in output
-        assert "docs/v2-migration.md" in output
+        assert "reference/changelog/#config-key-mapping-v1-to-v2" in output
         assert "sentieon" in output
+
+
+@pytest.mark.dry_run
+def test_v2_config_without_variant_calling_block_is_not_v1(request):
+    """`intervals` is a v1 boolean but also a v2 block. A v2 config that sets
+    intervals and relies on the variant_calling defaults is not a v1 config."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        text, count = re.subn(
+            r"^variant_calling:\n(?:(?:  .*)?\n)*",
+            "",
+            get_config_file().read_text(),
+            flags=re.M,
+        )
+        assert count == 1 and "\nintervals:\n" in text
+        cfg = Path(tmpdir) / "config_no_variant_calling.yaml"
+        cfg.write_text(text)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        result.assert_success()
+        assert "Detected a v1-style snpArcher config" not in result.stdout + result.stderr
 
 
 @pytest.mark.dry_run
