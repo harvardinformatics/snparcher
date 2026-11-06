@@ -2177,6 +2177,41 @@ def test_ploidy_validated_against_caller(request, tool, ploidy, accepted):
 
 
 @pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "tool, key, flag",
+    [
+        ("deepvariant", "num_shards", "--num_shards"),
+        ("parabricks", "num_cpu_threads", "--num-cpu-threads"),
+    ],
+)
+def test_caller_thread_settings_reach_command(request, tool, key, flag):
+    """These rules take their threads from the config. A set-threads entry in
+    the default workflow profile would override the config key and make it dead."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, tool)
+        text, count = re.subn(rf"{key}: \d+", f"{key}: 3", cfg.read_text())
+        assert count == 1
+        cfg.write_text(text)
+
+        # Snakemake caps a job's threads at --cores; raise it above the setting.
+        extra_args = ["--cores", "32"]
+        if tool == "deepvariant":
+            extra_args.append("--use-apptainer")
+        result = smk.dry_run(
+            target="results/gvcfs/sample1.g.vcf.gz",
+            configfile=cfg,
+            samples=get_samples_file(),
+            extra_args=extra_args,
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert f"{flag} 3 " in output
+
+
+@pytest.mark.dry_run
 def test_callable_sites_coverage_warns_for_gvcf_only_inputs(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:

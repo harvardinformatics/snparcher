@@ -91,9 +91,10 @@ Memory-intensive GATK-family rules (HaplotypeCaller, GenomicsDBImport, GenotypeG
 | `sentieon_haplotyper` | 32 | Sentieon HaplotypeCaller |
 | `sentieon_combine_gvcf` | 32 | Sentieon gVCF merge |
 | `bcftools_call` | 8 | bcftools mpileup/call |
-| `deepvariant_call` | 8 | DeepVariant inference |
 | `glnexus_joint` | 4 | GLnexus joint genotyping |
-| `parabricks_haplotypecaller` | 16 | Parabricks HaplotypeCaller |
+
+DeepVariant and Parabricks take their thread counts from the config instead: `variant_calling.deepvariant.num_shards` (default 8) and `variant_calling.parabricks.num_cpu_threads` (default 16).
+A `set-threads` entry for `deepvariant_call` or `parabricks_haplotypecaller` would override those settings.
 
 ### Customizing per-rule resources
 
