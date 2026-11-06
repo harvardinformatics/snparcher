@@ -52,6 +52,7 @@ def get_interval_gvcfs(wc):
     intervals_file = "results/intervals/gvcf/intervals.txt"
     
     if exists(intervals_file):
+        check_interval_settings()
         # Read directly from file if it exists
         # We do this because checkpoint.get() doesn't seem to pick up the checkpoint output if it was created in previous run
         # I.e if user does setup target rule, then rule all, the workflow fails 
@@ -74,6 +75,7 @@ def get_db_intervals(wc):
     intervals_file = "results/intervals/db/intervals.txt"
     
     if exists(intervals_file):
+        check_interval_settings()
         with open(intervals_file) as f:
             lines = [l.strip() for l in f.readlines()]
     else:

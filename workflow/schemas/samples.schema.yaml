@@ -42,4 +42,4 @@ allOf:
     then:
       properties:
         input:
-          pattern: "^.+;.+$"
+          pattern: "^[^;\\s]+;[^;\\s]+$"

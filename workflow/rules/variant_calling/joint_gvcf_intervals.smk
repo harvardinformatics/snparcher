@@ -6,6 +6,7 @@ def get_db_intervals(wc):
     intervals_file = "results/intervals/db/intervals.txt"
 
     if exists(intervals_file):
+        check_interval_settings()
         with open(intervals_file) as f:
             lines = [l.strip() for l in f.readlines()]
     else:

@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -82,6 +83,24 @@ class SnakemakeRunner:
                 continue
 
             dest.symlink_to(src.resolve())
+
+    def copy_fixtures(self, *paths):
+        """Copy fixture paths into the workdir.
+
+        Use this for inputs the workflow deletes as temp() files: deleting
+        through a symlink would remove the tracked fixture itself.
+        """
+        for rel_path in paths:
+            src = FIXTURES_DIR / rel_path
+            if not src.exists():
+                raise FileNotFoundError(f"Fixture not found: {src}")
+
+            dest = self.workdir / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                shutil.copytree(src, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dest)
 
     def run(
         self,

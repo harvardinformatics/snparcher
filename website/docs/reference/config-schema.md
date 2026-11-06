@@ -113,6 +113,13 @@ See [Parallelization](../explanation/parallelization.md) for background.
 | `intervals.db_max_intervals_per_shard` | integer | `200` | >= 0 | Cap on the number of intervals packed into a single GenomicsDB shard. Limits per-shard complexity for fragmented assemblies. `0` disables the cap. |
 | `intervals.db_max_contigs_per_shard` | integer | `200` | >= 0 | Cap on the number of distinct contigs packed into a single GenomicsDB shard. `0` disables the cap. |
 
+!!! note "Changing interval settings after a run"
+    Interval lists are built once and reused on later runs.
+    Each set records the settings and reference it was built from (`settings.txt` in `results/intervals/gvcf/` and `results/intervals/db/`).
+    If a later run's settings differ, snpArcher stops and lists the changes, rather than silently reusing the old lists.
+    Restore the old settings, or delete the listed directory to rebuild it.
+    The database shard count depends on the number of samples, so adding or removing samples also requires rebuilding `results/intervals/db/`.
+
 ## `callable_sites`
 
 Callable-sites BED generation settings.

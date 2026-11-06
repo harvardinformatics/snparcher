@@ -1,4 +1,5 @@
 from importlib.metadata import PackageNotFoundError, version
+import hashlib
 import logging
 import os
 import platform
@@ -8,6 +9,7 @@ import socket
 import subprocess
 import sys
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 
 import pandas as pd
@@ -144,7 +146,6 @@ REMOVED_MODULES = ("mk", "trackhub")
 V1_CONFIG_MARKERS = (
     "final_prefix",
     "resource_config",
-    "intervals",
     "sentieon",
     "sentieon_lic",
     "remote_reads_prefix",
@@ -193,8 +194,10 @@ def detect_v1_config_markers(cfg):
     """Return legacy v1-style keys when config does not have the v2 block structure."""
     found = [key for key in V1_CONFIG_MARKERS if key in cfg]
 
-    if isinstance(cfg.get("remote_reads"), bool):
-        found.append("remote_reads")
+    # These were booleans in v1; in v2, `intervals` is a block of settings.
+    for key in ("remote_reads", "intervals"):
+        if isinstance(cfg.get(key), bool):
+            found.append(key)
 
     if not found or _config_has_v2_blocks(cfg):
         return []
@@ -323,7 +326,8 @@ if v1_markers:
         "Detected a v1-style snpArcher config. "
         "This workflow expects the v2 config structure and will not auto-migrate v1 configs.\n"
         f"Legacy keys detected: {markers_text}\n"
-        "See docs/v2-migration.md for the v1 -> v2 mapping."
+        "See the v1 -> v2 key mapping at "
+        "https://snparcher.github.io/reference/changelog/#config-key-mapping-v1-to-v2"
     )
 
 normalize_supported_config_aliases(config)
@@ -411,17 +415,20 @@ def _parse_mark_duplicates(values, default):
     return pd.Series(parsed, index=values.index, dtype=bool)
 
 
-SAMPLE_SHEET_DTYPES = {
-    "sample_id": "string",
-    "library_id": "string",
+# Read ID columns as plain text. pandas would otherwise read IDs such as "NA",
+# "null" or "None" as missing values; a library_id of "NA" would then fall
+# back to the sample_id and merge libraries the user declared separate.
+SAMPLE_SHEET_CONVERTERS = {
+    "sample_id": str,
+    "library_id": str,
 }
 
-SAMPLE_METADATA_DTYPES = {
-    "sample_id": "string",
+SAMPLE_METADATA_CONVERTERS = {
+    "sample_id": str,
 }
 
 
-samples_df = pd.read_csv(config["samples"], dtype=SAMPLE_SHEET_DTYPES)
+samples_df = pd.read_csv(config["samples"], converters=SAMPLE_SHEET_CONVERTERS)
 global_mark_duplicates = bool(config["reads"]["mark_duplicates"])
 
 if "library_id" not in samples_df.columns:
@@ -468,6 +475,18 @@ for sample_id, group in samples_df.groupby("sample_id"):
                 f"Sample '{sample_id}' has input_type '{input_type}' but multiple rows. "
                 "Only one row is supported for bam/gvcf inputs."
             )
+
+    # A repeated FASTQ file or accession becomes a second input unit, and its
+    # reads would be counted twice.
+    seen_inputs = set()
+    for value, input_type in zip(group["input"], group["input_type"]):
+        for item in value.split(";") if input_type == "fastq" else [value]:
+            if item in seen_inputs:
+                raise ValueError(
+                    f"Sample '{sample_id}' lists input '{item}' more than once. "
+                    "Each FASTQ file or SRA accession may appear only once per sample."
+                )
+            seen_inputs.add(item)
 
 if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
     gvcf_samples = (
@@ -736,20 +755,30 @@ if (
 
 # --- Helper functions ---
 
+# The sample sheet is fixed once parsed. Input functions call these helpers for
+# every sample from every job, and the number of DB-shard jobs grows with the
+# sample count, so scanning the whole sheet on each call made building the job
+# graph quadratic in samples. Split the sheet by sample once and cache lookups.
+SAMPLE_ROWS = {
+    sample: rows for sample, rows in samples_df.groupby("sample_id", sort=False)
+}
+
+
 def get_sample_libraries(sample):
     """Get all library IDs for a sample."""
-    sample_rows = samples_df[samples_df["sample_id"] == sample]
-    return sample_rows["library_id"].drop_duplicates().tolist()
+    if sample not in SAMPLE_ROWS:
+        return []
+    return SAMPLE_ROWS[sample]["library_id"].drop_duplicates().tolist()
 
 
 def get_sample_rows(sample):
-    """Get all rows for a sample."""
-    sample_rows = samples_df[samples_df["sample_id"] == sample]
-    if sample_rows.empty:
+    """Get all rows for a sample. Callers must not modify the result."""
+    if sample not in SAMPLE_ROWS:
         raise ValueError(f"Sample '{sample}' not found in sample sheet")
-    return sample_rows
+    return SAMPLE_ROWS[sample]
 
 
+@cache
 def get_sample_scalar(sample, column):
     """Get a scalar metadata value that must be constant within a sample."""
     sample_rows = get_sample_rows(sample)
@@ -766,10 +795,11 @@ def get_sample_input_type(sample):
     return get_sample_scalar(sample, "input_type")
 
 
+@cache
 def get_sample_input_types(sample):
     """Get unique input_type values for a sample."""
     sample_rows = get_sample_rows(sample)
-    return sample_rows["input_type"].dropna().unique().tolist()
+    return tuple(sample_rows["input_type"].dropna().unique().tolist())
 
 
 def sample_has_input_type(sample, input_type):
@@ -963,8 +993,13 @@ metadata_df = None
 if config.get("sample_metadata"):
     metadata_df = pd.read_csv(
         config["sample_metadata"],
-        dtype=SAMPLE_METADATA_DTYPES,
+        converters=SAMPLE_METADATA_CONVERTERS,
     )
+    # pandas reads yes/no as strings and 1/0 as numbers; the schema expects
+    # booleans, so parse these columns before validating.
+    for col in ("exclude", "outgroup"):
+        if col in metadata_df.columns:
+            metadata_df[col] = _parse_bool_column(metadata_df[col], col)
     validate(metadata_df, Path(workflow.basedir, "schemas/sample_metadata.schema.yaml"))
 
     # Validate sample_id values exist in the main sample sheet
@@ -973,11 +1008,6 @@ if config.get("sample_metadata"):
         raise ValueError(
             f"sample_metadata contains sample_id(s) not in the samples CSV: {sorted(unknown)}"
         )
-
-    # Parse boolean columns if present
-    for col in ("exclude", "outgroup"):
-        if col in metadata_df.columns:
-            metadata_df[col] = _parse_bool_column(metadata_df[col], col)
 
     # Warn about samples without metadata
     missing = set(samples_df["sample_id"]) - set(metadata_df["sample_id"])

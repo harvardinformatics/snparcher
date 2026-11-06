@@ -99,6 +99,7 @@ Produced when `intervals.enabled` is `true` (GATK pathway) or when using the Par
 | `results/intervals/gvcf/` | Directory | Directory of interval list files for per-sample calling. |
 | `results/intervals/db/intervals.txt` | Text | File-of-filenames listing GenomicsDB interval BED files. |
 | `results/intervals/db/` | Directory | Directory of interval list files for GenomicsDB import. |
+| `results/intervals/{gvcf,db}/settings.txt` | Text | The settings and reference contigs each set of lists was built from. A later run with different settings stops rather than reusing the lists. |
 
 ## Callable sites outputs
 
