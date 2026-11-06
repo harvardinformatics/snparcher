@@ -37,12 +37,20 @@ variant_calling:
 | `gatk` | GATK HaplotypeCaller + GenomicsDB + GenotypeGVCFs | Default. Well-tested for population genomics. |
 | `sentieon` | Sentieon DNAseq (GATK-compatible, faster) | Requires a valid license (`variant_calling.sentieon.license`). |
 | `bcftools` | bcftools mpileup + call | No per-sample gVCF step. Cannot accept `gvcf` input. |
-| `deepvariant` | Google DeepVariant + GLnexus | ML-based caller. Cannot accept `gvcf` input. |
+| `deepvariant` | Google DeepVariant + GLnexus | ML-based caller. Requires Apptainer (see below). Cannot accept `gvcf` input. |
 | `parabricks` | NVIDIA Parabricks | GPU-accelerated. Requires Apptainer image and NVIDIA GPUs. Cannot accept `gvcf` input. |
 
 !!! note
     You only need to configure the sub-block for the tool you selected.
     Settings for other callers are ignored.
+
+!!! note "DeepVariant needs Apptainer"
+    snpArcher runs DeepVariant from Google's container image.
+    Apptainer (or Singularity) must be installed, and Snakemake must run with `--use-apptainer` in addition to `--use-conda`, or with `use-apptainer: True` in your workflow profile.
+    Without it, snpArcher stops with an error while planning the run.
+
+    Inside the container, Snakemake makes the working directory visible, along with whatever your site's Apptainer configuration binds.
+    If your sample sheet lists BAM files stored elsewhere, bind their directory too, for example `--apptainer-args "--bind /path/to/bams"`.
 
 ## Set the heterozygosity prior (GATK)
 

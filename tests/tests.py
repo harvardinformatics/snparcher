@@ -1742,6 +1742,7 @@ def test_deepvariant_dry_run(request):
             target="all",
             configfile=cfg,
             samples=get_samples_file(),
+            extra_args=["--use-apptainer"],
         )
         result.assert_success()
 
@@ -1762,6 +1763,51 @@ def test_deepvariant_dry_run(request):
             "glnexus_joint",
             "mem_mb_reduced",
         )
+
+
+@pytest.mark.dry_run
+def test_deepvariant_requires_apptainer(request):
+    """run_deepvariant exists only in the container image, which Snakemake uses
+    only when Apptainer is enabled. Without it the run must stop while the DAG
+    is built, not when the first DeepVariant job starts after mapping."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "deepvariant")
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "so Snakemake must run with Apptainer enabled" in output
+        assert "--use-apptainer" in output
+
+
+@pytest.mark.dry_run
+def test_deepvariant_removes_intermediate_results(request):
+    """DeepVariant's intermediate tfrecords can take tens of GB per sample.
+    Each job must write them to its own directory and remove it on exit."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "deepvariant")
+
+        result = smk.dry_run(
+            target="results/gvcfs/sample1.g.vcf.gz",
+            configfile=cfg,
+            samples=get_samples_file(),
+            extra_args=["--use-apptainer"],
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert 'WORK=$(mktemp -d "results/deepvariant/sample1.XXXXXX")' in output
+        assert "trap 'rm -rf \"$WORK\"' EXIT" in output
+        assert '--intermediate_results_dir "$WORK"' in output
 
 
 @pytest.mark.dry_run
@@ -1893,6 +1939,7 @@ def test_deepvariant_long_contig_dry_run_archives_compressed_csi_gvcfs(request):
             target="results/gvcfs/sample0.g.vcf.gz.csi",
             configfile=cfg,
             samples=FIXTURES_DIR / "config" / "samples.csv",
+            extra_args=["--use-apptainer"],
         )
         result.assert_success()
 
@@ -1900,6 +1947,7 @@ def test_deepvariant_long_contig_dry_run_archives_compressed_csi_gvcfs(request):
         assert scheduled_rule_present(output, "deepvariant_call")
         assert scheduled_rule_present(output, "archive_deepvariant_gvcf")
         assert "results/deepvariant/sample0.g.vcf" in output
+        assert '--intermediate_results_dir "$WORK"' in output
         assert "results/gvcfs/sample0.g.vcf.gz.csi" in output
         assert "bcftools index -f -c" in output
 
@@ -1925,6 +1973,7 @@ def test_deepvariant_long_contig_dry_run_glnexus_consumes_csi_gvcfs(request):
             target="results/vcfs/raw.vcf.gz.csi",
             configfile=cfg,
             samples=FIXTURES_DIR / "config" / "samples.csv",
+            extra_args=["--use-apptainer"],
         )
         result.assert_success()
 

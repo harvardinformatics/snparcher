@@ -37,6 +37,7 @@ In addition to the default `all` target, snpArcher defines several named targets
 | `--latency-wait N` | `-w N` | Seconds to wait for output files to appear (compensates for filesystem latency on network storage). |
 | `--retries N` | | Number of times to retry a failed job. |
 | `--use-conda` | | Enable conda environment creation for rules that specify a `conda:` directive. Required for snpArcher. |
+| `--use-apptainer` | | Run rules that specify a `container:` directive inside Apptainer. Required when `variant_calling.tool` is `deepvariant`. |
 | `--rerun-triggers {mtime,params,input,software-env,code}` | | Conditions under which to rerun a rule. Snakemake default is `mtime`. |
 | `--printshellcmds` | `-p` | Print the shell command of each job before execution. |
 | `--snakefile PATH` | `-s PATH` | Explicit path to the Snakefile. Needed when running from outside the snpArcher directory. |

@@ -72,6 +72,7 @@ snakemake \
 | `--snakefile` / `-s` | Path to snpArcher's `workflow/Snakefile`. Not needed if you run from inside the snpArcher directory. |
 | `--directory` / `-d` | Path to your project directory (where `config/config.yaml` lives). |
 | `--use-conda` | Required. Tells Snakemake to create isolated environments for each pipeline step. |
+| `--use-apptainer` | Required only for the `deepvariant` caller, which runs from a container image. |
 | `--cores` | Maximum number of CPU cores to use concurrently. Set this to the number of available cores. |
 | `--workflow-profile` | Path to a workflow profile directory for resource settings. Defaults to `workflow-profiles/default` in the snpArcher repo. |
 

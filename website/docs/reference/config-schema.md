@@ -81,6 +81,7 @@ Applies when `variant_calling.tool` is `bcftools`.
 ### `variant_calling.deepvariant`
 
 Applies when `variant_calling.tool` is `deepvariant`.
+DeepVariant runs from the `google/deepvariant` container image, so Snakemake must run with `--use-apptainer`.
 
 | Key | Type | Default | Allowed values | Description |
 |-----|------|---------|----------------|-------------|
