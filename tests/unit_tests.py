@@ -1,3 +1,4 @@
+import gzip
 import json
 import re
 import subprocess
@@ -725,6 +726,10 @@ def test_download_sra_completeness(request):
     rule merely checking that the files exist. A truncated extractor, or a pigz
     that compresses nothing and exits 0, fails here.
 
+    The output directory starts with a stale single-read file, as a retry finds
+    it: the raw FASTQs are temp(), but that file was never declared. The rule
+    must neither trip over it nor count its reads.
+
     Requires network access: prefetch pulls SRR000001 (~312 MB) from NCBI.
     """
     no_conda = request.config.getoption("--no-conda")
@@ -737,6 +742,10 @@ def test_download_sra_completeness(request):
 
         r1 = "results/fastqs/sample_mixed_reads/libA/u2/SRR000001_1.fastq.gz"
         r2 = "results/fastqs/sample_mixed_reads/libA/u2/SRR000001_2.fastq.gz"
+        leftover = Path(tmpdir) / "results/fastqs/sample_mixed_reads/libA/u2/SRR000001.fastq.gz"
+        leftover.parent.mkdir(parents=True)
+        with gzip.open(leftover, "wt") as handle:
+            handle.write("@stale\nACGT\n+\nIIII\n" * 3)
 
         result = smk.run(target=[r1, r2], samples=samples)
         result.print_log()
