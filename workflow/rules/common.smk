@@ -492,6 +492,18 @@ for sample_id, group in samples_df.groupby("sample_id"):
                 "Only one row is supported for bam/gvcf inputs."
             )
 
+    # A repeated FASTQ file or accession becomes a second input unit, and its
+    # reads would be counted twice.
+    seen_inputs = set()
+    for value, input_type in zip(group["input"], group["input_type"]):
+        for item in value.split(";") if input_type == "fastq" else [value]:
+            if item in seen_inputs:
+                raise ValueError(
+                    f"Sample '{sample_id}' lists input '{item}' more than once. "
+                    "Each FASTQ file or SRA accession may appear only once per sample."
+                )
+            seen_inputs.add(item)
+
 if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
     gvcf_samples = (
         samples_df[samples_df["input_type"] == "gvcf"]["sample_id"]

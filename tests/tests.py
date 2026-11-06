@@ -1224,6 +1224,43 @@ def test_na_ids_stay_literal(request):
         assert "results/bams/raw/NA/NA/u1.bam" in output
 
 
+FQ1 = "tests/data/fastq/sample1_1.fastq.gz"
+FQ2 = "tests/data/fastq/sample1_2.fastq.gz"
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "rows, message",
+    [
+        ([f"fastq,{FQ1};{FQ2};{FQ2}"], "does not match"),
+        ([f"fastq,{FQ1}; {FQ2}"], "does not match"),
+        ([f"fastq,{FQ1};{FQ1}"], f"lists input '{FQ1}' more than once"),
+        ([f"fastq,{FQ1};{FQ2}", f"fastq,{FQ1};{FQ2}"], f"lists input '{FQ1}' more than once"),
+        (["srr,SRR000001", "srr,SRR000001"], "lists input 'SRR000001' more than once"),
+    ],
+    ids=["three-paths", "space", "r1-equals-r2", "repeated-pair", "repeated-srr"],
+)
+def test_malformed_or_repeated_inputs_rejected(request, rows, message):
+    """A FASTQ input must be exactly one R1;R2 pair, and no file or accession
+    may appear twice in a sample: a repeat would count its reads twice."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        sheet = Path(tmpdir) / "samples.csv"
+        sheet.write_text(
+            "sample_id,input_type,input\n" + "".join(f"sample1,{row}\n" for row in rows)
+        )
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=sheet,
+        )
+
+        assert not result.succeeded
+        assert message in result.stdout + result.stderr
+
+
 @pytest.mark.dry_run
 def test_multirow_same_library_dry_run(request):
     no_conda = request.config.getoption("--no-conda")
