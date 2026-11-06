@@ -873,6 +873,16 @@ def get_final_gvcf(sample):
     return get_archive_gvcf(sample)
 
 
+def get_gvcfs_target(wildcards):
+    """Input for the gvcfs target: every sample's final gVCF."""
+    if VARIANT_TOOL == "bcftools":
+        raise WorkflowError(
+            "variant_calling.tool 'bcftools' calls all samples together and writes no "
+            "per-sample gVCFs, so the gvcfs target is not available."
+        )
+    return [get_final_gvcf(sample) for sample in SAMPLES_ALL]
+
+
 def get_archive_gvcf(sample):
     """Return the durable, workflow-generated compressed gVCF path."""
     return f"results/gvcfs/{sample}.g.vcf.gz"

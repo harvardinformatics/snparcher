@@ -155,6 +155,6 @@ rule callable_sites:
 
 
 rule gvcfs:
-    """Generate normalized gVCFs for all samples."""
+    """Generate normalized gVCFs for all samples (not bcftools, which writes none)."""
     input:
-        [get_final_gvcf(sample) for sample in SAMPLES_ALL],
+        get_gvcfs_target,

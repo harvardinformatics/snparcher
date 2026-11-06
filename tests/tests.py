@@ -1092,6 +1092,26 @@ def test_gvcfs_target_dry_run(request):
 
 
 @pytest.mark.dry_run
+def test_gvcfs_target_explains_bcftools_has_no_gvcfs(request):
+    """bcftools calls all samples together and writes no per-sample gVCFs.
+    The gvcfs target must say so, not fail on missing input files."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "bcftools")
+
+        result = smk.dry_run(
+            target="gvcfs",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "writes no per-sample gVCFs, so the gvcfs target is not available" in output
+
+
+@pytest.mark.dry_run
 def test_multirow_same_library_dry_run(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:

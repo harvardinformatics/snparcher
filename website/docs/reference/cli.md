@@ -21,7 +21,7 @@ In addition to the default `all` target, snpArcher defines several named targets
 | `call_variants` | Run variant calling through to the hard-filtered VCF. |
 | `qc_report` | Generate the QC metrics TSV report. |
 | `callable_sites` | Generate callable sites BED from coverage and mappability. |
-| `gvcfs` | Generate per-sample gVCFs for all samples. |
+| `gvcfs` | Generate per-sample gVCFs for all samples. Not available with `bcftools`, which writes no per-sample gVCFs. |
 
 ## Commonly used Snakemake flags
 
