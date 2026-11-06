@@ -97,6 +97,8 @@ It converts pileup data into image-like tensors and classifies each candidate si
 In PrecisionFDA Truth Challenge benchmarks, DeepVariant has consistently ranked among the highest-accuracy open-source callers for both SNPs and indels.
 
 In snpArcher, DeepVariant produces gVCFs that are then merged with GLnexus for joint genotyping.
+It runs from Google's container image, so it requires Apptainer (see [Choose a variant caller](../how-to/configure.md#choose-a-variant-caller)).
+Each DeepVariant job writes intermediate files, often tens of GB per sample, to a directory under `results/deepvariant/` and deletes them when the job ends, so plan scratch space for the samples running at once.
 The key configuration parameter is `model_type` (default `WGS` for whole-genome sequencing data; other options include `WES`, `PACBIO`, and `ONT_R104` for different data types).
 
 **When to use DeepVariant:**

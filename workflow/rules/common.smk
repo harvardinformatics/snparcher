@@ -483,6 +483,19 @@ if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
             "Use 'gatk' or 'sentieon', or provide FASTQ/BAM inputs for all samples."
         )
 
+# Ploidies each caller can honor; callers not listed take any ploidy. bcftools
+# call and Parabricks HaplotypeCaller support only haploid and diploid calling,
+# and DeepVariant always calls diploid genotypes.
+SUPPORTED_PLOIDY = {"bcftools": (1, 2), "parabricks": (1, 2), "deepvariant": (2,)}
+if VARIANT_TOOL in SUPPORTED_PLOIDY:
+    supported = SUPPORTED_PLOIDY[VARIANT_TOOL]
+    ploidy = config["variant_calling"]["ploidy"]
+    if ploidy not in supported:
+        raise ValueError(
+            f"variant_calling.tool '{VARIANT_TOOL}' supports variant_calling.ploidy "
+            f"{' or '.join(map(str, supported))} only (got {ploidy})."
+        )
+
 if VARIANT_TOOL == "parabricks":
     image = config["variant_calling"]["parabricks"]["container_image"].strip()
     if not image:
@@ -647,6 +660,17 @@ APPLY_HARD_FILTERS = GATK_LINEAGE_CALLER and GENERATE_FILTERED_VCF
 # The VCF that downstream consumers (postprocess, qc, `call_variants`) treat as
 # the final call set: hard-filtered when hard filtering runs, raw otherwise.
 FINAL_VCF = FILTERED_VCF if APPLY_HARD_FILTERS else RAW_VCF
+
+
+def raw_vcf_output(path):
+    """Declare the raw call set (or its index) as an output.
+
+    When hard filtering follows, filtered.vcf.gz carries every raw record
+    unchanged except FILTER, so the raw VCF is a temporary intermediate rather
+    than a second copy of the largest output. Otherwise the raw VCF is the
+    final call set and must persist, with its index.
+    """
+    return temp(path) if APPLY_HARD_FILTERS else path
 
 
 # --- Sample lists ---
@@ -847,6 +871,16 @@ def get_final_gvcf(sample):
         return gvcf_rows["input"].iloc[0]
 
     return get_archive_gvcf(sample)
+
+
+def get_gvcfs_target(wildcards):
+    """Input for the gvcfs target: every sample's final gVCF."""
+    if VARIANT_TOOL == "bcftools":
+        raise WorkflowError(
+            "variant_calling.tool 'bcftools' calls all samples together and writes no "
+            "per-sample gVCFs, so the gvcfs target is not available."
+        )
+    return [get_final_gvcf(sample) for sample in SAMPLES_ALL]
 
 
 def get_archive_gvcf(sample):

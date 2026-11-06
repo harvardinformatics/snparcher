@@ -40,9 +40,9 @@ rule all:
     """Default target: full pipeline."""
     default_target: True
     input:
-        RAW_VCF,
-        # Hard-filtered VCF as a default product (GATK-lineage only; validated in common.smk)
-        FILTERED_VCF if GENERATE_FILTERED_VCF else [],
+        # The final call set: filtered.vcf.gz when hard filtering runs (it holds
+        # every raw record, with FILTER set), otherwise raw.vcf.gz.
+        FINAL_VCF,
         "results/qc_metrics/qc_report.tsv",
         CALLABLE_TARGETS,
         # Postprocess outputs (when enabled)
@@ -155,6 +155,6 @@ rule callable_sites:
 
 
 rule gvcfs:
-    """Generate normalized gVCFs for all samples."""
+    """Generate normalized gVCFs for all samples (not bcftools, which writes none)."""
     input:
-        [get_final_gvcf(sample) for sample in SAMPLES_ALL],
+        get_gvcfs_target,

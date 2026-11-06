@@ -1,6 +1,23 @@
+from snakemake.settings.types import DeploymentMethod
+
+
+def apptainer_enabled():
+    settings = workflow.deployment_settings
+    return settings is not None and DeploymentMethod.APPTAINER in settings.deployment_method
+
+
 def deepvariant_input(wildcards):
     if sample_has_input_type(wildcards.sample, "gvcf"):
         raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call deepvariant")
+    # run_deepvariant exists only inside the container image, and Snakemake
+    # ignores the container directive unless Apptainer is enabled. Fail while
+    # building the DAG rather than after mapping has finished.
+    if not apptainer_enabled():
+        raise WorkflowError(
+            "variant_calling.tool 'deepvariant' runs DeepVariant from its container image, "
+            "so Snakemake must run with Apptainer enabled. Add --use-apptainer to the "
+            "command line, or 'use-apptainer: True' to your workflow profile."
+        )
 
     return {
         **get_indexed_final_bam_input(wildcards.sample),
@@ -27,7 +44,11 @@ if LONG_CONTIG_MODE:
             "logs/deepvariant_call/{sample}.txt"
         shell:
             """
-            mkdir -p results/deepvariant/{wildcards.sample}
+            # Intermediate tfrecords can take tens of GB per sample. Keep them in
+            # a private directory under the working directory, which Apptainer
+            # binds (a custom tmpdir may not be), and remove it when the job ends.
+            WORK=$(mktemp -d "results/deepvariant/{wildcards.sample}.XXXXXX")
+            trap 'rm -rf "$WORK"' EXIT
             /opt/deepvariant/bin/run_deepvariant \
                 --ref {input.ref} \
                 --reads {input.bam} \
@@ -35,7 +56,7 @@ if LONG_CONTIG_MODE:
                 --output_gvcf {output.gvcf} \
                 --model_type {params.model_type} \
                 --num_shards {threads} \
-                --intermediate_results_dir results/deepvariant/{wildcards.sample} \
+                --intermediate_results_dir "$WORK" \
                 &> {log}
             """
 
@@ -81,7 +102,11 @@ else:
             "logs/deepvariant_call/{sample}.txt"
         shell:
             """
-            mkdir -p results/deepvariant/{wildcards.sample}
+            # Intermediate tfrecords can take tens of GB per sample. Keep them in
+            # a private directory under the working directory, which Apptainer
+            # binds (a custom tmpdir may not be), and remove it when the job ends.
+            WORK=$(mktemp -d "results/deepvariant/{wildcards.sample}.XXXXXX")
+            trap 'rm -rf "$WORK"' EXIT
             /opt/deepvariant/bin/run_deepvariant \
                 --ref {input.ref} \
                 --reads {input.bam} \
@@ -89,6 +114,6 @@ else:
                 --output_gvcf {output.gvcf} \
                 --model_type {params.model_type} \
                 --num_shards {threads} \
-                --intermediate_results_dir results/deepvariant/{wildcards.sample} \
+                --intermediate_results_dir "$WORK" \
                 &> {log}
             """

@@ -327,6 +327,123 @@ def test_db_interval_split_rewrites_pathological_contig_shards(tmp_path):
     assert read_interval_header(shard_paths[0]) == read_interval_header(input_path)
 
 
+def split_db_shards(raw_dir, out_dir, max_intervals, max_contigs, merge_threshold):
+    """Run split-db and return the output shard paths in order."""
+    run_interval_list_tool(
+        "split-db",
+        "--input-dir",
+        raw_dir,
+        "--output-dir",
+        out_dir,
+        "--fof",
+        out_dir / "intervals.txt",
+        "--max-intervals-per-shard",
+        max_intervals,
+        "--max-contigs-per-shard",
+        max_contigs,
+        "--merge-contigs-threshold",
+        merge_threshold,
+    )
+    return [Path(line) for line in (out_dir / "intervals.txt").read_text().splitlines()]
+
+
+def assert_shards_disjoint(shard_paths):
+    """Fail if two shard records overlap, since that sequence is genotyped twice."""
+    spans = sorted(
+        (contig, int(start), int(end), path.name)
+        for path in shard_paths
+        for contig, start, end, *_ in (
+            record.split("\t") for record in read_interval_records(path)
+        )
+    )
+    overlaps = [
+        f"{contig} overlaps between {shard} and {next_shard}"
+        for (contig, _, end, shard), (next_contig, next_start, _, next_shard) in zip(
+            spans, spans[1:]
+        )
+        if contig == next_contig and next_start <= end
+    ]
+    assert not overlaps, "\n".join(overlaps)
+
+
+def test_db_interval_split_rewrite_leaves_contigs_split_by_gatk(tmp_path):
+    """Only contigs wholly inside a many-contig shard are rewritten.
+
+    In a chromosome-level assembly GATK often puts the last chromosome's tail in
+    the same shard as the unplaced scaffolds. Rewriting that tail to the whole
+    chromosome would genotype the head of the chromosome in two shards.
+    """
+    raw_dir = tmp_path / "raw"
+    out_dir = tmp_path / "out"
+    raw_dir.mkdir()
+    scaffolds = [f"scaf{i:03d}" for i in range(100)]
+    contig_lengths = {"chr10": 100_000, **dict.fromkeys(scaffolds, 2000), "big1": 80_000}
+    write_interval_list(
+        raw_dir / "0000-scattered.interval_list",
+        contig_lengths,
+        [("chr10", 1, 90_000)],
+    )
+    write_interval_list(
+        raw_dir / "0001-scattered.interval_list",
+        contig_lengths,
+        [
+            ("chr10", 90_001, 100_000),
+            *[(scaffold, 1, 1500) for scaffold in scaffolds],
+            ("big1", 1, 40_000),
+        ],
+    )
+    write_interval_list(
+        raw_dir / "0002-scattered.interval_list",
+        contig_lengths,
+        [("big1", 40_001, 80_000)],
+    )
+
+    shard_paths = split_db_shards(raw_dir, out_dir, 200, 200, 50)
+
+    assert_shards_disjoint(shard_paths)
+    assert [read_interval_records(path) for path in shard_paths] == [
+        ["chr10\t1\t90000\t+\tACGTmer"],
+        ["chr10\t90001\t100000\t+\tACGTmer"],
+        [f"{scaffold}\t1\t2000\t+\t{scaffold}" for scaffold in scaffolds],
+        ["big1\t1\t40000\t+\tACGTmer"],
+        ["big1\t40001\t80000\t+\tACGTmer"],
+    ]
+    # The scaffold shard is still all whole contigs, so GenomicsDB merges them.
+    result = run_interval_list_tool(
+        "genomicsdb-merge-contigs-arg",
+        "--input",
+        shard_paths[2],
+        "--threshold",
+        50,
+    )
+    assert result.stdout.strip() == "--merge-contigs-into-num-partitions 50"
+
+
+def test_db_interval_split_rewrite_leaves_contigs_split_by_cap(tmp_path):
+    """The per-shard interval cap can split a gappy contig; it stays partial too."""
+    raw_dir = tmp_path / "raw"
+    out_dir = tmp_path / "out"
+    raw_dir.mkdir()
+    scaffolds = [f"scaf{i:03d}" for i in range(60)]
+    gappy = [("gappy", start, start + 49) for start in range(1, 25_000, 100)]
+    write_interval_list(
+        raw_dir / "0000-scattered.interval_list",
+        {**dict.fromkeys(scaffolds, 2000), "gappy": 100_000},
+        [*[(scaffold, 1, 1500) for scaffold in scaffolds], *gappy],
+    )
+
+    shard_paths = split_db_shards(raw_dir, out_dir, 200, 200, 50)
+
+    assert_shards_disjoint(shard_paths)
+    gappy_records = [f"gappy\t{start}\t{end}\t+\tACGTmer" for _, start, end in gappy]
+    assert len(gappy_records) == 250
+    assert [read_interval_records(path) for path in shard_paths] == [
+        [f"{scaffold}\t1\t2000\t+\t{scaffold}" for scaffold in scaffolds],
+        gappy_records[:140],
+        gappy_records[140:],
+    ]
+
+
 def test_genomicsdb_merge_contigs_arg_only_for_whole_contig_pathology(tmp_path):
     whole_path = tmp_path / "whole.interval_list"
     partial_path = tmp_path / "partial.interval_list"
@@ -975,6 +1092,26 @@ def test_gvcfs_target_dry_run(request):
 
 
 @pytest.mark.dry_run
+def test_gvcfs_target_explains_bcftools_has_no_gvcfs(request):
+    """bcftools calls all samples together and writes no per-sample gVCFs.
+    The gvcfs target must say so, not fail on missing input files."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "bcftools")
+
+        result = smk.dry_run(
+            target="gvcfs",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "writes no per-sample gVCFs, so the gvcfs target is not available" in output
+
+
+@pytest.mark.dry_run
 def test_multirow_same_library_dry_run(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1331,6 +1468,31 @@ def test_gatk_without_intervals_dry_run(request):
         assert_haplotypecaller_uses_explicit_bam_csi_index(source, expected_count=2)
 
 
+@pytest.mark.full_run
+@pytest.mark.parametrize("long_contig", [False, True], ids=["standard", "long_contig"])
+def test_gatk_without_intervals_full_run(request, long_contig):
+    """GATK joint calling runs end to end with intervals disabled.
+
+    With intervals off, one GenomicsDBImport covers the whole genome. It was
+    given the reference .fai as -L, which GATK rejects as an interval file, so
+    every such run died after HaplotypeCaller; only dry runs covered this path.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_intervals_config(get_config_file(), tmpdir, enabled=False)
+        if long_contig:
+            cfg = write_long_contig_config(cfg, tmpdir, "gatk")
+        index = ".csi" if long_contig else ".tbi"
+
+        result = smk.run(target="call_variants", configfile=cfg, samples=get_samples_file())
+        result.assert_success()
+        result.assert_output_exists(
+            "results/vcfs/filtered.vcf.gz", f"results/vcfs/filtered.vcf.gz{index}"
+        )
+        assert list(iter_vcf_records(Path(tmpdir) / "results/vcfs/filtered.vcf.gz"))
+
+
 @pytest.mark.dry_run
 def test_joint_genomicsdb_import_dry_run_uses_profile_heap_and_contig_merge_guard(request):
     no_conda = request.config.getoption("--no-conda")
@@ -1554,13 +1716,16 @@ def test_full_pipeline(request):
         )
         result.assert_success()
         result.assert_output_exists(
-            "results/vcfs/raw.vcf.gz",
             # gatk is GATK-lineage and generate_filtered_vcf defaults true, so the
-            # hard-filtered VCF is a default product alongside raw.
+            # hard-filtered VCF is the final call set, with its index.
             "results/vcfs/filtered.vcf.gz",
+            "results/vcfs/filtered.vcf.gz.tbi",
             "results/qc_metrics/qc_report.tsv",
             "results/callable_sites/callable_sites.bed",
         )
+        # filtered.vcf.gz holds every raw record with FILTER set, so the raw
+        # VCF is a temporary intermediate, not a second copy of the call set.
+        assert not (Path(tmpdir) / "results/vcfs/raw.vcf.gz").exists()
 
 
 @pytest.mark.dry_run
@@ -1597,6 +1762,7 @@ def test_deepvariant_dry_run(request):
             target="all",
             configfile=cfg,
             samples=get_samples_file(),
+            extra_args=["--use-apptainer"],
         )
         result.assert_success()
 
@@ -1617,6 +1783,51 @@ def test_deepvariant_dry_run(request):
             "glnexus_joint",
             "mem_mb_reduced",
         )
+
+
+@pytest.mark.dry_run
+def test_deepvariant_requires_apptainer(request):
+    """run_deepvariant exists only in the container image, which Snakemake uses
+    only when Apptainer is enabled. Without it the run must stop while the DAG
+    is built, not when the first DeepVariant job starts after mapping."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "deepvariant")
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "so Snakemake must run with Apptainer enabled" in output
+        assert "--use-apptainer" in output
+
+
+@pytest.mark.dry_run
+def test_deepvariant_removes_intermediate_results(request):
+    """DeepVariant's intermediate tfrecords can take tens of GB per sample.
+    Each job must write them to its own directory and remove it on exit."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "deepvariant")
+
+        result = smk.dry_run(
+            target="results/gvcfs/sample1.g.vcf.gz",
+            configfile=cfg,
+            samples=get_samples_file(),
+            extra_args=["--use-apptainer"],
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert 'WORK=$(mktemp -d "results/deepvariant/sample1.XXXXXX")' in output
+        assert "trap 'rm -rf \"$WORK\"' EXIT" in output
+        assert '--intermediate_results_dir "$WORK"' in output
 
 
 @pytest.mark.dry_run
@@ -1748,6 +1959,7 @@ def test_deepvariant_long_contig_dry_run_archives_compressed_csi_gvcfs(request):
             target="results/gvcfs/sample0.g.vcf.gz.csi",
             configfile=cfg,
             samples=FIXTURES_DIR / "config" / "samples.csv",
+            extra_args=["--use-apptainer"],
         )
         result.assert_success()
 
@@ -1755,6 +1967,7 @@ def test_deepvariant_long_contig_dry_run_archives_compressed_csi_gvcfs(request):
         assert scheduled_rule_present(output, "deepvariant_call")
         assert scheduled_rule_present(output, "archive_deepvariant_gvcf")
         assert "results/deepvariant/sample0.g.vcf" in output
+        assert '--intermediate_results_dir "$WORK"' in output
         assert "results/gvcfs/sample0.g.vcf.gz.csi" in output
         assert "bcftools index -f -c" in output
 
@@ -1780,6 +1993,7 @@ def test_deepvariant_long_contig_dry_run_glnexus_consumes_csi_gvcfs(request):
             target="results/vcfs/raw.vcf.gz.csi",
             configfile=cfg,
             samples=FIXTURES_DIR / "config" / "samples.csv",
+            extra_args=["--use-apptainer"],
         )
         result.assert_success()
 
@@ -1944,6 +2158,80 @@ def test_gvcf_input_rejected_for_new_callers(request, tool):
 
 
 @pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "tool, ploidy, accepted",
+    [
+        ("bcftools", 4, False),
+        ("parabricks", 3, False),
+        ("deepvariant", 1, False),
+        ("bcftools", 1, True),
+        ("parabricks", 1, True),
+        ("deepvariant", 2, True),
+        ("gatk", 4, True),
+    ],
+)
+def test_ploidy_validated_against_caller(request, tool, ploidy, accepted):
+    """bcftools call and Parabricks HaplotypeCaller support only haploid and
+    diploid calling, and DeepVariant always calls diploid genotypes. Any other
+    ploidy must stop the run at startup, not fail in the caller or be ignored."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, tool)
+        cfg.write_text(cfg.read_text().replace("ploidy: 2", f"ploidy: {ploidy}", 1))
+
+        result = smk.dry_run(
+            target="all",
+            configfile=cfg,
+            samples=get_samples_file(),
+            extra_args=["--use-apptainer"] if tool == "deepvariant" else None,
+        )
+
+        if accepted:
+            result.assert_success()
+        else:
+            assert not result.succeeded
+            output = result.stdout + result.stderr
+            assert f"'{tool}' supports variant_calling.ploidy" in output
+            assert f"(got {ploidy})" in output
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "tool, key, flag",
+    [
+        ("deepvariant", "num_shards", "--num_shards"),
+        ("parabricks", "num_cpu_threads", "--num-cpu-threads"),
+    ],
+)
+def test_caller_thread_settings_reach_command(request, tool, key, flag):
+    """These rules take their threads from the config. A set-threads entry in
+    the default workflow profile would override the config key and make it dead."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, tool)
+        text, count = re.subn(rf"{key}: \d+", f"{key}: 3", cfg.read_text())
+        assert count == 1
+        cfg.write_text(text)
+
+        # Snakemake caps a job's threads at --cores; raise it above the setting.
+        extra_args = ["--cores", "32"]
+        if tool == "deepvariant":
+            extra_args.append("--use-apptainer")
+        result = smk.dry_run(
+            target="results/gvcfs/sample1.g.vcf.gz",
+            configfile=cfg,
+            samples=get_samples_file(),
+            extra_args=extra_args,
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert f"{flag} 3 " in output
+
+
+@pytest.mark.dry_run
 def test_callable_sites_coverage_warns_for_gvcf_only_inputs(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -2064,12 +2352,37 @@ def test_full_pipeline_bcftools(request):
         )
         result.assert_success()
         # bcftools is not GATK-lineage: no hard-filtered VCF is produced, and
-        # call_variants resolves to the raw VCF.
+        # call_variants resolves to the raw VCF, which must keep its index.
         result.assert_output_exists(
             "results/vcfs/raw.vcf.gz",
+            "results/vcfs/raw.vcf.gz.tbi",
             "results/qc_metrics/qc_report.tsv",
         )
         assert not (Path(tmpdir) / "results/vcfs/filtered.vcf.gz").exists()
+
+
+@pytest.mark.full_run
+def test_bcftools_caller_quotes_contig_names(request):
+    """SAM allows shell metacharacters in contig names, and NCBI-style
+    gi|...| names are common. The per-contig mpileup must get the name quoted."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        contig = "gi|15829254|ref|AB011548.2|"
+        fasta = gzip.decompress((TEST_DATA_DIR / "reference" / "test_genome.fa.gz").read_bytes())
+        reference = tmp_path / "test_genome.fa"
+        reference.write_text(fasta.decode().replace(">AB011548.2 ", f">{contig} ", 1))
+
+        smk = SnakemakeRunner(tmp_path, use_conda=not no_conda)
+        cfg = write_reference_source_config(get_config_file(), tmpdir, source=str(reference))
+        cfg = write_config_for_tool(cfg, tmpdir, "bcftools")
+
+        result = smk.run(target="call_variants", configfile=cfg, samples=get_samples_file())
+        result.assert_success()
+        result.assert_output_exists("results/vcfs/raw.vcf.gz", "results/vcfs/raw.vcf.gz.tbi")
+        with gzip.open(tmp_path / "results/vcfs/raw.vcf.gz", "rt") as handle:
+            chroms = [line.split("\t", 1)[0] for line in handle if not line.startswith("#")]
+        assert contig in chroms
 
 
 @pytest.mark.full_run
@@ -2198,6 +2511,15 @@ def test_long_contig_hard_filters_full_run(request):
         }
         assert {"RPRS_filter", "FS_SOR_filter", "MQ_filter", "QUAL_filter"} <= declared
 
+        # The raw VCF is not a product when hard filtering runs, so nothing
+        # asks for it later. When `all` did, the deleted temp work VCF meant
+        # re-running joint genotyping for every interval to rebuild it.
+        result = smk.dry_run(target="all", configfile=configfile, samples=samples)
+        result.assert_success()
+        output = result.stdout + result.stderr
+        for rule in ("gatk_genotype_gvcfs", "concat_interval_vcfs", "compress_interval_raw_vcf"):
+            assert not scheduled_rule_present(output, rule), rule
+
 
 @pytest.mark.full_run
 def test_long_contig_qc_consumes_filtered_vcf_full_run(request):
@@ -2240,6 +2562,13 @@ def test_long_contig_multistage_interval_gather(request):
             "gatk",
         )
         samples = get_samples_file()
+        # A small heap makes SortVcf's records-in-RAM differ from Picard's
+        # default, so the logs show it is sized from the heap and sample count.
+        small_heap = [
+            "--set-resources",
+            "concat_interval_gvcfs_stage:mem_mb_reduced=100",
+            "concat_interval_vcfs_stage:mem_mb_reduced=100",
+        ]
 
         result = smk.run(
             target="setup",
@@ -2256,10 +2585,11 @@ def test_long_contig_multistage_interval_gather(request):
             target=staged_gvcf_targets,
             configfile=configfile,
             samples=samples,
-            extra_args=["--notemp"],
+            extra_args=["--notemp", *small_heap],
         )
         result.assert_success()
         result.assert_output_exists(*staged_gvcf_targets)
+        gvcf_run_output = result.stdout + result.stderr
 
         staged_vcf_targets = [
             "results/vcfs/work/staged/r1/c0.vcf",
@@ -2269,7 +2599,7 @@ def test_long_contig_multistage_interval_gather(request):
             target=staged_vcf_targets,
             configfile=configfile,
             samples=samples,
-            extra_args=["--notemp"],
+            extra_args=["--notemp", *small_heap],
         )
         result.assert_success()
         result.assert_output_exists(*staged_vcf_targets)
@@ -2280,6 +2610,12 @@ def test_long_contig_multistage_interval_gather(request):
         vcf_log_text = vcf_log.read_text()
         assert "IndexFeatureFile" in gvcf_log_text
         assert "IndexFeatureFile" in vcf_log_text
+
+        # Half of a 100 MB heap: one sample per gVCF, two in the cohort VCF.
+        assert "-Xmx100m" in gvcf_run_output
+        assert "-Xmx100m" in result.stdout + result.stderr
+        assert "MAX_RECORDS_IN_RAM=22814" in gvcf_log_text
+        assert "MAX_RECORDS_IN_RAM=20576" in vcf_log_text
 
         source = workflow_source("rules", "variant_calling", "gatk_intervals.smk")
         assert "picard SortVcf" in source
