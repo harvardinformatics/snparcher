@@ -147,8 +147,8 @@ Produced when `modules.postprocess.enabled` is `true`.
 
 | Path | Format | Description |
 |------|--------|-------------|
-| `results/postprocess/filtered.vcf.gz` | VCF (bgzipped) | VCF with excluded samples removed and default filters applied. |
-| `results/postprocess/filtered.vcf.gz.csi` | CSI index | Index for the filtered VCF. |
+| `results/postprocess/filtered.vcf.gz` | VCF (bgzipped) | Excluded samples removed; sites kept only if they passed the caller's filters, lie in `callable_sites_filtered.bed`, are biallelic, and pass the MAF and missingness thresholds. |
+| `results/postprocess/filtered.vcf.gz.tbi` | Tabix index | Index for the filtered VCF (`.csi` in long-contig mode). |
 | `results/postprocess/callable_sites_filtered.bed` | BED | Callable sites BED after removing small contigs and excluded scaffolds. |
 | `results/postprocess/clean_snps.vcf.gz` | VCF (bgzipped) | Final clean SNP-only VCF after MAF, missingness, callable-sites, and scaffold filters. |
 | `results/postprocess/clean_snps.vcf.gz.tbi` | Tabix index | Index for the clean SNPs VCF. |

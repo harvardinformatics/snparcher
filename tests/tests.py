@@ -2,6 +2,7 @@ import functools
 import gzip
 import http.server
 import math
+import os
 import platform
 import re
 import shutil
@@ -2802,6 +2803,295 @@ def test_postprocess_standalone_full_run(request):
             len(record[3]) != 1 or any(len(alt) != 1 for alt in record[4].split(","))
             for record in indel_records
         )
+
+
+def write_postprocess_inputs(out_dir):
+    """Small postprocess inputs where each record's fate follows by hand.
+
+    s3 is excluded in the metadata. Callable regions: ctg1:1000-2000 and the
+    whole of every other contig. contig_size is 10000 (the default):
+    `small` (5000 bp) is dropped, `exact` (10000 bp) is kept.
+    """
+    out_dir = Path(out_dir)
+    contigs = {"ctg1": 100000, "small": 5000, "exact": 10000, "mtDNA": 16000}
+    records = [
+        ("ctg1", 995, "AGGGGGGGGG", "A", "0/1\t0/0\t0/0"),  # POS not callable; REF reaches into the region
+        ("ctg1", 1500, "A", "G", "0/1\t0/0\t0/0"),          # callable SNP
+        ("ctg1", 1600, "A", "G,*", "0/2\t0/2\t1/1"),        # only * is left once s3 is dropped
+        ("ctg1", 1650, "A", "G,*", "0/1\t0/2\t0/0"),        # G and * both remain: multiallelic
+        ("ctg1", 1700, "A", "AT", "0/1\t0/0\t0/0"),         # callable indel
+        ("ctg1", 3000, "A", "G", "0/1\t0/0\t0/0"),          # not callable
+        ("exact", 100, "A", "G", "0/1\t0/0\t0/0"),          # contig exactly contig_size
+        ("mtDNA", 100, "A", "G", "0/1\t0/0\t0/0"),          # excluded scaffold
+        ("small", 100, "A", "G", "0/1\t0/0\t0/0"),          # contig shorter than contig_size
+    ]
+    vcf = out_dir / "pp_raw.vcf"
+    with open(vcf, "w") as handle:
+        handle.write("##fileformat=VCFv4.2\n")
+        for name, length in contigs.items():
+            handle.write(f"##contig=<ID={name},length={length}>\n")
+        handle.write('##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n')
+        handle.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\ts1\ts2\ts3\n")
+        for chrom, pos, ref, alt, gts in records:
+            handle.write(f"{chrom}\t{pos}\t.\t{ref}\t{alt}\t50\tPASS\t.\tGT\t{gts}\n")
+    fai = out_dir / "pp_ref.fai"
+    fai.write_text("".join(f"{name}\t{length}\t0\t60\t61\n" for name, length in contigs.items()))
+    bed = out_dir / "pp_callable.bed"
+    bed.write_text("ctg1\t1000\t2000\n" + "".join(
+        f"{name}\t0\t{length}\n" for name, length in contigs.items() if name != "ctg1"
+    ))
+    samples = out_dir / "pp_samples.csv"
+    samples.write_text("sample_id\ns1\ns2\ns3\n")
+    metadata = out_dir / "pp_metadata.csv"
+    metadata.write_text("sample_id,exclude\ns1,false\ns2,false\ns3,true\n")
+    return {
+        "samples": str(samples),
+        "sample_metadata": str(metadata),
+        "vcf": str(vcf),
+        "ref_fai": str(fai),
+        "callable_sites_bed": str(bed),
+    }
+
+
+@pytest.mark.full_run
+def test_postprocess_filters_by_position_contig_and_scaffold(request):
+    """Records are kept by their POS, small contigs and excluded scaffolds
+    leave the VCF and the filtered BED alike, and a record whose only ALT
+    left is * is dropped, while one that keeps a real ALT beside * is not."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile",
+        )
+        result = smk.run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "postprocess" / "config" / "config.yaml",
+            config_overrides={
+                **write_postprocess_inputs(tmpdir),
+                "exclude_scaffolds": "'mtDNA, Y'",
+                "keep_basic_filter": "true",
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools", "bedtools")
+        result.assert_success()
+
+        pp = Path(tmpdir) / "results" / "postprocess"
+
+        def sites(name):
+            return [f"{r[0]}:{r[1]}" for r in iter_vcf_records(pp / name)]
+
+        # basic.vcf.gz has no position, contig or multiallelic filters yet.
+        assert sites("basic.vcf.gz") == [
+            "ctg1:995", "ctg1:1500", "ctg1:1650", "ctg1:1700", "ctg1:3000",
+            "exact:100", "mtDNA:100", "small:100",
+        ]
+        assert sites("filtered.vcf.gz") == ["ctg1:1500", "ctg1:1700", "exact:100"]
+        assert sites("clean_snps.vcf.gz") == ["ctg1:1500", "exact:100"]
+        assert sites("clean_indels.vcf.gz") == ["ctg1:1700"]
+        assert (pp / "callable_sites_filtered.bed").read_text() == (
+            "ctg1\t1000\t2000\nexact\t0\t10000\n"
+        )
+        logs = Path(tmpdir) / "logs" / "postprocess"
+        for rule in ("basic_filter", "update_bed", "strict_filter",
+                     "subset_snps", "subset_indels", "drop_indel_snps"):
+            assert (logs / f"{rule}.txt").exists(), rule
+
+
+@pytest.mark.full_run
+def test_postprocess_finishes_when_no_snp_survives(request):
+    """Only the indel at ctg1:1700 is callable, so clean_snps.vcf.gz is empty.
+
+    drop_indel_SNPs used to pass bcftools a plain-text list of SNP positions,
+    which bcftools rejects when empty ("Failed to read the targets").
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bed = Path(tmpdir) / "indel_only.bed"
+        bed.write_text("ctg1\t1690\t1710\n")
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile",
+        )
+        result = smk.run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "postprocess" / "config" / "config.yaml",
+            config_overrides={
+                **write_postprocess_inputs(tmpdir),
+                "callable_sites_bed": str(bed),
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools", "bedtools")
+        result.assert_success()
+
+        pp = Path(tmpdir) / "results" / "postprocess"
+        assert [f"{r[0]}:{r[1]}" for r in iter_vcf_records(pp / "filtered.vcf.gz")] == ["ctg1:1700"]
+        assert list(iter_vcf_records(pp / "clean_snps.vcf.gz")) == []
+
+
+@pytest.mark.full_run
+def test_postprocess_stops_when_no_callable_region_remains(request):
+    """Every callable region is on an excluded scaffold or a small contig.
+
+    The filtered callable BED is then empty, which bcftools rejects as a
+    targets file, so update_bed stops with an explanation instead.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile",
+        )
+        result = smk.run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "postprocess" / "config" / "config.yaml",
+            config_overrides={
+                **write_postprocess_inputs(tmpdir),
+                "exclude_scaffolds": "'ctg1,exact,mtDNA'",
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools", "bedtools")
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "Error in rule update_bed" in output
+        assert "No callable sites remain after removing contigs shorter than" in output
+
+
+@pytest.mark.full_run
+def test_postprocess_include_list_reruns_on_exclusion_change(request):
+    """Editing exclude in the sample metadata reruns filter_individuals."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        inputs = write_postprocess_inputs(tmpdir)
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=False,
+            snakefile=WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile",
+        )
+        kwargs = dict(
+            target="results/postprocess/include_samples.txt",
+            configfile=WORKFLOW_DIR / "modules" / "postprocess" / "config" / "config.yaml",
+            config_overrides=inputs,
+        )
+        smk.run(**kwargs).assert_success()
+
+        metadata = Path(inputs["sample_metadata"])
+        metadata.write_text(metadata.read_text().replace("s2,false", "s2,true"))
+        result = smk.dry_run(**kwargs)
+        result.assert_success()
+        assert scheduled_rule_present(result.stdout + result.stderr, "filter_individuals")
+
+
+@pytest.mark.dry_run
+def test_postprocess_unsupported_filtering_key_cannot_replace_vcf(request):
+    """modules.postprocess.filtering.vcf is ignored, as the warning says."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cfg = Path(tmpdir) / "config_pp_vcf.yaml"
+        text = get_postprocess_config().read_text()
+        assert text.count("    filtering:\n") == 1
+        cfg.write_text(text.replace("    filtering:\n", "    filtering:\n      vcf: /elsewhere/other.vcf.gz\n"))
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        result = smk.dry_run(
+            target="results/postprocess/filtered.vcf.gz",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+        result.assert_success()
+        output = result.stdout + result.stderr
+        assert "Ignoring unsupported config key(s): modules.postprocess.filtering.vcf" in output
+        assert "/elsewhere/other.vcf.gz" not in output
+
+
+@pytest.mark.dry_run
+def test_postprocess_maf_above_half_fails_validation(request):
+    """maf > 0.5 would make the lower bound exceed the upper one."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cfg = Path(tmpdir) / "config_pp_maf.yaml"
+        text = get_postprocess_config().read_text()
+        assert text.count("      maf: 0.01\n") == 1
+        cfg.write_text(text.replace("      maf: 0.01\n", "      maf: 0.6\n"))
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        result = smk.dry_run(target="all", configfile=cfg, samples=get_samples_file())
+        assert not result.succeeded
+        assert "modules.postprocess.filtering.maf" in result.stdout + result.stderr
+
+
+@pytest.mark.dry_run
+def test_postprocess_module_rejects_maf_above_half():
+    """A standalone run skips the main workflow's schema, so the module checks
+    maf itself; at 0.6 the filter AF<0.6 | AF>0.4 removes every variant."""
+    fixture_dir = TEST_DATA_DIR / "postprocess"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [
+                "snakemake", "-n",
+                "-s", str(WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile"),
+                "--directory", tmpdir,
+                "--config",
+                f"samples={fixture_dir / 'samples.csv'}",
+                f"vcf={fixture_dir / 'raw.vcf'}",
+                f"ref_fai={fixture_dir / 'ref.fai'}",
+                f"callable_sites_bed={fixture_dir / 'callable_sites.bed'}",
+                "maf=0.6",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "maf must be between 0 and 0.5, got 0.6" in result.stdout + result.stderr
+
+
+@pytest.mark.dry_run
+def test_postprocess_module_runs_without_a_configfile():
+    """The module's documented standalone command works from any directory."""
+    fixture_dir = TEST_DATA_DIR / "postprocess"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [
+                "snakemake", "-n",
+                "-s", str(WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile"),
+                "--directory", tmpdir,
+                "--config",
+                f"samples={fixture_dir / 'samples.csv'}",
+                f"vcf={fixture_dir / 'raw.vcf'}",
+                f"ref_fai={fixture_dir / 'ref.fai'}",
+                f"callable_sites_bed={fixture_dir / 'callable_sites.bed'}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.full_run
+def test_run_postprocess_long_contig_mode_writes_csi(request):
+    """run-postprocess.sh --long-contig-mode switches the module to CSI indexes."""
+    if request.config.getoption("--no-conda"):
+        pytest.skip("run-postprocess.sh always uses conda")
+    fixture_dir = TEST_DATA_DIR / "postprocess"
+    repo_root = WORKFLOW_DIR.parent
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env = dict(os.environ, SNAKEMAKE_CONDA_PREFIX=str(repo_root / ".snakemake" / "conda"))
+        result = subprocess.run(
+            [
+                "bash", str(repo_root / "run-postprocess.sh"), str(repo_root),
+                str(fixture_dir / "samples.csv"), str(fixture_dir / "raw.vcf"),
+                str(fixture_dir / "ref.fai"), str(fixture_dir / "callable_sites.bed"),
+                "--long-contig-mode", "--cores", "1",
+            ],
+            cwd=tmpdir,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        pp = Path(tmpdir) / "results" / "postprocess"
+        assert (pp / "filtered.vcf.gz.csi").exists()
+        assert not (pp / "filtered.vcf.gz.tbi").exists()
 
 
 @pytest.mark.full_run

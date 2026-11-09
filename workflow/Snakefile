@@ -60,14 +60,25 @@ rule all:
 # --- Module imports ----------------------------------------------------------
 
 if POSTPROCESS_ENABLED:
+    # Forward only the documented filtering keys, and set the workflow's own
+    # inputs last: an unsupported key such as filtering.vcf (warned about and
+    # "ignored" by config validation) used to override the input VCF.
+    _POSTPROCESS_FILTERING_KEYS = (
+        "contig_size", "maf", "missingness", "exclude_scaffolds",
+        "split_by_type", "keep_basic_filter",
+    )
     _postprocess_config = {
+        **{
+            key: value
+            for key, value in config["modules"]["postprocess"]["filtering"].items()
+            if key in _POSTPROCESS_FILTERING_KEYS
+        },
         "samples": config["samples"],
         "sample_metadata": config.get("sample_metadata", ""),
         "vcf": FINAL_VCF,
         "long_contig_mode": LONG_CONTIG_MODE,
         "ref_fai": REF_FILES["ref_fai"],
         "callable_sites_bed": "results/callable_sites/callable_sites.bed",
-        **config["modules"]["postprocess"]["filtering"],
     }
 
     module postprocess:
