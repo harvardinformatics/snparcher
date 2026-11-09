@@ -55,8 +55,7 @@ def write_intervals_to_path(
     callable_zarr_to_bed.write_bed_intervals(
         group=group,
         contigs=contigs,
-        total_samples=2,
-        min_callable_samples=2,
+        total_columns=2,
         merge_distance=merge_distance,
         output_bed=output_bed,
     )

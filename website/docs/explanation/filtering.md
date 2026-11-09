@@ -97,22 +97,16 @@ Compute the SFS after each filtering step and observe how the distribution chang
 2. **After removing low-coverage samples**: The singleton excess typically decreases because the worst-quality genotype calls are removed.
    The total number of segregating sites may paradoxically increase as the removal of high-missingness samples reveals variants that were previously uncalled.
 3. **After excluding sex chromosomes**: The 1/4-frequency peak should diminish or disappear.
-4. **After callable sites filtering** (removing high-heterozygosity and low-coverage regions): The 1/2-frequency peak should diminish or disappear, indicating that collapsed duplications have been masked.
+4. **After callable sites filtering** (removing high-depth and unmappable regions): The 1/2-frequency peak should diminish or disappear, indicating that collapsed duplications have been masked.
 
 If the SFS still shows artifactual peaks after all filters, the filters may need to be more aggressive.
 If the SFS looks smooth and follows the expected declining shape (possibly with demographic deviations), the filtering is likely adequate.
 
 ## Coverage filtering: the callable sites approach
 
-Coverage-based filtering addresses two classes of problems:
+Coverage-based filtering asks two questions about each site.
 
-### Low coverage
-
-Regions with very low read depth produce unreliable genotype calls.
-A site covered by only 1-2 reads has a high probability of missing the heterozygous allele entirely, leading to a false homozygous reference call.
-Systematically, low-coverage regions create missing data and underestimate heterozygosity.
-
-### Excessive coverage
+### Is the depth consistent with single-copy sequence?
 
 Regions with much higher depth than expected are suspicious.
 Common causes include:
@@ -123,18 +117,41 @@ Common causes include:
 
 These high-depth regions produce an excess of heterozygous calls (from fixed differences between paralogs) and distort allele frequency estimates.
 
+### Do enough samples have data?
+
+Sites with no reads in most samples cannot be genotyped and should not count as examined sites.
+Typical causes are assembly gaps, sequence missing from the sampled individuals, and regions that failed to sequence.
+
+Low depth on its own is not a reason to exclude a site.
+A low-depth genotype is less certain, which genotype-level filters handle; it does not produce systematic false variants the way excess depth does.
+
 ### How snpArcher handles coverage
 
-The callable sites module computes per-site depth across all BAM-backed samples and identifies regions that fall within acceptable bounds.
-By default, the bounds are:
+snpArcher uses [clam](https://github.com/cademirch/clam) for this step.
+Per-base depth from every BAM-backed sample is collected into one store, and each site is tested against two rules:
 
-- **Minimum coverage**: `auto` = `max(1, floor(global_mean_coverage / 2))`
-- **Maximum coverage**: `auto` = `ceil(global_mean_coverage * 2)`
+1. **Upper bound on summed depth.**
+   Depth is summed over samples at each site.
+   Most of a genome is single-copy, so the genome-wide median of summed depth, taken over mappable sites with data, is the cohort's single-copy depth.
+   With `max_depth: auto` (the default), a site is excluded when its summed depth is an outlier above that median: more than `max_depth_k` (default 4) robust standard deviations above it, measured on the square-root scale.
+   Because the spread is estimated from the data, the cutoff adapts to the cohort.
+   Large, deep cohorts get a tight cutoff; small or shallow cohorts, which cannot tell one copy from two at a single site, exclude less.
+   Setting `max_depth` to a number instead uses a fixed multiple of the median, for example `1.5` or `2`.
+2. **Presence.**
+   At least `fraction` (default 0.25) of samples must have at least `min_sample_depth` (default 1) reads at the site.
 
-The `fraction` parameter (default 1.0) controls what proportion of BAM-backed samples must be callable at a site for it to be included.
-A value of 1.0 means every sample must be within the depth bounds; lower values allow some samples to be outside bounds.
+There is no lower bound on depth.
+Samples marked `exclude` in the sample metadata are left out of both rules.
 
-Regions passing the coverage filter are merged (with a configurable merge distance, default 100 bp) into contiguous intervals, producing a BED file of coverage-callable regions.
+The defaults deliberately err toward keeping sites.
+A collapsed duplication that survives this step can still be caught by genotype filters later, but a site removed here is gone for good.
+
+The thresholds that were applied are written to `results/callable_sites/coverage_thresholds.tsv`.
+Passing regions are merged across gaps of up to `merge_distance` bp (default 100), so that depth hovering around a threshold does not fragment the mask.
+
+!!! note "What the depth bound does not catch"
+    - It is a cohort-level test. A duplication or CNV carried by only some samples raises summed depth only a little and generally passes. If you know of such regions, mask them yourself.
+    - The bound is genome-wide. Hemizygous sex chromosomes, such as X in males, sit below the autosomal peak, so their single-copy sequence is kept, but duplications on them are less likely to be excluded.
 
 ## Mappability filtering
 
@@ -152,19 +169,48 @@ Regions with ambiguous mappability are masked.
 The final callable sites BED file is the intersection of the coverage-passing and mappability-passing regions.
 It represents the portion of the genome where:
 
-1. Read depth is within acceptable bounds across samples (not too low, not too high)
+1. Summed depth is not an outlier above single-copy depth, and enough samples have reads
 2. Reads can be uniquely mapped
 
 This BED file serves two purposes:
 
 - **Site filtering**: The postprocess module intersects the VCF with the callable sites BED, retaining only variants in callable regions.
-- **Denominator for rate calculations**: Any analysis that computes a rate (variants per site, nucleotide diversity, etc.) needs to know the denominator: how many sites were examined.
-  The callable sites BED defines that denominator.
+- **A mask for other tools**: Analyses that need to know which sites were examined, such as SFS-based demographic inference or PSMC/MSMC, can use the BED as their mask.
 
 !!! warning "Effective genome length"
     When you filter your VCF to callable sites, the effective length of the genome changes.
     If you started with a 1 Gb genome and 800 Mb passes callable sites filters, your denominator for diversity calculations is 800 Mb, not 1 Gb.
     Forgetting to adjust the denominator leads to underestimates of nucleotide diversity and biases in demographic inference.
+
+## Diversity and divergence with clam
+
+For π, dxy, FST and heterozygosity, `clam stat` can use a clam callable store instead of the BED.
+clam knows how many samples have data at every site, which a yes/no BED cannot express.
+
+`results/callable_sites/callable_loci.zarr` treats all samples as one population, because snpArcher does not know your populations.
+Use it directly only when your samples form a single population:
+
+```bash
+clam stat -o clam_stats -w 10000 -c results/callable_sites/callable_loci.zarr <vcf>
+```
+
+For statistics by population, such as dxy, FST, or π within each population, first build a callable store with your populations from `results/callable_sites/depths.zarr`, which holds every sample's depth:
+
+```bash
+clam loci -o callable_pops.zarr --samples pops.tsv \
+    -m <min_sample_depth> \
+    -d <clam_min_proportion> \
+    --max-mean-depth <clam_max_mean_depth> \
+    results/callable_sites/depths.zarr
+clam stat -o clam_stats -w 10000 -c callable_pops.zarr <vcf>
+```
+
+- Replace each `<name>` with its value in `results/callable_sites/coverage_thresholds.tsv`. These are the thresholds snpArcher applied, so the same sites are callable; clam only splits each site's count by population.
+- `pops.tsv` is tab-separated, with the header `sample_name` and `population`, and one line for each sample in `depths.zarr`: every BAM-backed sample not marked `exclude`. The thresholds hold only for that set of samples.
+- `clam stat` reads the populations from the store. The VCF must contain the same samples.
+- `-w` sets the window size in bp.
+
+clam's callable stores do not yet apply the mappability filter, so until they do, statistics from `clam stat` include low-mappability sequence.
 
 ## Sample filtering: QC-guided exclusion
 

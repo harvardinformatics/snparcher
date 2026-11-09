@@ -10,14 +10,10 @@
         }
       ],
       "column_names": [
-        "sample0",
-        "sample1",
-        "sample2",
-        "sample3",
-        "sample4"
+        "default"
       ],
       "chunk_size": 1000000,
-      "callable_loci_type": "sample_masks",
+      "callable_loci_type": "population_counts",
       "populations": [
         {
           "name": "default",

@@ -7,6 +7,7 @@ GENMAP_SAMPLING_VALUE = 20
 
 
 def get_callable_source_beds(_wildcards):
+    check_callable_sites_not_blocked()
     beds = []
     if CALLABLE_COVERAGE_BED_ENABLED:
         beds.append("results/callable_sites/coverage.bed")
@@ -16,6 +17,7 @@ def get_callable_source_beds(_wildcards):
 
 
 def get_coverage_bed_zarr_input(_wildcards):
+    check_callable_sites_not_blocked()
     if CALLABLE_COVERAGE_BED_ENABLED:
         return "results/callable_sites/callable_loci.zarr"
 
@@ -29,6 +31,25 @@ def get_coverage_bed_zarr_input(_wildcards):
     raise ValueError(
         "Cannot create results/callable_sites/coverage.bed because "
         "callable_sites.coverage.enabled is false or no BAM-backed samples are available."
+    )
+
+
+def get_coverage_threshold_mappability(_wildcards):
+    check_callable_sites_not_blocked()
+    if CALLABLE_MAPPABILITY_ENABLED:
+        return "results/callable_sites/mappability.bed"
+    return []
+
+
+# Samples excluded in sample_metadata are left out of the coverage mask, so
+# it reflects the cohort that downstream filtering keeps.
+CALLABLE_SAMPLES = [s for s in SAMPLES_WITH_BAM if s not in set(get_excluded_samples())]
+
+if CALLABLE_COVERAGE_STATS_ENABLED and not CALLABLE_SAMPLES:
+    raise WorkflowError(
+        "callable_sites.coverage.enabled is true, but every BAM-backed sample is "
+        "excluded in sample_metadata. Disable callable_sites.coverage or include "
+        "at least one BAM-backed sample."
     )
 
 
@@ -60,10 +81,16 @@ rule clam_collect:
     input:
         d4=expand(
             "results/callable_sites/depths/{sample}.per-base.d4",
-            sample=SAMPLES_WITH_BAM,
+            sample=CALLABLE_SAMPLES,
         ),
     output:
         zarr=directory("results/callable_sites/depths.zarr"),
+    params:
+        # Without a samples file, clam names each sample by its file name up
+        # to the first dot, so sample_id ind.1 would become "ind".
+        samples=lambda wc, input: " ".join(
+            f"{sample} {d4}" for sample, d4 in zip(CALLABLE_SAMPLES, input.d4)
+        ),
     threads: 8
     conda:
         "../envs/clam.yaml"
@@ -73,26 +100,33 @@ rule clam_collect:
         "logs/clam_collect.txt"
     shell:
         """
+        SAMPLES=$(mktemp "{resources.tmpdir}/clam_samples_XXXXXX.tsv")
+        trap 'rm -f "$SAMPLES"' EXIT
+        printf 'sample_name\\tfile_path\\n' > "$SAMPLES"
+        printf '%s\\t%s\\n' {params.samples} >> "$SAMPLES"
         clam collect \
             -o {output.zarr} \
             -t {threads} \
-            {input.d4} \
+            --samples "$SAMPLES" \
             &> {log}
         """
 
 
 rule callable_coverage_thresholds:
-    """Calculate cohort-wide coverage thresholds for callable loci."""
+    """Choose clam loci thresholds from the cohort's summed-depth distribution."""
     input:
-        summaries=expand(
-            "results/callable_sites/depths/{sample}.mosdepth.summary.txt",
-            sample=SAMPLES_WITH_BAM,
-        ),
+        zarr="results/callable_sites/depths.zarr",
+        mappability=get_coverage_threshold_mappability,
     output:
         tsv="results/callable_sites/coverage_thresholds.tsv",
     params:
-        min_coverage=config["callable_sites"]["coverage"]["min_coverage"],
-        max_coverage=config["callable_sites"]["coverage"]["max_coverage"],
+        max_depth=config["callable_sites"]["coverage"]["max_depth"],
+        max_depth_k=config["callable_sites"]["coverage"]["max_depth_k"],
+        min_sample_depth=config["callable_sites"]["coverage"]["min_sample_depth"],
+        fraction=config["callable_sites"]["coverage"]["fraction"],
+        mappability_arg=lambda wc, input: (
+            f"--mappability-bed {input.mappability}" if input.mappability else ""
+        ),
         script=Path(workflow.basedir) / "scripts" / "callable_coverage_thresholds.py",
     conda:
         "../envs/callable_sites.yaml"
@@ -102,17 +136,23 @@ rule callable_coverage_thresholds:
         "logs/callable_coverage_thresholds.txt"
     shell:
         """
-        python {params.script} \
-            --min-coverage {params.min_coverage} \
-            --max-coverage {params.max_coverage} \
+        python {params.script} {input.zarr} \
+            {params.mappability_arg} \
+            --max-depth {params.max_depth} \
+            --max-depth-k {params.max_depth_k} \
+            --min-sample-depth {params.min_sample_depth} \
+            --fraction {params.fraction} \
             --output {output.tsv} \
-            {input.summaries} \
             &> {log}
         """
 
 
 rule clam_loci:
-    """Identify callable loci based on coverage."""
+    """Count, per site, the samples that make it coverage-callable.
+
+    Population-count mode: clam zeroes the count wherever the site fails a
+    threshold, and the counts are what `clam stat` needs as denominators.
+    """
     input:
         zarr="results/callable_sites/depths.zarr",
         thresholds="results/callable_sites/coverage_thresholds.tsv",
@@ -127,14 +167,13 @@ rule clam_loci:
         "logs/clam_loci.txt"
     shell:
         """
-        min_depth=$(awk -F '\t' 'NR==2 {{print $2}}' {input.thresholds})
-        max_depth=$(awk -F '\t' 'NR==2 {{print $3}}' {input.thresholds})
+        threshold() {{ awk -F '\t' -v key="$1" '$1 == key {{print $2}}' {input.thresholds}; }}
         clam loci \
             -o {output.zarr} \
             -t {threads} \
-            --per-sample \
-            -m "${{min_depth}}" \
-            -M "${{max_depth}}" \
+            -m "$(threshold min_sample_depth)" \
+            -d "$(threshold clam_min_proportion)" \
+            --max-mean-depth "$(threshold clam_max_mean_depth)" \
             {input.zarr} \
             &> {log}
         """
@@ -147,7 +186,6 @@ rule coverage_bed:
     output:
         bed="results/callable_sites/coverage.bed",
     params:
-        fraction=config["callable_sites"]["coverage"]["fraction"],
         merge_distance=config["callable_sites"]["coverage"]["merge_distance"],
         script=Path(workflow.basedir) / "scripts" / "callable_zarr_to_bed.py",
     conda:
@@ -159,7 +197,6 @@ rule coverage_bed:
     shell:
         """
         python {params.script} {input.zarr} {output.bed} \
-            --fraction {params.fraction} \
             --merge-distance {params.merge_distance} \
             &> {log}
         """
@@ -172,7 +209,6 @@ rule genmap_index:
     output:
         idx=directory("results/callable_sites/genmap_index"),
     params:
-        ref_decompressed=lambda wc, input: input.ref.replace(".gz", ""),
         sampling_threshold_bytes=GENMAP_SAMPLING_THRESHOLD_BYTES,
         skew_threshold_bytes=GENMAP_SKEW_THRESHOLD_BYTES,
         sampling_value=GENMAP_SAMPLING_VALUE,
@@ -186,8 +222,12 @@ rule genmap_index:
         """
         set -euo pipefail
 
-        REF_FASTA="{params.ref_decompressed}"
-        trap 'rm -f "$REF_FASTA"' EXIT
+        # GenMap needs an uncompressed FASTA. Decompress it into a job-private
+        # directory: results/reference/{{name}}.fa can be a FASTA that the user
+        # or another rule owns, and this job must not overwrite or delete it.
+        WORK=$(mktemp -d "{resources.tmpdir}/genmap_index_XXXXXX")
+        trap 'rm -rf "$WORK"' EXIT
+        REF_FASTA="$WORK/$(basename "{input.ref}" .gz)"
 
         gunzip -c "{input.ref}" > "$REF_FASTA"
         SIZE_BYTES=$(wc -c < "$REF_FASTA" | tr -d '[:space:]')
