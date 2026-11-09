@@ -611,6 +611,25 @@ def test_coverage_mask_fraction_boundary_is_exact(request):
 
 
 @pytest.mark.unit
+def test_coverage_mask_max_depth_boundary_is_exact(request):
+    """max_depth 2.3 of a median of 50 keeps a site whose summed depth is 115.
+
+    2.3 * 50 is 114.99999999999999 in floating point, which floors to 114.
+    """
+    depths = np.full((400, 5), 10, dtype=np.uint32)  # summed 50
+    depths[300:310] = 23  # summed 115: on the bound
+    depths[310:320] = (23, 23, 23, 23, 24)  # summed 116: above it
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        lines, thresholds = run_coverage_mask(
+            request, tmpdir, depths, mappability_bed=None, max_depth=2.3
+        )
+
+    assert int(thresholds["summed_depth_cutoff"]) == 115
+    assert lines == ["chr2l\t0\t310", "chr2l\t320\t400"]
+
+
+@pytest.mark.unit
 def test_genmap_index_leaves_reference_fasta_alone(request):
     """genmap_index must not touch results/reference/{name}.fa.
 

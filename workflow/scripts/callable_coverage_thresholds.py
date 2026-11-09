@@ -126,17 +126,19 @@ def main() -> int:
         sqrt_mad = weighted_median(np.abs(np.sqrt(depth_values) - sqrt_median), weights)
         sqrt_sd = max(MAD_TO_SD * sqrt_mad, MIN_SQRT_SD)
 
+        # Fraction keeps the numeric bounds exact. In binary floating point
+        # 2.3 * 50 is 114.99999999999999, which floors to 114, and 0.55 * 200
+        # is 110.00000000000001, whose ceiling is 111. The median is a whole
+        # number, since it is a sum of read counts.
         if args.max_depth == "auto":
             cutoff = (sqrt_median + args.max_depth_k * sqrt_sd) ** 2
         else:
-            multiple = float(args.max_depth)
+            multiple = Fraction(args.max_depth)
             if multiple < 1:
-                raise ValueError(f"--max-depth must be 'auto' or >= 1, got {multiple}")
-            cutoff = multiple * median
+                raise ValueError(f"--max-depth must be 'auto' or >= 1, got {args.max_depth}")
+            cutoff = multiple * int(median)
         summed_cutoff = math.floor(cutoff)
 
-        # Fraction(str(...)) keeps 0.55 * 200 at exactly 110; in binary
-        # floating point it is 110.00000000000001 and the ceiling would be 111.
         min_samples = math.ceil(Fraction(str(args.fraction)) * n_samples)
 
         # clam compares in floating point, and rounds the -d boundary the same
