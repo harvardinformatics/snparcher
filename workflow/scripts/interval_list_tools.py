@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from collections import Counter
 from dataclasses import dataclass
+from itertools import groupby
 from pathlib import Path
 
 
@@ -240,15 +242,35 @@ def whole_contig_records(
     return whole_records
 
 
-def maybe_rewrite_pathological_contig_chunk(
+def shared_contigs(chunks: list[list[IntervalRecord]]) -> set[str]:
+    """Return contigs with records in more than one chunk."""
+    counts = Counter(
+        contig for chunk in chunks for contig in {record.contig for record in chunk}
+    )
+    return {contig for contig, count in counts.items() if count > 1}
+
+
+def rewrite_pathological_contig_chunk(
     records: list[IntervalRecord],
+    shared: set[str],
     contig_lengths: dict[str, int],
     path: Path,
     threshold: int,
-) -> list[IntervalRecord]:
-    if threshold <= 0 or count_unique_contigs(records) <= threshold:
-        return records
-    return whole_contig_records(records, contig_lengths, path)
+) -> list[list[IntervalRecord]]:
+    """Rewrite a many-contig chunk to whole contigs so GenomicsDB can merge them.
+
+    Only contigs that lie wholly in this chunk are rewritten. A contig split
+    across chunks, by GATK or by the per-shard caps, keeps its own records in a
+    separate chunk, so no sequence is genotyped in two shards. The returned
+    chunks stay in input order.
+    """
+    whole = {record.contig for record in records if record.contig not in shared}
+    if threshold <= 0 or len(whole) <= threshold:
+        return [records]
+    return [
+        list(run) if is_shared else whole_contig_records(list(run), contig_lengths, path)
+        for is_shared, run in groupby(records, key=lambda record: record.contig in shared)
+    ]
 
 
 def records_are_whole_contigs(
@@ -272,7 +294,7 @@ def split_db_intervals(args: argparse.Namespace) -> int:
     if not input_files:
         raise ValueError(f"No GATK scattered interval lists found in {args.input_dir}")
 
-    output_chunks: list[tuple[list[str], list[IntervalRecord]]] = []
+    chunks: list[tuple[IntervalList, Path, list[IntervalRecord]]] = []
     total_records = 0
     for path in input_files:
         interval_list = parse_interval_list(path)
@@ -284,13 +306,19 @@ def split_db_intervals(args: argparse.Namespace) -> int:
             args.max_intervals_per_shard,
             args.max_contigs_per_shard,
         ):
-            chunk = maybe_rewrite_pathological_contig_chunk(
-                chunk,
-                interval_list.contig_lengths,
-                path,
-                args.merge_contigs_threshold,
-            )
-            output_chunks.append((interval_list.header, chunk))
+            chunks.append((interval_list, path, chunk))
+
+    shared = shared_contigs([chunk for _, _, chunk in chunks])
+    output_chunks: list[tuple[list[str], list[IntervalRecord]]] = []
+    for interval_list, path, chunk in chunks:
+        for records in rewrite_pathological_contig_chunk(
+            chunk,
+            shared,
+            interval_list.contig_lengths,
+            path,
+            args.merge_contigs_threshold,
+        ):
+            output_chunks.append((interval_list.header, records))
 
     if not output_chunks:
         raise ValueError(f"No interval records found in {args.input_dir}")

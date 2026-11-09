@@ -40,8 +40,8 @@ An optional key is also accepted at the top level:
 |-----|------|---------|----------------|-------------|
 | `variant_calling.expected_coverage` | string | `"low"` | `low`, `high` | Expected sequencing coverage regime. |
 | `variant_calling.tool` | string | `"gatk"` | `gatk`, `sentieon`, `bcftools`, `deepvariant`, `parabricks` | Variant caller to use. |
-| `variant_calling.ploidy` | integer | `2` | >= 1 | Ploidy of the organism. |
-| `variant_calling.generate_filtered_vcf` | boolean | `true` | `true`, `false` | Produce `results/vcfs/filtered.vcf.gz` (raw calls annotated with the GATK hard-filter FILTER column) as a default output. Applies only to GATK-family callers (`gatk`, `sentieon`, `parabricks`); ignored with a warning for `bcftools`/`deepvariant`. When `false`, hard filtering is skipped entirely and the raw VCF becomes the final call set consumed by the postprocess/qc modules and the `call_variants` target. |
+| `variant_calling.ploidy` | integer | `2` | >= 1 | Ploidy of the organism. `bcftools` and `parabricks` support 1 or 2; `deepvariant` supports 2 only. |
+| `variant_calling.generate_filtered_vcf` | boolean | `true` | `true`, `false` | Produce `results/vcfs/filtered.vcf.gz` (raw calls annotated with the GATK hard-filter FILTER column) as a default output. Applies only to GATK-family callers (`gatk`, `sentieon`, `parabricks`); ignored with a warning for `bcftools`/`deepvariant`. When `false`, hard filtering is skipped entirely and the raw VCF becomes the final call set consumed by the postprocess/qc modules and the `call_variants` target. When `true`, `raw.vcf.gz` is a temporary intermediate: `filtered.vcf.gz` holds every raw record, with FILTER set. |
 | `variant_calling.long_contig_mode` | boolean or `"auto"` | `"auto"` | `true`, `false`, `"auto"` | Use CSI-capable (and, for DeepVariant, GLnexus-based) paths for references with contigs longer than the Tabix coordinate limit (~512 Mb). `"auto"` inspects the reference `.fai` when available while building the DAG. Enabling it switches VCF/gVCF indexes to `.csi`. Because GATK cannot read a CSI-indexed compressed VCF, GATK steps (including hard filtering) run on uncompressed work VCFs and the results are compressed and CSI-indexed afterwards. |
 
 !!! note "Deprecated alias: `variant_calling.gatk.ploidy`"
@@ -81,6 +81,7 @@ Applies when `variant_calling.tool` is `bcftools`.
 ### `variant_calling.deepvariant`
 
 Applies when `variant_calling.tool` is `deepvariant`.
+DeepVariant runs from the `google/deepvariant` container image, so Snakemake must run with `--use-apptainer`.
 
 | Key | Type | Default | Allowed values | Description |
 |-----|------|---------|----------------|-------------|

@@ -38,10 +38,12 @@ set-threads:
   sentieon_combine_gvcf: 32
 
   # Additional Variant Callers
+  # deepvariant_call and parabricks_haplotypecaller take their threads from
+  # variant_calling.deepvariant.num_shards and
+  # variant_calling.parabricks.num_cpu_threads in the config. An entry here
+  # would override those settings.
   bcftools_call: 8
-  deepvariant_call: 8
   glnexus_joint: 4
-  parabricks_haplotypecaller: 16
 
 # Control/overwrite resources per rule.
 # mem_mb controls the scheduler request. mem_mb_reduced controls tool memory

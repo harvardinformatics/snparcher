@@ -63,6 +63,16 @@ rule joint_genomics_db_import:
         MERGE_CONTIGS_ARG=$(python {params.interval_tools} genomicsdb-merge-contigs-arg \
             --input {input.ref_fai} \
             --threshold {params.merge_contig_threshold} 2>> {log})
+
+        # One whole-contig interval per contig, as BED: GATK's -L reads
+        # interval files (.list, .intervals, .interval_list, .bed) and rejects
+        # a .fai. BED, unlike a .list of names, cannot mistake a contig name
+        # containing ':' for chr:start-end. Whole contigs are also what
+        # --merge-contigs-into-num-partitions requires.
+        WORK=$(mktemp -d "{resources.tmpdir}/joint_genomics_db_import_XXXXXX")
+        trap 'rm -rf "$WORK"' EXIT
+        awk 'BEGIN {{OFS = "\\t"}} {{print $1, 0, $2}}' {input.ref_fai} > "$WORK/whole_genome.bed"
+
         gatk GenomicsDBImport \
             --java-options '-Xmx{resources.mem_mb_reduced}m' \
             --genomicsdb-shared-posixfs-optimizations true \
@@ -70,7 +80,7 @@ rule joint_genomics_db_import:
             --genomicsdb-workspace-path {output.db} \
             --merge-input-intervals $MERGE_CONTIGS_ARG \
             --reader-threads {threads} \
-            -L {input.ref_fai} \
+            -L "$WORK/whole_genome.bed" \
             --tmp-dir {resources.tmpdir} \
             --sample-name-map {input.db_mapfile} \
             &>> {log}
@@ -118,8 +128,8 @@ if LONG_CONTIG_MODE:
             vcf=RAW_VCF_WORK,
             idx=RAW_VCF_WORK_INDEX,
         output:
-            vcf=temp(RAW_VCF),
-            idx=temp(RAW_VCF_INDEX),
+            vcf=raw_vcf_output(RAW_VCF),
+            idx=raw_vcf_output(RAW_VCF_INDEX),
         params:
             index_args=BCFTOOLS_INDEX_ARGS,
         conda:
@@ -141,8 +151,8 @@ else:
             db="results/gatk_genomics_db.tar",
             **REF_FILES,
         output:
-            vcf=temp(RAW_VCF),
-            tbi=temp(RAW_VCF_INDEX),
+            vcf=raw_vcf_output(RAW_VCF),
+            tbi=raw_vcf_output(RAW_VCF_INDEX),
         params:
             het_prior=config["variant_calling"]["gatk"]["het_prior"],
             db_rel=lambda wc, input: subpath(input.db, strip_suffix=".tar"),

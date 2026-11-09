@@ -203,6 +203,28 @@ def format_picard_vcf_inputs(files):
     return " ".join(f"I={shlex.quote(str(path))}" for path in files)
 
 
+# Long-contig mode gathers interval VCFs with picard SortVcf, not a streaming
+# gather: GenotypeGVCFs writes a multi-contig DB shard in contig-name order,
+# not reference order. Giving GenotypeGVCFs the shard's intervals (-L, with
+# --merge-input-intervals --only-output-calls-starting-in-intervals, as GATK's
+# WARP pipeline does) writes reference order, which would allow picard
+# GatherVcfs instead.
+#
+# SortVcf holds MAX_RECORDS_IN_RAM records on the heap before spilling to
+# TMP_DIR, and a record grows with the sample count: about 110 bytes per sample
+# for GATK genotype fields, measured. Picard's default of 500,000 records needs
+# roughly 65 MB of heap per sample, so the gather rules cap the batch at half
+# the heap, using this conservative per-record estimate. The heap is only known
+# when the job runs, so the division happens in the shell.
+SORTVCF_RECORD_BYTES = 2048
+SORTVCF_SAMPLE_BYTES = 250
+
+
+def sortvcf_record_bytes(n_samples):
+    """Estimate the heap one SortVcf record with n_samples occupies."""
+    return SORTVCF_RECORD_BYTES + SORTVCF_SAMPLE_BYTES * n_samples
+
+
 def get_final_stage_file(base_files, wc, path_builder):
     """Return final staged output path (or original file if no staging is needed)."""
     if not base_files:
@@ -320,6 +342,7 @@ rule concat_interval_gvcfs_stage:
     params:
         index_args=BCFTOOLS_INDEX_ARGS,
         picard_inputs=get_interval_gvcf_stage_picard_inputs,
+        sortvcf_record_bytes=sortvcf_record_bytes(1),
         long_mode=LONG_CONTIG_MODE,
     conda:
         "../../envs/gatk.yaml"
@@ -330,10 +353,16 @@ rule concat_interval_gvcfs_stage:
     shell:
         """
         if [ "{params.long_mode}" = "True" ]; then
+            # Keep half the heap's worth of records in RAM, at most Picard's
+            # default of 500,000 (see SORTVCF_RECORD_BYTES).
+            max_records=$(( {resources.mem_mb_reduced} * 1048576 / 2 / {params.sortvcf_record_bytes} ))
+            max_records=$(( max_records > 500000 ? 500000 : (max_records < 1 ? 1 : max_records) ))
             picard SortVcf \
+                -Xmx{resources.mem_mb_reduced}m \
                 {params.picard_inputs} \
                 O={output.gvcf} \
                 TMP_DIR={resources.tmpdir} \
+                MAX_RECORDS_IN_RAM=$max_records \
                 CREATE_INDEX=false \
                 > {log} 2>&1
             gatk IndexFeatureFile -I {output.gvcf} >> {log} 2>&1
@@ -509,6 +538,7 @@ rule concat_interval_vcfs_stage:
     params:
         index_args=BCFTOOLS_INDEX_ARGS,
         picard_inputs=get_interval_vcf_stage_picard_inputs,
+        sortvcf_record_bytes=sortvcf_record_bytes(len(SAMPLES_ALL)),
         long_mode=LONG_CONTIG_MODE,
     conda:
         "../../envs/gatk.yaml"
@@ -519,10 +549,16 @@ rule concat_interval_vcfs_stage:
     shell:
         """
         if [ "{params.long_mode}" = "True" ]; then
+            # Keep half the heap's worth of records in RAM, at most Picard's
+            # default of 500,000 (see SORTVCF_RECORD_BYTES).
+            max_records=$(( {resources.mem_mb_reduced} * 1048576 / 2 / {params.sortvcf_record_bytes} ))
+            max_records=$(( max_records > 500000 ? 500000 : (max_records < 1 ? 1 : max_records) ))
             picard SortVcf \
+                -Xmx{resources.mem_mb_reduced}m \
                 {params.picard_inputs} \
                 O={output.vcf} \
                 TMP_DIR={resources.tmpdir} \
+                MAX_RECORDS_IN_RAM=$max_records \
                 CREATE_INDEX=false \
                 > {log} 2>&1
             gatk IndexFeatureFile -I {output.vcf} >> {log} 2>&1
@@ -539,8 +575,8 @@ rule concat_interval_vcfs:
         vcf=get_final_interval_vcf_stage_file,
         tbi=get_final_interval_vcf_stage_tbi,
     output:
-        vcf=temp(RAW_VCF_WORK) if LONG_CONTIG_MODE else RAW_VCF,
-        idx=temp(RAW_VCF_WORK_INDEX) if LONG_CONTIG_MODE else RAW_VCF_INDEX,
+        vcf=temp(RAW_VCF_WORK) if LONG_CONTIG_MODE else raw_vcf_output(RAW_VCF),
+        idx=temp(RAW_VCF_WORK_INDEX) if LONG_CONTIG_MODE else raw_vcf_output(RAW_VCF_INDEX),
     benchmark:
         "benchmarks/concat_interval_vcfs/benchmark.txt"
     log:
@@ -560,8 +596,8 @@ if LONG_CONTIG_MODE:
             vcf=RAW_VCF_WORK,
             idx=RAW_VCF_WORK_INDEX,
         output:
-            vcf=temp(RAW_VCF),
-            idx=temp(RAW_VCF_INDEX),
+            vcf=raw_vcf_output(RAW_VCF),
+            idx=raw_vcf_output(RAW_VCF_INDEX),
         params:
             index_args=BCFTOOLS_INDEX_ARGS,
         conda:

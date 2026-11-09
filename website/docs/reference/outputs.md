@@ -5,14 +5,14 @@ Paths use the placeholders `{ref}` for `reference.name` and `{sample}` for `samp
 
 ## Core pipeline outputs
 
-These files are always produced by the default `all` target.
+These files are produced by the default `all` target. The final call set is one VCF: `filtered.vcf.gz` when GATK hard filtering runs (GATK-family callers with `generate_filtered_vcf: true`, the default), and `raw.vcf.gz` otherwise.
 
 | Path | Format | Description |
 |------|--------|-------------|
-| `results/vcfs/raw.vcf.gz` | VCF (bgzipped) | Joint-genotyped, unfiltered VCF containing all samples and all sites called by the chosen variant caller. |
-| `results/vcfs/raw.vcf.gz.tbi` | Tabix index | Index for the raw VCF. |
-| `results/vcfs/filtered.vcf.gz` | VCF (bgzipped) | Hard-filtered VCF. GATK `VariantFiltration` tags are applied; sites are annotated but not removed. |
+| `results/vcfs/filtered.vcf.gz` | VCF (bgzipped) | Final call set when hard filtering runs: every joint-genotyped record, with the GATK hard-filter results in the FILTER column (sites are annotated, not removed). |
 | `results/vcfs/filtered.vcf.gz.tbi` | Tabix index | Index for the filtered VCF. |
+| `results/vcfs/raw.vcf.gz` | VCF (bgzipped) | Final call set when hard filtering does not run (bcftools, DeepVariant, or `generate_filtered_vcf: false`): all samples and all sites called by the chosen caller. When hard filtering runs it is a temporary intermediate, since `filtered.vcf.gz` holds the same records. |
+| `results/vcfs/raw.vcf.gz.tbi` | Tabix index | Index for the raw VCF, kept with it. |
 | `results/qc_metrics/qc_report.tsv` | TSV | Per-sample QC metrics table aggregated from fastp, BAM stats, and coverage summaries. |
 
 !!! note "Index type depends on `long_contig_mode`"

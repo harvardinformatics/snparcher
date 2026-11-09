@@ -53,8 +53,8 @@ rule sentieon_combine_gvcf:
         unpack(sentieon_combine_gvcf_input),
         **REF_FILES,
     output:
-        vcf=temp("results/vcfs/raw.vcf.gz"),
-        tbi=temp("results/vcfs/raw.vcf.gz.tbi"),
+        vcf=raw_vcf_output(RAW_VCF),
+        tbi=raw_vcf_output(RAW_VCF_INDEX),
     params:
         lic=config["variant_calling"]["sentieon"]["license"],
         gvcf_args=lambda wc, input: " ".join([f"-v {g}" for g in input.gvcfs]),

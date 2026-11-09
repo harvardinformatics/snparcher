@@ -37,12 +37,20 @@ variant_calling:
 | `gatk` | GATK HaplotypeCaller + GenomicsDB + GenotypeGVCFs | Default. Well-tested for population genomics. |
 | `sentieon` | Sentieon DNAseq (GATK-compatible, faster) | Requires a valid license (`variant_calling.sentieon.license`). |
 | `bcftools` | bcftools mpileup + call | No per-sample gVCF step. Cannot accept `gvcf` input. |
-| `deepvariant` | Google DeepVariant + GLnexus | ML-based caller. Cannot accept `gvcf` input. |
+| `deepvariant` | Google DeepVariant + GLnexus | ML-based caller. Requires Apptainer (see below). Cannot accept `gvcf` input. |
 | `parabricks` | NVIDIA Parabricks | GPU-accelerated. Requires Apptainer image and NVIDIA GPUs. Cannot accept `gvcf` input. |
 
 !!! note
     You only need to configure the sub-block for the tool you selected.
     Settings for other callers are ignored.
+
+!!! note "DeepVariant needs Apptainer"
+    snpArcher runs DeepVariant from Google's container image.
+    Apptainer (or Singularity) must be installed, and Snakemake must run with `--use-apptainer` in addition to `--use-conda`, or with `use-apptainer: True` in your workflow profile.
+    Without it, snpArcher stops with an error while planning the run.
+
+    Inside the container, Snakemake makes the working directory visible, along with whatever your site's Apptainer configuration binds.
+    If your sample sheet lists BAM files stored elsewhere, bind their directory too, for example `--apptainer-args "--bind /path/to/bams"`.
 
 ## Set the heterozygosity prior (GATK)
 
@@ -69,6 +77,10 @@ variant_calling:
   ploidy: 2  # <-- change if not diploid
   expected_coverage: "low"  # "low" for <30x, "high" for >30x
 ```
+
+`gatk` and `sentieon` accept any ploidy.
+`bcftools` and `parabricks` support haploid or diploid calling only (1 or 2), and `deepvariant` always calls diploid genotypes (2).
+snpArcher stops at startup if the ploidy doesn't suit the selected caller.
 
 The `expected_coverage` setting controls internal caller tuning.
 Use `low` for most resequencing projects (5-15x per sample) and `high` for datasets with consistently deep coverage (>30x).
