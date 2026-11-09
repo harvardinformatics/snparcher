@@ -3406,6 +3406,43 @@ def test_qc_plink_handles_sex_organelle_contigs_and_small_cohorts(request):
 
 
 @pytest.mark.full_run
+def test_qc_dashboard_renders_three_samples(request):
+    """Three samples, the fewest QC accepts, with the default 3 clusters.
+
+    R's default k-means needs fewer clusters than points, so with one cluster
+    per sample the dashboard failed with "number of cluster centres must lie
+    between 1 and nrow(x)".
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(TEST_DATA_DIR / "qc" / "ref.fai") as handle:
+            contigs = [line.split()[0] for line in handle if line.strip()]
+        vcf, fai, samples, _ = write_qc_cohort(tmpdir, contig_names=contigs, n_samples=3)
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(samples),
+                "vcf": str(vcf),
+                "fai": str(fai),
+                "qc_report": str(TEST_DATA_DIR / "qc" / "qc_report.tsv"),
+            },
+        )
+        skip_if_arm64_packages_unavailable(
+            result, "admixture", "plink2", "plink", "r-ggmap", "r-ape", "bioconductor-ggtree"
+        )
+        result.assert_success()
+
+        html = (Path(tmpdir) / "results" / "qc" / "qc_dashboard.html").read_text()
+        assert "a k-means clustering with 2 clusters is applied" in html
+
+
+@pytest.mark.full_run
 def test_qc_dashboard_counts_pass_records_and_many_clusters(request):
     """The dashboard's numbers, text and map match the data.
 

@@ -261,9 +261,13 @@ df.depth <- df.depth %>%  mutate_if(is.numeric, round, digits = 2)
 
 df.pca <- left_join(df.pca, df.depth, by = c("IID" = "INDV"))
 
-# kmeans needs at least as many distinct points as clusters, and every plot
-# colours by cluster, so extend the palette when more clusters are requested.
-input$clusters <- min(input$clusters, nrow(unique(df.pca[, c("PC1", "PC2")])))
+# kmeans needs a distinct point for every cluster, and its default algorithm
+# needs fewer clusters than points (kmeans itself handles a single cluster).
+# Every plot colours by cluster, so extend the palette when more clusters are
+# requested.
+input$clusters <- max(1, min(input$clusters,
+                             nrow(unique(df.pca[, c("PC1", "PC2")])),
+                             nrow(df.pca) - 1))
 if (input$clusters > length(set.colors)) {
   set.colors <- grDevices::colorRampPalette(set.colors)(input$clusters)
 }
