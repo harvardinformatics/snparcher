@@ -248,6 +248,13 @@ rule update_bed:
         bedtools subtract -a {input.bed} -b {output.dropped_contigs} 2>> {log} \
             | bedtools sort -i - 2>> {log} \
             | bedtools merge -i - > {output.bed} 2>> {log}
+        # bcftools rejects an empty targets file in strict_filter.
+        if [ ! -s {output.bed} ]; then
+            echo "No callable sites remain after removing contigs shorter than" \
+                "contig_size ({params.size_filter} bp) and those in exclude_scaffolds." \
+                | tee -a {log} >&2
+            exit 1
+        fi
         """
 
 

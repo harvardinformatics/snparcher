@@ -2932,6 +2932,35 @@ def test_postprocess_finishes_when_no_snp_survives(request):
 
 
 @pytest.mark.full_run
+def test_postprocess_stops_when_no_callable_region_remains(request):
+    """Every callable region is on an excluded scaffold or a small contig.
+
+    The filtered callable BED is then empty, which bcftools rejects as a
+    targets file, so update_bed stops with an explanation instead.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile",
+        )
+        result = smk.run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "postprocess" / "config" / "config.yaml",
+            config_overrides={
+                **write_postprocess_inputs(tmpdir),
+                "exclude_scaffolds": "'ctg1,exact,mtDNA'",
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools", "bedtools")
+        assert not result.succeeded
+        output = result.stdout + result.stderr
+        assert "Error in rule update_bed" in output
+        assert "No callable sites remain after removing contigs shorter than" in output
+
+
+@pytest.mark.full_run
 def test_postprocess_include_list_reruns_on_exclusion_change(request):
     """Editing exclude in the sample metadata reruns filter_individuals."""
     with tempfile.TemporaryDirectory() as tmpdir:
