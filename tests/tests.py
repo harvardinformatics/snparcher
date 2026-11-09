@@ -2818,6 +2818,7 @@ def write_postprocess_inputs(out_dir):
         ("ctg1", 995, "AGGGGGGGGG", "A", "0/1\t0/0\t0/0"),  # POS not callable; REF reaches into the region
         ("ctg1", 1500, "A", "G", "0/1\t0/0\t0/0"),          # callable SNP
         ("ctg1", 1600, "A", "G,*", "0/2\t0/2\t1/1"),        # only * is left once s3 is dropped
+        ("ctg1", 1650, "A", "G,*", "0/1\t0/2\t0/0"),        # G and * both remain: multiallelic
         ("ctg1", 1700, "A", "AT", "0/1\t0/0\t0/0"),         # callable indel
         ("ctg1", 3000, "A", "G", "0/1\t0/0\t0/0"),          # not callable
         ("exact", 100, "A", "G", "0/1\t0/0\t0/0"),          # contig exactly contig_size
@@ -2855,7 +2856,8 @@ def write_postprocess_inputs(out_dir):
 @pytest.mark.full_run
 def test_postprocess_filters_by_position_contig_and_scaffold(request):
     """Records are kept by their POS, small contigs and excluded scaffolds
-    leave the VCF and the filtered BED alike, and * alleles are dropped."""
+    leave the VCF and the filtered BED alike, and a record whose only ALT
+    left is * is dropped, while one that keeps a real ALT beside * is not."""
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(
@@ -2869,6 +2871,7 @@ def test_postprocess_filters_by_position_contig_and_scaffold(request):
             config_overrides={
                 **write_postprocess_inputs(tmpdir),
                 "exclude_scaffolds": "'mtDNA, Y'",
+                "keep_basic_filter": "true",
             },
         )
         skip_if_arm64_packages_unavailable(result, "bcftools", "bedtools")
@@ -2879,6 +2882,11 @@ def test_postprocess_filters_by_position_contig_and_scaffold(request):
         def sites(name):
             return [f"{r[0]}:{r[1]}" for r in iter_vcf_records(pp / name)]
 
+        # basic.vcf.gz has no position, contig or multiallelic filters yet.
+        assert sites("basic.vcf.gz") == [
+            "ctg1:995", "ctg1:1500", "ctg1:1650", "ctg1:1700", "ctg1:3000",
+            "exact:100", "mtDNA:100", "small:100",
+        ]
         assert sites("filtered.vcf.gz") == ["ctg1:1500", "ctg1:1700", "exact:100"]
         assert sites("clean_snps.vcf.gz") == ["ctg1:1500", "exact:100"]
         assert sites("clean_indels.vcf.gz") == ["ctg1:1700"]

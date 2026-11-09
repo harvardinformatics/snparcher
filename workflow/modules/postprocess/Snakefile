@@ -209,9 +209,11 @@ rule basic_filter:
         """
         # -a trims ALT alleles unseen in the kept samples, which can leave only
         # the spanning-deletion allele *: such a record carries no variant.
+        # ALT="*" alone would match any record with a * allele, so require it
+        # to be the only one.
         bcftools view -S {input.include} -f .,PASS {input.vcf} -a -U -O u 2> {log} \
             | bcftools +fill-tags -Ou 2>> {log} \
-            | bcftools view -m2 -e 'AF==0 | ref="N" | ALT="." | ALT="*"' \
+            | bcftools view -m2 -e 'AF==0 | ref="N" | ALT="." | (N_ALT=1 & ALT="*")' \
                 -O z -o {output.filtered} 2>> {log}
         bcftools index {params.index_args} {output.filtered} 2>> {log}
         """
