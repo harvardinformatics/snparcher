@@ -73,6 +73,11 @@ config["keep_basic_filter"] = _as_bool(config["keep_basic_filter"])
 
 config["long_contig_mode"] = _as_bool(config["long_contig_mode"])
 
+# The main workflow's schema also caps maf at 0.5, but a standalone run skips
+# that schema. Above 0.5, AF<maf | AF>1-maf removes every variant.
+if not 0 <= float(config["maf"]) <= 0.5:
+    raise ValueError(f"maf must be between 0 and 0.5, got {config['maf']}")
+
 _LONG_CONTIG_MODE = config["long_contig_mode"]
 _BCFTOOLS_INDEX_ARGS = "-f -c" if _LONG_CONTIG_MODE else "-f -t"
 _VCF_INDEX_SUFFIX = ".csi" if _LONG_CONTIG_MODE else ".tbi"

@@ -3021,6 +3021,31 @@ def test_postprocess_maf_above_half_fails_validation(request):
 
 
 @pytest.mark.dry_run
+def test_postprocess_module_rejects_maf_above_half():
+    """A standalone run skips the main workflow's schema, so the module checks
+    maf itself; at 0.6 the filter AF<0.6 | AF>0.4 removes every variant."""
+    fixture_dir = TEST_DATA_DIR / "postprocess"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [
+                "snakemake", "-n",
+                "-s", str(WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile"),
+                "--directory", tmpdir,
+                "--config",
+                f"samples={fixture_dir / 'samples.csv'}",
+                f"vcf={fixture_dir / 'raw.vcf'}",
+                f"ref_fai={fixture_dir / 'ref.fai'}",
+                f"callable_sites_bed={fixture_dir / 'callable_sites.bed'}",
+                "maf=0.6",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "maf must be between 0 and 0.5, got 0.6" in result.stdout + result.stderr
+
+
+@pytest.mark.dry_run
 def test_postprocess_module_runs_without_a_configfile():
     """The module's documented standalone command works from any directory."""
     fixture_dir = TEST_DATA_DIR / "postprocess"
