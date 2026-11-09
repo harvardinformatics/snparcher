@@ -177,15 +177,40 @@ This BED file serves two purposes:
 - **Site filtering**: The postprocess module intersects the VCF with the callable sites BED, retaining only variants in callable regions.
 - **A mask for other tools**: Analyses that need to know which sites were examined, such as SFS-based demographic inference or PSMC/MSMC, can use the BED as their mask.
 
-!!! tip "Use clam for diversity and divergence"
-    For π, dxy, FST and heterozygosity, run `clam stat` on your VCF with `results/callable_sites/callable_loci.zarr`.
-    clam knows how many samples have data at every site, which a yes/no BED cannot express.
-    clam's callable store does not yet apply the mappability filter, so until it does, statistics from `clam stat` include low-mappability sequence.
-
 !!! warning "Effective genome length"
     When you filter your VCF to callable sites, the effective length of the genome changes.
     If you started with a 1 Gb genome and 800 Mb passes callable sites filters, your denominator for diversity calculations is 800 Mb, not 1 Gb.
     Forgetting to adjust the denominator leads to underestimates of nucleotide diversity and biases in demographic inference.
+
+## Diversity and divergence with clam
+
+For π, dxy, FST and heterozygosity, `clam stat` can use a clam callable store instead of the BED.
+clam knows how many samples have data at every site, which a yes/no BED cannot express.
+
+`results/callable_sites/callable_loci.zarr` treats all samples as one population, because snpArcher does not know your populations.
+Use it directly only when your samples form a single population:
+
+```bash
+clam stat -o clam_stats -w 10000 -c results/callable_sites/callable_loci.zarr <vcf>
+```
+
+For statistics by population, such as dxy, FST, or π within each population, first build a callable store with your populations from `results/callable_sites/depths.zarr`, which holds every sample's depth:
+
+```bash
+clam loci -o callable_pops.zarr --samples pops.tsv \
+    -m <min_sample_depth> \
+    -d <clam_min_proportion> \
+    --max-mean-depth <clam_max_mean_depth> \
+    results/callable_sites/depths.zarr
+clam stat -o clam_stats -w 10000 -c callable_pops.zarr <vcf>
+```
+
+- Replace each `<name>` with its value in `results/callable_sites/coverage_thresholds.tsv`. These are the thresholds snpArcher applied, so the same sites are callable; clam only splits each site's count by population.
+- `pops.tsv` is tab-separated, with the header `sample_name` and `population`, and one line for each sample in `depths.zarr`: every BAM-backed sample not marked `exclude`. The thresholds hold only for that set of samples.
+- `clam stat` reads the populations from the store. The VCF must contain the same samples.
+- `-w` sets the window size in bp.
+
+clam's callable stores do not yet apply the mappability filter, so until they do, statistics from `clam stat` include low-mappability sequence.
 
 ## Sample filtering: QC-guided exclusion
 

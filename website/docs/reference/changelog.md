@@ -9,7 +9,8 @@
   A site is now coverage-callable when its depth summed across samples is not an outlier above the genome-wide median (or, with a numeric `max_depth`, not above that multiple of the median), and at least `fraction` of samples have `min_sample_depth` reads there.
   The old per-sample thresholds kept only a small fraction of the genome in realistic cohorts.
   Configs that still set the old keys skip callable sites, and postprocess with it, with a warning; the rest of the workflow runs.
-- **`callable_loci.zarr` now holds clam population counts** (samples with data per site) instead of per-sample masks, so it can be used directly with `clam stat`.
+- **`callable_loci.zarr` now holds clam population counts** (samples with data per site) instead of per-sample masks, with all samples as one population.
+  Use it with `clam stat` for a single population; for statistics by population, build a store with your populations from `depths.zarr` (see [Filtering](../explanation/filtering.md#diversity-and-divergence-with-clam)).
 
 ### Fixes
 
@@ -17,6 +18,7 @@
 - `fraction` now converts to an exact sample count: 0.55 of 200 samples requires 110, not 111.
 - GenMap no longer overwrites or deletes `results/reference/{name}.fa`.
 - Samples marked `exclude` in the sample metadata are left out of the coverage mask.
+- Sample IDs containing a dot keep their full name in `depths.zarr`. clam used to cut each name at the first dot, so `ind.1` was stored as `ind`, and `ind.1` with `ind.2` failed `clam_collect`.
 
 ## v2.0
 
