@@ -85,6 +85,12 @@ rule clam_collect:
         ),
     output:
         zarr=directory("results/callable_sites/depths.zarr"),
+    params:
+        # Without a samples file, clam names each sample by its file name up
+        # to the first dot, so sample_id ind.1 would become "ind".
+        samples=lambda wc, input: " ".join(
+            f"{sample} {d4}" for sample, d4 in zip(CALLABLE_SAMPLES, input.d4)
+        ),
     threads: 8
     conda:
         "../envs/clam.yaml"
@@ -94,10 +100,14 @@ rule clam_collect:
         "logs/clam_collect.txt"
     shell:
         """
+        SAMPLES=$(mktemp "{resources.tmpdir}/clam_samples_XXXXXX.tsv")
+        trap 'rm -f "$SAMPLES"' EXIT
+        printf 'sample_name\\tfile_path\\n' > "$SAMPLES"
+        printf '%s\\t%s\\n' {params.samples} >> "$SAMPLES"
         clam collect \
             -o {output.zarr} \
             -t {threads} \
-            {input.d4} \
+            --samples "$SAMPLES" \
             &> {log}
         """
 

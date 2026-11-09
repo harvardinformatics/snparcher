@@ -352,6 +352,63 @@ def test_collect_fastp_stats(request):
 
 
 @pytest.mark.unit
+def test_clam_collect_keeps_sample_ids_with_dots(request):
+    """depths.zarr names its columns by sample_id, dots included.
+
+    clam names samples by file name up to the first dot unless it is given
+    the names, so ind.1 and ind.2 both became "ind" and clam_collect failed.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals",
+            "results/bams/markdup",
+        )
+        result = smk.run(
+            target=[
+                f"results/callable_sites/depths/{s}.per-base.d4" for s in ("sample0", "sample1")
+            ],
+            samples=SAMPLES,
+        )
+        result.assert_success()
+
+        # Rename the samples, and their depth files, to IDs with dots.
+        depths_dir = Path(tmpdir) / "results" / "callable_sites" / "depths"
+        dotted = {"sample0": "ind.1", "sample1": "ind.2"}
+        for old, new in dotted.items():
+            (depths_dir / f"{old}.per-base.d4").rename(depths_dir / f"{new}.per-base.d4")
+        sheet_lines = SAMPLES.read_text().splitlines()
+        samples = Path(tmpdir) / "dotted_samples.csv"
+        samples.write_text("\n".join(
+            [sheet_lines[0]]
+            + [
+                line.replace(old, new, 1)
+                for line in sheet_lines[1:]
+                for old, new in dotted.items()
+                if line.startswith(f"{old},")
+            ]
+        ) + "\n")
+
+        result = smk.run(
+            target="results/callable_sites/depths.zarr",
+            samples=samples,
+            extra_args=["--allowed-rules", "clam_collect"],
+        )
+        result.print_log()
+        result.assert_success()
+
+        metadata = json.loads(
+            (Path(tmpdir) / "results/callable_sites/depths.zarr/zarr.json").read_text()
+        )["attributes"]["clam_metadata"]
+        assert metadata["column_names"] == ["ind.1", "ind.2"]
+
+
+@pytest.mark.unit
 def test_mosdepth(request):
     """Mosdepth for one sample."""
     no_conda = request.config.getoption("--no-conda")
