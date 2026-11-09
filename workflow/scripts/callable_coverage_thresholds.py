@@ -87,7 +87,7 @@ def summed_depth_histogram(depths_zarr: Path, mappable) -> tuple[np.ndarray, int
         rows = array.chunks[0]
         for lo in range(0, length, rows):
             hi = min(lo + rows, length)
-            summed = np.asarray(array[lo:hi, :], dtype=np.uint64).sum(axis=1)
+            summed = array[lo:hi, :].sum(axis=1, dtype=np.uint64)
             keep = summed > 0
             if mappable is not None:
                 if name not in mappable:
