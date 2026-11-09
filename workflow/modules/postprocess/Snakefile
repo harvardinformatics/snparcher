@@ -332,7 +332,6 @@ rule drop_indel_SNPs:
         vcf="results/postprocess/clean_snps_prefilter.vcf.gz",
         idx=_vcf_index("results/postprocess/clean_snps_prefilter.vcf.gz"),
     output:
-        keep_snps=temp("results/postprocess/keep_snp_positions.txt"),
         vcf="results/postprocess/clean_snps.vcf.gz",
         idx=_vcf_index("results/postprocess/clean_snps.vcf.gz"),
     params:
@@ -343,10 +342,6 @@ rule drop_indel_SNPs:
         "logs/postprocess/drop_indel_snps.txt"
     shell:
         """
-        # A plain CHROM/POS targets file needs no bgzip or index, so nothing
-        # is left behind beside the temp position list.
-        bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\n' {input.vcf} 2> {log} \
-            | awk 'length($3) == 1 {{print $1"\t"$2}}' > {output.keep_snps}
-        bcftools view -T {output.keep_snps} {input.vcf} -Oz -o {output.vcf} 2>> {log}
+        bcftools view -e 'strlen(REF)>1' {input.vcf} -Oz -o {output.vcf} 2> {log}
         bcftools index {params.index_args} {output.vcf} 2>> {log}
         """

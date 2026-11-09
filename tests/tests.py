@@ -2897,7 +2897,38 @@ def test_postprocess_filters_by_position_contig_and_scaffold(request):
         for rule in ("basic_filter", "update_bed", "strict_filter",
                      "subset_snps", "subset_indels", "drop_indel_snps"):
             assert (logs / f"{rule}.txt").exists(), rule
-        assert not list(pp.glob("keep_snp_positions*")), list(pp.glob("keep_snp_positions*"))
+
+
+@pytest.mark.full_run
+def test_postprocess_finishes_when_no_snp_survives(request):
+    """Only the indel at ctg1:1700 is callable, so clean_snps.vcf.gz is empty.
+
+    drop_indel_SNPs used to pass bcftools a plain-text list of SNP positions,
+    which bcftools rejects when empty ("Failed to read the targets").
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bed = Path(tmpdir) / "indel_only.bed"
+        bed.write_text("ctg1\t1690\t1710\n")
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile",
+        )
+        result = smk.run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "postprocess" / "config" / "config.yaml",
+            config_overrides={
+                **write_postprocess_inputs(tmpdir),
+                "callable_sites_bed": str(bed),
+            },
+        )
+        skip_if_arm64_packages_unavailable(result, "bcftools", "bedtools")
+        result.assert_success()
+
+        pp = Path(tmpdir) / "results" / "postprocess"
+        assert [f"{r[0]}:{r[1]}" for r in iter_vcf_records(pp / "filtered.vcf.gz")] == ["ctg1:1700"]
+        assert list(iter_vcf_records(pp / "clean_snps.vcf.gz")) == []
 
 
 @pytest.mark.full_run
