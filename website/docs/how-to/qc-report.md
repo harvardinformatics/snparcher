@@ -25,7 +25,7 @@ The top of the report shows a summary of:
 - **Average genome-wide depth** (based on read depth)
 
 !!! note
-    The QC report is based on a random, LD-pruned subset of approximately 100,000 biallelic SNPs, after removing indels, sites with MAF < 0.01, sites with > 75% missing data, and samples below the `min_depth` threshold.
+    The QC report is based on a random, LD-pruned subset of approximately 100,000 biallelic SNPs, after removing samples below the `min_depth` threshold, then indels, sites with MAF < 0.01, and sites with > 75% missing data. MAF and missingness are computed over the samples that remain.
     This subset provides a good approximation of dataset-wide patterns but is not a substitute for final analysis.
 
 ## Panels and what to look for
@@ -38,7 +38,7 @@ A principal component analysis colored by k-means cluster assignments (default k
 
 - Distinct clusters may reflect real population structure or batch effects.
 - Outlier samples far from any cluster warrant investigation: they could indicate contamination, sample swaps, or a different species.
-- The number of clusters (`modules.qc.clusters` in config) can be adjusted if the default does not match your expected population structure.
+- The number of clusters (`modules.qc.clusters` in config) can be adjusted if the default does not match your expected population structure. It is capped at the number of distinct sample positions in the PCA.
 
 ### Depth vs. principal components (Figure 2)
 

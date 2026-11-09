@@ -5,7 +5,8 @@ Produces an interactive QC dashboard (PCA, admixture, NJ tree, relatedness,
 mapping rate, heterozygosity, geographic maps) from a raw VCF.
 
 Can run standalone:
-    snakemake --snakefile workflow/modules/qc/Snakefile --config vcf=path/to/raw.vcf.gz fai=path/to/ref.fai
+    snakemake --snakefile workflow/modules/qc/Snakefile \
+        --config samples=path/to/samples.csv vcf=path/to/raw.vcf.gz fai=path/to/ref.fai
 
 Or imported by the main workflow via Snakemake's `module` directive
 (config is passed in, overriding the configfile below).
@@ -30,12 +31,14 @@ Config keys (flat):
 """
 
 import os
+import shlex
 import tempfile
 import pandas as pd
 
-# When imported via `module ... config: config`, this configfile is ignored.
-configfile: "config/config.yaml"
-
+# No configfile directive: it resolved against the working directory, so a
+# standalone run failed outside a project, or silently read the project's
+# main config. Pass --configfile workflow/modules/qc/config/config.yaml (as
+# run-qc.sh does) or --config; anything unset falls back to these defaults.
 _QC_DEFAULTS = {
     "samples": "config/samples.csv",
     "sample_metadata": "",
@@ -96,6 +99,14 @@ def _get_coords_input(wildcards):
     return {}
 
 
+def _exclude_scaffolds_arg(value):
+    """bcftools -t argument that drops the comma-separated scaffolds, or ''."""
+    names = [name.strip() for name in str(value or "").split(",") if name.strip()]
+    if not names:
+        return ""
+    return "-t " + shlex.quote("^" + ",".join(names))
+
+
 def _load_contig_map(path):
     """Load the QC contig map and validate the required columns."""
     contig_map = pd.read_table(path, sep="\t")
@@ -122,15 +133,19 @@ rule contig_map:
     output:
         map="results/qc/contig_map.tsv",
     run:
-        dffai = pd.read_table(input.fai, sep="\t", header=None, usecols=[0], names=["original_contig"])
+        # FASTA IDs end at the first whitespace, so the first field is the
+        # contig name however the FAI is delimited.
+        with open(input.fai) as handle:
+            contigs = [line.split()[0] for line in handle if line.strip()]
+        dffai = pd.DataFrame({"original_contig": contigs})
         if dffai.empty:
             raise ValueError(f"Reference FAI is empty: {input.fai}")
 
-        all_numeric = pd.to_numeric(dffai["original_contig"], errors="coerce").notnull().all()
-        if all_numeric:
-            dffai["plink_contig"] = [f"qcctg{i}" for i in range(1, len(dffai) + 1)]
-        else:
-            dffai["plink_contig"] = dffai["original_contig"]
+        # PLINK rejects or reinterprets standard chromosome names: X needs sex
+        # information, Y/MT/chrM and numbers above --autosome-num are invalid,
+        # and chr1 becomes 1. Neutral names avoid all of it; the dashboard and
+        # ADMIXTURE only need the mapping to be consistent.
+        dffai["plink_contig"] = [f"qcctg{i}" for i in range(1, len(dffai) + 1)]
 
         dffai["admixture_id"] = range(1, len(dffai) + 1)
         dffai.to_csv(output.map, sep="\t", index=False)
@@ -341,23 +356,23 @@ rule subsample_snps:
     conda:
         "envs/subsample_snps.yml"
     params:
-        chr_ex=config["exclude_scaffolds"],
+        exclude_arg=_exclude_scaffolds_arg(config["exclude_scaffolds"]),
     log:
         "logs/qc/subsample_snps.txt",
     shell:
         """
-        ## Remove filtered sites, retain only biallelic SNPs
-        ## Also remove MAF < 0.01, >75% missing, indels, ref=N
-        if [ -z "{params.chr_ex}" ]
-        then
-            bcftools view -S {input.samps} -v snps -m2 -M2 -f .,PASS \
-                -e 'AF==1 | AF==0 | AF<0.01 | ALT="*" | F_MISSING > 0.75 | TYPE~"indel" | ref="N"' \
-                {input.vcf} -O z -o {output.filtered} &> {log}
-        else
-            bcftools view -S {input.samps} -t ^{params.chr_ex} -v snps -m2 -M2 -f .,PASS \
-                -e 'AF==1 | AF==0 | AF<0.01 | ALT="*" | F_MISSING > 0.75 | TYPE~"indel" | ref="N"' \
-                {input.vcf} -O z -o {output.filtered} &> {log}
-        fi
+        ## Keep unfiltered sites for the samples that passed the depth filter,
+        ## then retain biallelic SNPs with MAF >= 0.01 (either allele can be
+        ## the minor one) and <= 75% missing.
+        ## The site filters must see only those samples: bcftools applies -e
+        ## before -S, and the caller's INFO/AF covers every sample, so AF is
+        ## recomputed after subsetting. F_MISSING is computed from the
+        ## genotypes present, which are the kept samples' by then.
+        bcftools view -S {input.samps} {params.exclude_arg} -f .,PASS -Ou {input.vcf} 2> {log} \
+            | bcftools +fill-tags -Ou -- -t AF 2>> {log} \
+            | bcftools view -v snps -m2 -M2 \
+                -e 'AF==1 | AF==0 | AF<0.01 | AF>0.99 | ALT="*" | F_MISSING > 0.75 | TYPE~"indel" | ref="N"' \
+                -O z -o {output.filtered} 2>> {log}
         bcftools index -f -c {output.filtered} >> {log} 2>&1
 
         # Figure out window size to get ~100k SNPs
@@ -367,7 +382,7 @@ rule subsample_snps:
         # If < 150k SNPs, take all; otherwise prune
         if [[ $SITES -gt 1 ]]
         then
-            bcftools +prune -w $SITES -n 1 -N rand -O z -o {output.pruned} {output.filtered} >> {log} 2>&1
+            bcftools +prune -w $SITES -n 1 -N rand --random-seed 42 -O z -o {output.pruned} {output.filtered} >> {log} 2>&1
         else
             bcftools view -O z -o {output.pruned} {output.filtered} >> {log} 2>&1
         fi
@@ -399,10 +414,10 @@ rule prepare_plink_inputs:
 
         with open(input.fai) as src, open(output.fai, "w") as dst:
             for line in src:
-                fields = line.rstrip("\n").split("\t")
+                fields = line.split()
                 if fields:
                     fields[0] = rename_map.get(fields[0], fields[0])
-                dst.write("\t".join(fields) + "\n")
+                    dst.write("\t".join(fields) + "\n")
 
         with tempfile.NamedTemporaryFile(
             "w",
@@ -461,11 +476,24 @@ rule plink:
         "logs/qc/plink.txt",
     shell:
         """
-        plink2 --vcf {input.vcf} --pca 10 --out {params.prefix} \
+        # Drop sparse samples first, so the number of PCs can follow the
+        # number of samples left: plink2 cannot compute more than samples - 1.
+        plink2 --vcf {input.vcf} --out {params.prefix} \
             --vcf-half-call missing \
             --mind {params.max_sample_missingness} \
-            --allow-extra-chr --autosome-num 95 --make-bed --make-king square \
-            --const-fid --bad-freqs &> {log}
+            --allow-extra-chr --autosome-num 95 --make-bed \
+            --const-fid &> {log}
+        N=$(wc -l < {output.fam})
+        if [ "$N" -lt 3 ]; then
+            echo "ERROR: QC needs at least 3 samples, but $N remain after the" \
+                "depth and missingness filters (modules.qc.min_depth," \
+                "modules.qc.max_sample_missingness)." | tee -a {log} >&2
+            exit 1
+        fi
+        PCS=$(( N - 1 < 10 ? N - 1 : 10 ))
+        plink2 --bfile {params.prefix} --out {params.prefix} \
+            --pca $PCS --make-king square \
+            --allow-extra-chr --autosome-num 95 --bad-freqs &>> {log}
         plink --vcf {input.vcf} --out {params.prefix} \
             --vcf-half-call missing \
             --mind {params.max_sample_missingness} \
@@ -500,21 +528,26 @@ rule admixture:
     output:
         admix3="results/qc/plink.3.Q",
         admix2="results/qc/plink.2.Q",
-    params:
-        outdir=lambda wc, input: os.path.dirname(input.bed),
     log:
         "logs/qc/admixture.txt",
     conda:
         "envs/admixture.yml"
     shell:
         """
-        cp {input.bim_fixed} {input.bim} 2> {log}
+        # ADMIXTURE needs integer chromosome codes and writes its results to
+        # the working directory. Give it a private directory holding the
+        # integer-coded .bim, rather than overwriting plink.bim (an upstream
+        # output) and moving files out of the workflow root.
+        WORK=$(mktemp -d results/qc/admixture_XXXXXX)
+        trap 'rm -rf "$WORK"' EXIT
+        ln -s "$(realpath {input.bed})" "$WORK/plink.bed"
+        ln -s "$(realpath {input.fam})" "$WORK/plink.fam"
+        cp {input.bim_fixed} "$WORK/plink.bim"
 
-        admixture {input.bed} 2 &>> {log}
-        admixture {input.bed} 3 &>> {log}
+        (cd "$WORK" && admixture plink.bed 2 && admixture plink.bed 3) &> {log}
 
-        mv plink.2.* {params.outdir} &>> {log}
-        mv plink.3.* {params.outdir} &>> {log}
+        mv "$WORK/plink.2.Q" {output.admix2}
+        mv "$WORK/plink.3.Q" {output.admix3}
         """
 
 
@@ -523,6 +556,9 @@ rule generate_coords_file:
     Generate coordinates file from sample metadata (lat/long columns).
     Only runs when metadata with lat/long is available.
     """
+    input:
+        # Rebuild when the metadata changes; the rule only runs when it is set.
+        metadata=lambda wc: config["sample_metadata"] or [],
     output:
         coords="results/qc/coords.txt",
     run:
@@ -561,6 +597,7 @@ rule qc_dashboard:
     params:
         qc_dir="results/qc",
         clusters=config["clusters"],
+        min_depth=config["min_depth"],
         google_api_key=config["google_api_key"],
         has_qc_report=_has_qc_report(),
     output:
