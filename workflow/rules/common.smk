@@ -1082,10 +1082,9 @@ if config.get("sample_metadata"):
         converters=SAMPLE_METADATA_CONVERTERS,
     )
     # pandas reads yes/no as strings and 1/0 as numbers; the schema expects
-    # booleans, so parse these columns before validating.
-    for col in ("exclude", "outgroup"):
-        if col in metadata_df.columns:
-            metadata_df[col] = _parse_bool_column(metadata_df[col], col)
+    # a boolean, so parse the column before validating.
+    if "exclude" in metadata_df.columns:
+        metadata_df["exclude"] = _parse_bool_column(metadata_df["exclude"], "exclude")
     validate(metadata_df, Path(workflow.basedir, "schemas/sample_metadata.schema.yaml"))
 
     # Validate sample_id values exist in the main sample sheet
@@ -1109,26 +1108,6 @@ def get_excluded_samples():
     if metadata_df is None or "exclude" not in metadata_df.columns:
         return []
     return metadata_df.loc[metadata_df["exclude"], "sample_id"].tolist()
-
-
-def get_included_samples():
-    """Return list of sample_ids NOT marked for exclusion."""
-    excluded = set(get_excluded_samples())
-    return [s for s in SAMPLES_ALL if s not in excluded]
-
-
-def get_outgroup_samples():
-    """Return list of sample_ids where outgroup=True. Empty list if no metadata."""
-    if metadata_df is None or "outgroup" not in metadata_df.columns:
-        return []
-    return metadata_df.loc[metadata_df["outgroup"], "sample_id"].tolist()
-
-
-def get_ingroup_samples():
-    """Return list of sample_ids that are not outgroup and not excluded."""
-    excluded = set(get_excluded_samples())
-    outgroup = set(get_outgroup_samples())
-    return [s for s in SAMPLES_ALL if s not in excluded and s not in outgroup]
 
 
 # --- Debug banner ---
