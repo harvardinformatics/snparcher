@@ -104,6 +104,10 @@ Applies when `variant_calling.tool` is `parabricks`.
 Interval-based parallelization settings.
 See [Parallelization](../explanation/parallelization.md) for background.
 
+The interval lists are built once per project, in `results/intervals/`.
+Changing these settings later, or the number of samples, does not rebuild them.
+To apply new values, delete `results/intervals/db/` (GenomicsDB shards) or `results/intervals/gvcf/` (per-sample calling intervals) before the next run.
+
 | Key | Type | Default | Constraints | Description |
 |-----|------|---------|-------------|-------------|
 | `intervals.enabled` | boolean | `true` | | Enable interval-based parallelization for GATK. When `false`, GATK runs whole-genome HaplotypeCaller and single-pass GenomicsDBImport. |
