@@ -5,7 +5,9 @@ def get_reference_type():
         return "url"
     if Path(source).exists():
         return "local"
-    if re.fullmatch(r"GC[AF]_\d+(\.\d+)?", source):
+    # The version is required: the download rule reads the FASTA from
+    # ncbi_dataset/data/{source}/, and NCBI names that directory with it.
+    if re.fullmatch(r"GC[AF]_\d+\.\d+", source):
         return "accession"
     if Path(REF_FILES["ref"]).exists():
         # Already prepared, so the source is never read again.
@@ -21,7 +23,8 @@ if REF_TYPE == "invalid":
     def invalid_reference_source(wildcards):
         raise WorkflowError(
             f"reference.source '{config['reference']['source']}' is not an existing file, "
-            "a URL, or an NCBI assembly accession (GCA_ or GCF_, e.g. GCF_000002315.6). "
+            "a URL, or an NCBI assembly accession with its version (GCA_ or GCF_, "
+            "e.g. GCF_000002315.6). "
             "Relative paths are resolved from the working directory."
         )
 
