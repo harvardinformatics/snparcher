@@ -143,6 +143,39 @@ def test_external_bam_staging_and_indexing(request):
 
 
 @pytest.mark.unit
+def test_bcftools_names_samples_by_sample_id(request):
+    """bcftools mpileup names samples by the BAMs' read-group SM, and merges
+    BAMs that share one into a single sample. Two external BAMs with the same
+    SM must stay two samples, named by their sample_ids."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures("config", "data", "results/reference")
+
+        external_bam = FIXTURES_DIR / "results/bams/markdup/sample0.bam"  # SM:sample0
+        samples = tmpdir / "shared_sm_samples.csv"
+        samples.write_text(
+            "sample_id,input_type,input\n"
+            f"indA,bam,{external_bam}\n"
+            f"indB,bam,{external_bam}\n"
+        )
+        config = yaml.safe_load((FIXTURES_DIR / "config" / "config.yaml").read_text())
+        config["variant_calling"]["tool"] = "bcftools"
+        configfile = tmpdir / "bcftools_config.yaml"
+        configfile.write_text(yaml.safe_dump(config))
+
+        result = smk.run(target="call_variants", configfile=configfile, samples=samples)
+        result.print_log()
+        result.assert_success()
+
+        with gzip.open(tmpdir / "results/vcfs/raw.vcf.gz", "rt") as handle:
+            header = next(line for line in handle if line.startswith("#CHROM"))
+        assert header.rstrip("\n").split("\t")[9:] == ["indA", "indB"]
+
+
+@pytest.mark.unit
 def test_gvcfs(request):
     """Per-sample gVCF generation for one sample."""
     no_conda = request.config.getoption("--no-conda")

@@ -86,6 +86,10 @@ rule bcftools_call:
         max_depth=config["variant_calling"]["bcftools"]["max_depth"],
         ploidy=config["variant_calling"]["ploidy"],
         contig=lambda wc: get_bcftools_region_name(wc.region_id),
+        # "<bam> <sample_id>" pairs, in the order of input.bams.
+        bam_samples=lambda wc, input: " ".join(
+            f"{bam} {sample}" for bam, sample in zip(input.bams, SAMPLES_WITH_BAM)
+        ),
         index_args=BCFTOOLS_INDEX_ARGS,
     threads: 1
     conda:
@@ -96,8 +100,14 @@ rule bcftools_call:
         "logs/bcftools_call/{region_id}.txt"
     shell:
         """
+        # mpileup names samples by the BAMs' read-group SM, and merges BAMs
+        # that share one. -G assigns every read in each BAM to its sample_id.
+        READ_GROUPS=$(mktemp "{resources.tmpdir}/bcftools_read_groups_XXXXXX")
+        trap 'rm -f "$READ_GROUPS"' EXIT
+        printf '*\t%s\t%s\n' {params.bam_samples} > "$READ_GROUPS"
         bcftools mpileup \
             -f {input.ref} \
+            -G "$READ_GROUPS" \
             -q {params.min_mapq} \
             -Q {params.min_baseq} \
             -d {params.max_depth} \
