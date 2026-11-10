@@ -72,10 +72,6 @@ def scheduled_rule_present(output, rule):
     return f"rule {rule}:" in output or f"checkpoint {rule}:" in output
 
 
-def workflow_source(*parts):
-    return (WORKFLOW_DIR.joinpath(*parts)).read_text()
-
-
 def profile_resource_block(profile_dir, rule):
     config_path = Path(profile_dir) / "config.yaml"
     match = re.search(
@@ -97,20 +93,27 @@ def assert_profile_resource_scales_by_attempt(profile_dir, rule, key):
     assert re.search(rf"^    {re.escape(key)}: attempt\s*\*\s*\d+\n", block, re.M)
 
 
-def assert_gatk_rule_uses_profile_heap(source):
-    assert "--java-options '-Xmx{resources.mem_mb_reduced}m'" in source
-    assert "-Xmx3072m" not in source
-    assert "mem_mb=4096" not in source
+# A dry run prints a resource that is evaluated when the job runs (the
+# profile's "attempt * N" values) as <TBD>.
+RUNTIME_RESOURCE = "<TBD>"
 
 
-def assert_haplotypecaller_uses_explicit_bam_csi_index(source, expected_count):
-    assert "**get_indexed_final_bam_input(wildcards.sample)" in source
-    assert source.count("--read-index {input.bam_index}") == expected_count
+def command_lines(output, command):
+    lines = [line for line in output.splitlines() if command in line]
+    assert lines, f"no {command!r} command in the output"
+    return lines
 
 
-def assert_glnexus_rule_uses_profile_memory(source):
-    assert "glnexus_mem_gbytes=$(( {resources.mem_mb_reduced} / 1024 ))" in source
-    assert '--mem-gbytes "$glnexus_mem_gbytes"' in source
+def assert_java_heap_from_profile(output, command):
+    """The Java heap comes from the job's resources, not a fixed value."""
+    for line in command_lines(output, command):
+        assert f"--java-options '-Xmx{RUNTIME_RESOURCE}m'" in line, line
+
+
+def assert_haplotypecaller_reads_bam_csi(output):
+    """HaplotypeCaller is given the workflow-made CSI index explicitly."""
+    for line in command_lines(output, "gatk HaplotypeCaller"):
+        assert re.search(r"--read-index \S+\.bam\.csi", line), line
 
 
 def get_multistage_config_file():
@@ -1714,11 +1717,14 @@ def test_callable_sites_leaves_out_excluded_samples(request):
 
 
 @pytest.mark.dry_run
-def test_gatk_without_intervals_dry_run(request):
+@pytest.mark.parametrize("long_contig", [False, True])
+def test_gatk_without_intervals_dry_run(request, long_contig):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
         smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
         cfg = write_intervals_config(get_config_file(), tmpdir, enabled=False)
+        if long_contig:
+            cfg = write_long_contig_config(cfg, tmpdir, "gatk")
 
         result = smk.dry_run(
             target="call_variants",
@@ -1730,9 +1736,7 @@ def test_gatk_without_intervals_dry_run(request):
         output = result.stdout + result.stderr
         assert "gatk_haplotypecaller" in output
         assert "joint_genomics_db_import" in output
-
-        source = workflow_source("rules", "variant_calling", "gatk.smk")
-        assert_haplotypecaller_uses_explicit_bam_csi_index(source, expected_count=2)
+        assert_haplotypecaller_reads_bam_csi(output)
 
 
 @pytest.mark.full_run
@@ -1778,11 +1782,8 @@ def test_joint_genomicsdb_import_dry_run_uses_profile_heap_and_contig_merge_guar
         assert scheduled_rule_present(output, "joint_genomics_db_import")
         assert scheduled_rule_present(output, "joint_genotype_gvcfs")
         assert "-Xmx3072m" not in output
-
-        source = workflow_source("rules", "variant_calling", "joint_gvcf.smk")
-        assert_gatk_rule_uses_profile_heap(source)
-        assert "genomicsdb-merge-contigs-arg" in source
-        assert "--threshold {params.merge_contig_threshold}" in source
+        assert_java_heap_from_profile(output, "gatk GenomicsDBImport")
+        assert re.search(r"genomicsdb-merge-contigs-arg .*--threshold \d+", output)
         assert_profile_resource(
             WORKFLOW_PROFILE_DIR,
             "joint_genomics_db_import",
@@ -1811,12 +1812,8 @@ def test_interval_genomicsdb_import_dry_run_uses_profile_heap(request):
         output = result.stdout + result.stderr
         assert scheduled_rule_present(output, "gatk_genomics_db_import")
         assert "-Xmx3072m" not in output
-
-        source = workflow_source("rules", "variant_calling", "gatk_intervals.smk")
-        assert_gatk_rule_uses_profile_heap(source)
-        assert_haplotypecaller_uses_explicit_bam_csi_index(source, expected_count=1)
-        assert "genomicsdb-merge-contigs-arg" in source
-        assert "--threshold {params.merge_contig_threshold}" in source
+        assert_java_heap_from_profile(output, "gatk GenomicsDBImport")
+        assert re.search(r"genomicsdb-merge-contigs-arg .*--threshold \d+", output)
         assert_profile_resource(
             WORKFLOW_PROFILE_DIR,
             "gatk_genomics_db_import",
@@ -2074,9 +2071,8 @@ def test_deepvariant_dry_run(request):
         # the BAM's read-group SM.
         assert "--sample_name sample1 " in output
         assert "glnexus_joint" in output
-
-        source = workflow_source("rules", "variant_calling", "glnexus_gvcf.smk")
-        assert_glnexus_rule_uses_profile_memory(source)
+        assert f"glnexus_mem_gbytes=$(( {RUNTIME_RESOURCE} / 1024 ))" in output
+        assert '--mem-gbytes "$glnexus_mem_gbytes"' in output
         assert_profile_resource_scales_by_attempt(
             WORKFLOW_PROFILE_DIR,
             "glnexus_joint",
@@ -2165,11 +2161,12 @@ def test_gatk_long_contig_dry_run_uses_work_gvcfs_and_csi_archives(request):
         assert not scheduled_rule_present(output, "glnexus_joint")
         assert "results/gvcfs/work/sample0.g.vcf" in output
         assert "results/gvcfs/sample0.g.vcf.gz.csi" in output
-
-        source = workflow_source("rules", "variant_calling", "gatk_intervals.smk")
-        assert "INTERVAL_GVCF_PATTERN" in source
-        assert "results/interval_gvcfs/{sample}/{interval}.g.vcf" in source
-        assert "gatk IndexFeatureFile -I {output.gvcf}" in source
+        # Long-contig interval gVCFs are uncompressed, with a Tribble index, and
+        # the gathered VCF is indexed with IndexFeatureFile.
+        assert re.search(r"-O results/interval_gvcfs/sample0/\d+\.g\.vcf\s", output)
+        assert re.search(r"results/interval_gvcfs/sample0/\d+\.g\.vcf\.idx", output)
+        assert "gatk IndexFeatureFile -I results/vcfs/work/staged/" in output
+        assert_haplotypecaller_reads_bam_csi(output)
 
 
 @pytest.mark.dry_run
@@ -2228,7 +2225,7 @@ def test_bcftools_long_contig_dry_run_uses_csi_indexes(request):
         )
 
         result = smk.dry_run(
-            target="results/vcfs/regions/L000000.vcf.gz.csi",
+            target=["results/vcfs/regions/L000000.vcf.gz.csi", "results/vcfs/raw.vcf.gz.csi"],
             configfile=cfg,
             samples=FIXTURES_DIR / "config" / "samples.csv",
         )
@@ -2236,10 +2233,10 @@ def test_bcftools_long_contig_dry_run_uses_csi_indexes(request):
 
         output = result.stdout + result.stderr
         assert scheduled_rule_present(output, "bcftools_call")
+        assert scheduled_rule_present(output, "bcftools_concat_regions")
         assert "results/vcfs/regions/L000000.vcf.gz.csi" in output
         assert "bcftools index -f -c" in output
-        source = workflow_source("rules", "variant_calling", "bcftools.smk")
-        assert "tabix -p vcf" not in source
+        assert "tabix" not in output
 
 
 @pytest.mark.dry_run
@@ -2978,12 +2975,18 @@ def test_long_contig_multistage_interval_gather(request):
         assert "MAX_RECORDS_IN_RAM=22814" in gvcf_log_text
         assert "MAX_RECORDS_IN_RAM=20576" in vcf_log_text
 
-        source = workflow_source("rules", "variant_calling", "gatk_intervals.smk")
-        assert "picard SortVcf" in source
-        assert "O={output.gvcf}" in source
-        assert "O={output.vcf}" in source
-        assert "CREATE_INDEX=false" in source
-        assert "gatk GatherVcfs" not in source
+        # Picard echoes its arguments into the log. Each stage is sorted by
+        # SortVcf straight into the stage's output, and indexed afterwards by
+        # IndexFeatureFile rather than by SortVcf.
+        for log_text, output in (
+            (gvcf_log_text, "results/gvcfs/work/staged/sample1/r1/c0.g.vcf"),
+            (vcf_log_text, "results/vcfs/work/staged/r1/c0.vcf"),
+        ):
+            assert "picard.vcf.SortVcf done" in log_text
+            assert f"OUTPUT={output} " in log_text
+            assert "CREATE_INDEX=false" in log_text
+            assert "IndexFeatureFile" in log_text
+            assert "GatherVcfs" not in log_text
 
 
 # --- Metadata tests ---
@@ -3857,15 +3860,42 @@ def test_qc_disabled_no_rules(request):
             "QC rules should not appear when module is disabled"
 
 
-def test_qc_indexes_are_explicitly_csi():
+@pytest.mark.dry_run
+def test_qc_indexes_are_explicitly_csi(request):
     """QC writes CSI indexes explicitly so the module stays long-contig safe
-    without depending on the bcftools default index format."""
-    source = workflow_source("modules", "qc", "Snakefile")
-    assert source.count("bcftools index -f -c") == 2
-    assert not re.search(r"bcftools index (?!-f -c)", source)
-    # Declared index outputs match what the commands write.
-    assert source.count(".vcf.gz.csi") == 3
-    assert ".vcf.gz.tbi" not in source
+    without depending on the bcftools default index format.
+
+    A dry run prints shell commands but not the shell() calls inside run:
+    blocks, so prepare_plink_inputs is checked through its declared output
+    only; if its command wrote another index type, the job would fail.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(
+            Path(tmpdir),
+            use_conda=not no_conda,
+            snakefile=WORKFLOW_DIR / "modules" / "qc" / "Snakefile",
+        )
+        result = smk.dry_run(
+            target="all",
+            configfile=WORKFLOW_DIR / "modules" / "qc" / "config" / "config.yaml",
+            config_overrides={
+                "samples": str(TEST_DATA_DIR / "qc" / "samples.csv"),
+                "vcf": str(TEST_DATA_DIR / "qc" / "raw.vcf.gz"),
+                "fai": str(TEST_DATA_DIR / "qc" / "ref.fai"),
+                "qc_report": str(TEST_DATA_DIR / "qc" / "qc_report.tsv"),
+            },
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        index_args = re.findall(r"bcftools index (-f -c|\S+)", output)
+        assert index_args and set(index_args) == {"-f -c"}, index_args
+        # Every declared VCF index is CSI.
+        assert set(re.findall(r"\S+\.vcf\.gz\.(?:csi|tbi)", output)) == {
+            "results/qc/filtered.vcf.gz.csi",
+            "results/qc/plink_input.vcf.gz.csi",
+        }
 
 
 @pytest.mark.dry_run
