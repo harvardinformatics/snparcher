@@ -1,11 +1,12 @@
 # mapping.smk
 
 def bwa_mem_input(wildcards):
-    """Get input fastqs for alignment."""
+    """Get input fastqs, the reference and its BWA index for alignment."""
     return {
         "r1": f"results/filtered_fastqs/{wildcards.sample}/{wildcards.library}/{wildcards.input_unit}_1.fastq.gz",
         "r2": f"results/filtered_fastqs/{wildcards.sample}/{wildcards.library}/{wildcards.input_unit}_2.fastq.gz",
         **REF_FILES,
+        "bwa_idx": REF_BWA_IDX,
     }
 
 
