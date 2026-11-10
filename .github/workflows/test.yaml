@@ -123,16 +123,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Together the filters select every full-run test: core takes all
+        # that are not postprocess or qc.
         include:
           - group: core-1
-            filter: "not metadata and not postprocess and not qc"
+            filter: "not postprocess and not qc"
             split_group: 1
           - group: core-2
-            filter: "not metadata and not postprocess and not qc"
+            filter: "not postprocess and not qc"
             split_group: 2
           - group: core-3
-            filter: "not metadata and not postprocess and not qc"
+            filter: "not postprocess and not qc"
             split_group: 3
+          - group: postprocess
+            filter: "postprocess"
+            split_group: 0
           - group: qc
             filter: "qc"
             split_group: 0
