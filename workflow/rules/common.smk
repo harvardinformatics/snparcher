@@ -722,6 +722,15 @@ def raw_vcf_output(path):
     return temp(path) if APPLY_HARD_FILTERS else path
 
 
+# Outputs of the rule that writes the raw joint VCF (joint_genotype_gvcfs, or
+# concat_interval_vcfs with intervals). In long-contig mode it is an
+# uncompressed work VCF, which a compress rule turns into raw.vcf.gz.
+if LONG_CONTIG_MODE:
+    RAW_VCF_OUTPUT = {"vcf": temp(RAW_VCF_WORK), "idx": temp(RAW_VCF_WORK_INDEX)}
+else:
+    RAW_VCF_OUTPUT = {"vcf": raw_vcf_output(RAW_VCF), "idx": raw_vcf_output(RAW_VCF_INDEX)}
+
+
 # --- Sample lists ---
 
 SAMPLES_ALL = samples_df["sample_id"].unique().tolist()

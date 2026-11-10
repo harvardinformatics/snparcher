@@ -23,44 +23,60 @@ def deepvariant_input(wildcards):
     }
 
 
+# In long-contig mode DeepVariant writes uncompressed files, and
+# archive_deepvariant_gvcf compresses the gVCF with a CSI index; otherwise it
+# writes the archived gVCF directly.
 if LONG_CONTIG_MODE:
+    DEEPVARIANT_CALL_OUTPUT = {
+        "gvcf": temp("results/deepvariant/{sample}.g.vcf"),
+        "vcf": temp("results/deepvariant/{sample}.vcf"),
+    }
+else:
+    DEEPVARIANT_CALL_OUTPUT = {
+        "gvcf": "results/gvcfs/{sample}.g.vcf.gz",
+        "tbi": "results/gvcfs/{sample}.g.vcf.gz.tbi",
+        "vcf": temp("results/deepvariant/{sample}.vcf.gz"),
+        "vcf_tbi": temp("results/deepvariant/{sample}.vcf.gz.tbi"),
+    }
 
-    rule deepvariant_call:
-        input:
-            unpack(deepvariant_input),
-        output:
-            gvcf=temp("results/deepvariant/{sample}.g.vcf"),
-            vcf=temp("results/deepvariant/{sample}.vcf"),
-        params:
-            model_type=config["variant_calling"]["deepvariant"]["model_type"],
-        threads: config["variant_calling"]["deepvariant"]["num_shards"]
-        container:
-            "docker://google/deepvariant:1.10.0"
-        benchmark:
-            "benchmarks/deepvariant_call/{sample}.txt"
-        log:
-            "logs/deepvariant_call/{sample}.txt"
-        shell:
-            """
-            # Intermediate tfrecords can take tens of GB per sample. Keep them in
-            # a private directory under the working directory, which Apptainer
-            # binds (a custom tmpdir may not be), and remove it when the job ends.
-            WORK=$(mktemp -d "results/deepvariant/{wildcards.sample}.XXXXXX")
-            trap 'rm -rf "$WORK"' EXIT
-            # --sample_name overrides the BAM's read-group SM, which GLnexus
-            # would otherwise use for the sample's column.
-            /opt/deepvariant/bin/run_deepvariant \
-                --ref {input.ref} \
-                --reads {input.bam} \
-                --sample_name {wildcards.sample} \
-                --output_vcf {output.vcf} \
-                --output_gvcf {output.gvcf} \
-                --model_type {params.model_type} \
-                --num_shards {threads} \
-                --intermediate_results_dir "$WORK" \
-                &> {log}
-            """
 
+rule deepvariant_call:
+    input:
+        unpack(deepvariant_input),
+    output:
+        **DEEPVARIANT_CALL_OUTPUT,
+    params:
+        model_type=config["variant_calling"]["deepvariant"]["model_type"],
+    threads: config["variant_calling"]["deepvariant"]["num_shards"]
+    container:
+        "docker://google/deepvariant:1.10.0"
+    benchmark:
+        "benchmarks/deepvariant_call/{sample}.txt"
+    log:
+        "logs/deepvariant_call/{sample}.txt"
+    shell:
+        """
+        # Intermediate tfrecords can take tens of GB per sample. Keep them in
+        # a private directory under the working directory, which Apptainer
+        # binds (a custom tmpdir may not be), and remove it when the job ends.
+        WORK=$(mktemp -d "results/deepvariant/{wildcards.sample}.XXXXXX")
+        trap 'rm -rf "$WORK"' EXIT
+        # --sample_name overrides the BAM's read-group SM, which GLnexus
+        # would otherwise use for the sample's column.
+        /opt/deepvariant/bin/run_deepvariant \
+            --ref {input.ref} \
+            --reads {input.bam} \
+            --sample_name {wildcards.sample} \
+            --output_vcf {output.vcf} \
+            --output_gvcf {output.gvcf} \
+            --model_type {params.model_type} \
+            --num_shards {threads} \
+            --intermediate_results_dir "$WORK" \
+            &> {log}
+        """
+
+
+if LONG_CONTIG_MODE:
 
     rule archive_deepvariant_gvcf:
         input:
@@ -80,44 +96,4 @@ if LONG_CONTIG_MODE:
             """
             bcftools view -Oz -o {output.gvcf} {input.gvcf} 2> {log}
             bcftools index {params.index_args} {output.gvcf} 2>> {log}
-            """
-
-else:
-
-    rule deepvariant_call:
-        input:
-            unpack(deepvariant_input),
-        output:
-            gvcf="results/gvcfs/{sample}.g.vcf.gz",
-            tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
-            vcf=temp("results/deepvariant/{sample}.vcf.gz"),
-            vcf_tbi=temp("results/deepvariant/{sample}.vcf.gz.tbi"),
-        params:
-            model_type=config["variant_calling"]["deepvariant"]["model_type"],
-        threads: config["variant_calling"]["deepvariant"]["num_shards"]
-        container:
-            "docker://google/deepvariant:1.10.0"
-        benchmark:
-            "benchmarks/deepvariant_call/{sample}.txt"
-        log:
-            "logs/deepvariant_call/{sample}.txt"
-        shell:
-            """
-            # Intermediate tfrecords can take tens of GB per sample. Keep them in
-            # a private directory under the working directory, which Apptainer
-            # binds (a custom tmpdir may not be), and remove it when the job ends.
-            WORK=$(mktemp -d "results/deepvariant/{wildcards.sample}.XXXXXX")
-            trap 'rm -rf "$WORK"' EXIT
-            # --sample_name overrides the BAM's read-group SM, which GLnexus
-            # would otherwise use for the sample's column.
-            /opt/deepvariant/bin/run_deepvariant \
-                --ref {input.ref} \
-                --reads {input.bam} \
-                --sample_name {wildcards.sample} \
-                --output_vcf {output.vcf} \
-                --output_gvcf {output.gvcf} \
-                --model_type {params.model_type} \
-                --num_shards {threads} \
-                --intermediate_results_dir "$WORK" \
-                &> {log}
             """
