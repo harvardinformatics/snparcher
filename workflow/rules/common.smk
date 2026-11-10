@@ -539,6 +539,14 @@ if VARIANT_TOOL == "parabricks":
             "variant_calling.parabricks.container_image is required when variant_calling.tool='parabricks'."
         )
 
+# Every Sentieon rule exports SENTIEON_LICENSE from this setting, so an empty
+# value fails every Sentieon job, after the run has started.
+if VARIANT_TOOL == "sentieon" and not str(config["variant_calling"]["sentieon"]["license"]).strip():
+    raise ValueError(
+        "variant_calling.sentieon.license is required when variant_calling.tool='sentieon'. "
+        "Set it to your Sentieon license server (host:port) or license file path."
+    )
+
 samples_df["input_unit"] = (
     samples_df.groupby(["sample_id", "library_id"]).cumcount().add(1).map(lambda x: f"u{x}")
 )

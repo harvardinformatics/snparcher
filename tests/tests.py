@@ -523,6 +523,8 @@ def write_long_contig_config(base_config, out_dir, tool="gatk", mode="true"):
             'container_image: "/tmp/parabricks.sif"',
             1,
         )
+    if tool == "sentieon":
+        text = text.replace('license: ""', 'license: "licsrvr.example.org:8990"', 1)
 
     out_path = Path(out_dir) / f"config_{tool}_long_{mode}.yaml"
     out_path.write_text(text)
@@ -2439,6 +2441,62 @@ def test_parabricks_dry_run(request):
         output = result.stdout + result.stderr
         assert "parabricks_haplotypecaller" in output
         assert "concat_interval_vcfs" in output
+
+
+def write_sentieon_config(out_dir):
+    """Write a config for tool: sentieon with a licence server set (a dry run
+    never contacts it)."""
+    cfg = write_config_for_tool(get_config_file(), out_dir, "sentieon")
+    text = cfg.read_text()
+    assert 'license: ""' in text
+    cfg.write_text(text.replace('license: ""', 'license: "licsrvr.example.org:8990"', 1))
+    return cfg
+
+
+@pytest.mark.dry_run
+def test_sentieon_dry_run(request):
+    """tool: sentieon maps and dedups with Sentieon, and its insert-size QC
+    feeds the QC report. Nothing dry-ran this path, which could not be parsed
+    and pointed at a conda env file that did not exist."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_sentieon_config(tmpdir)
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs.csv")
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        for rule in (
+            "sentieon_map",
+            "sentieon_dedup_library",
+            "sentieon_bam_stats",
+            "parse_sentieon_stats",
+            "sentieon_haplotyper",
+        ):
+            assert scheduled_rule_present(output, rule), rule
+        for rule in ("bwa_mem", "markdup_library"):
+            assert not scheduled_rule_present(output, rule), rule
+        assert re.search(
+            r"rule combine_qc_metrics:\n    input: [^\n]*results/qc_metrics/sentieon/sample1\.json",
+            output,
+        )
+
+
+@pytest.mark.dry_run
+def test_sentieon_requires_license(request):
+    """Every Sentieon rule exports SENTIEON_LICENSE from the config, so an empty
+    licence fails every Sentieon job. It must stop the run at startup."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_config_for_tool(get_config_file(), tmpdir, "sentieon")
+        assert 'license: ""' in cfg.read_text()
+
+        result = smk.dry_run(target="all", configfile=cfg, samples=SAMPLES_DIR / "local_fastqs.csv")
+
+        assert not result.succeeded
+        assert "variant_calling.sentieon.license is required" in result.stdout + result.stderr
 
 
 @pytest.mark.dry_run
