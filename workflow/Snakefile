@@ -130,7 +130,9 @@ rule download_reads:
     """Download fastqs for all SRA samples."""
     input:
         [
-            f"results/fastqs/{record['sample_id']}/{record['library_id']}/{record['input_unit']}/{record['input']}_{read}.fastq.gz"
+            sra_fastq(
+                record["sample_id"], record["library_id"], record["input_unit"], record["input"], read
+            )
             for sample in SAMPLES_SRR
             for record in get_sample_srr_records(sample)
             for read in [1, 2]

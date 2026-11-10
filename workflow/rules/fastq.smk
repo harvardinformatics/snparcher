@@ -1,3 +1,9 @@
+def sra_fastq(sample, library, input_unit, accession, read):
+    """Path of a downloaded SRA FASTQ. With wildcard names as arguments, it is
+    download_sra's output pattern."""
+    return f"results/fastqs/{sample}/{library}/{input_unit}/{accession}_{read}.fastq.gz"
+
+
 def fastp_input(wildcards):
     """Get input fastqs for filtering."""
     sample_rows = get_sample_rows(wildcards.sample)
@@ -16,17 +22,8 @@ def fastp_input(wildcards):
     input_type = row["input_type"]
     
     if input_type == "srr":
-        accession = row["input"]
-        return {
-            "r1": (
-                f"results/fastqs/{wildcards.sample}/{wildcards.library}/"
-                f"{wildcards.input_unit}/{accession}_1.fastq.gz"
-            ),
-            "r2": (
-                f"results/fastqs/{wildcards.sample}/{wildcards.library}/"
-                f"{wildcards.input_unit}/{accession}_2.fastq.gz"
-            ),
-        }
+        unit = (wildcards.sample, wildcards.library, wildcards.input_unit, row["input"])
+        return {"r1": sra_fastq(*unit, 1), "r2": sra_fastq(*unit, 2)}
     elif input_type == "fastq":
         r1, r2 = row["input"].split(";")
         return {"r1": r1, "r2": r2}
@@ -36,10 +33,10 @@ def fastp_input(wildcards):
 
 rule download_sra:
     output:
-        r1=temp("results/fastqs/{sample}/{library}/{input_unit}/{accession}_1.fastq.gz"),
-        r2=temp("results/fastqs/{sample}/{library}/{input_unit}/{accession}_2.fastq.gz"),
+        r1=temp(sra_fastq("{sample}", "{library}", "{input_unit}", "{accession}", 1)),
+        r2=temp(sra_fastq("{sample}", "{library}", "{input_unit}", "{accession}", 2)),
     params:
-        outdir="results/fastqs/{sample}/{library}/{input_unit}",
+        outdir=os.path.dirname(sra_fastq("{sample}", "{library}", "{input_unit}", "{accession}", 1)),
         csra_census=Path(workflow.basedir) / "scripts" / "csra_expected_reads.awk",
     threads: 4
     conda:
