@@ -1033,8 +1033,35 @@ def test_v1_style_config_exits_with_migration_message(request):
         assert not result.succeeded
         output = result.stdout + result.stderr
         assert "Detected a v1-style snpArcher config" in output
-        assert "docs/v2-migration.md" in output
+        assert "reference/changelog/#config-key-mapping-v1-to-v2" in output
         assert "sentieon" in output
+
+
+@pytest.mark.dry_run
+def test_v2_config_without_variant_calling_block_is_not_v1(request):
+    """`intervals` is a v1 boolean but also a v2 block. A v2 config that sets
+    intervals and relies on the variant_calling defaults is not a v1 config."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        text, count = re.subn(
+            r"^variant_calling:\n(?:(?:  .*)?\n)*",
+            "",
+            get_config_file().read_text(),
+            flags=re.M,
+        )
+        assert count == 1 and "\nintervals:\n" in text
+        cfg = Path(tmpdir) / "config_no_variant_calling.yaml"
+        cfg.write_text(text)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        result.assert_success()
+        assert "Detected a v1-style snpArcher config" not in result.stdout + result.stderr
 
 
 @pytest.mark.dry_run
@@ -1169,6 +1196,72 @@ def test_gvcfs_target_explains_bcftools_has_no_gvcfs(request):
 
 
 @pytest.mark.dry_run
+def test_na_ids_stay_literal(request):
+    """pandas reads "NA" as a missing value by default. A library_id of "NA"
+    must stay its own library, not fall back to the sample_id and merge with
+    the sample's blank-library row; a sample_id of "NA" must stay a sample."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        sheet = Path(tmpdir) / "na_ids.csv"
+        sheet.write_text(
+            "sample_id,input_type,input,library_id,mark_duplicates\n"
+            "sample1,fastq,tests/data/fastq/sample1_1.fastq.gz;tests/data/fastq/sample1_2.fastq.gz,NA,true\n"
+            "sample1,fastq,tests/data/fastq/sample2_1.fastq.gz;tests/data/fastq/sample2_2.fastq.gz,,true\n"
+            "NA,fastq,tests/data/fastq/sample2_1.fastq.gz;tests/data/fastq/sample2_2.fastq.gz,,true\n"
+        )
+
+        result = smk.dry_run(
+            target="map_samples",
+            configfile=get_config_file(),
+            samples=sheet,
+        )
+        result.assert_success()
+
+        output = result.stdout + result.stderr
+        assert "results/bams/library/sample1/NA.bam" in output
+        assert "results/bams/library/sample1/sample1.bam" in output
+        assert "results/bams/raw/NA/NA/u1.bam" in output
+
+
+FQ1 = "tests/data/fastq/sample1_1.fastq.gz"
+FQ2 = "tests/data/fastq/sample1_2.fastq.gz"
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "rows, message",
+    [
+        ([f"fastq,{FQ1};{FQ2};{FQ2}"], "does not match"),
+        ([f"fastq,{FQ1}; {FQ2}"], "does not match"),
+        ([f"fastq,{FQ1};{FQ1}"], f"lists input '{FQ1}' more than once"),
+        ([f"fastq,{FQ1};{FQ2}", f"fastq,{FQ1};{FQ2}"], f"lists input '{FQ1}' more than once"),
+        (["srr,SRR000001", "srr,SRR000001"], "lists input 'SRR000001' more than once"),
+    ],
+    ids=["three-paths", "space", "r1-equals-r2", "repeated-pair", "repeated-srr"],
+)
+def test_malformed_or_repeated_inputs_rejected(request, rows, message):
+    """A FASTQ input must be exactly one R1;R2 pair, and no file or accession
+    may appear twice in a sample: a repeat would count its reads twice."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        sheet = Path(tmpdir) / "samples.csv"
+        sheet.write_text(
+            "sample_id,input_type,input\n" + "".join(f"sample1,{row}\n" for row in rows)
+        )
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=sheet,
+        )
+
+        assert not result.succeeded
+        assert message in result.stdout + result.stderr
+
+
+@pytest.mark.dry_run
 def test_multirow_same_library_dry_run(request):
     no_conda = request.config.getoption("--no-conda")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1188,6 +1281,52 @@ def test_multirow_same_library_dry_run(request):
         assert "merge_dedup_libraries" in output
         assert "input_unit=u1" in output
         assert "input_unit=u2" in output
+
+
+@pytest.mark.dry_run
+def test_dag_build_time_with_many_samples(request):
+    """Every DB-shard job lists every sample's gVCF, and the default shard count
+    is 7.5 per sample, so per-sample lookups that scanned the whole sheet made
+    building the job graph quadratic in samples. With 150 samples and 1,125
+    shards this dry run took about 155 s before those lookups were cached and
+    about 30 s after."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workdir = Path(tmpdir)
+        smk = SnakemakeRunner(workdir, use_conda=not no_conda)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals/gvcf",
+            "results/intervals/picard.interval_list",
+        )
+        n_samples, n_shards = 150, 1125
+        shard = FIXTURES_DIR / "results/intervals/db/0000-scattered.interval_list"
+        (workdir / "results/intervals/db").mkdir()
+        shard_lists = [f"results/intervals/db/{i:04d}-scattered.interval_list" for i in range(n_shards)]
+        for path in shard_lists:
+            (workdir / path).symlink_to(shard)
+        (workdir / "results/intervals/db/intervals.txt").write_text("\n".join(shard_lists) + "\n")
+        sheet = workdir / "many_samples.csv"
+        sheet.write_text(
+            "sample_id,input_type,input,library_id,mark_duplicates\n"
+            + "".join(
+                f"s{i},fastq,data/reads/Pop1_sample_{i % 5}_1.fq.gz;"
+                f"data/reads/Pop1_sample_{i % 5}_2.fq.gz,,true\n"
+                for i in range(n_samples)
+            )
+        )
+
+        start = time.monotonic()
+        result = smk.dry_run(
+            target="call_variants",
+            configfile=FIXTURES_DIR / "config" / "config.yaml",
+            samples=sheet,
+        )
+        elapsed = time.monotonic() - start
+        result.assert_success()
+        assert elapsed < 75, f"Dry run with {n_samples} samples took {elapsed:.0f} s"
 
 
 @pytest.mark.dry_run
@@ -1715,6 +1854,40 @@ def test_interval_genomicsdb_import_profile_heap_override_is_authoritative(reque
             "mem_mb_reduced",
             "12345",
         )
+
+
+@pytest.mark.dry_run
+@pytest.mark.parametrize(
+    "source, accepted",
+    [
+        ("tests/data/reference/test_genom.fa.gz", False),
+        ("/no/such/dir/test_genome.fa.gz", False),
+        ("GCF_000002315.6", True),
+        # NCBI unpacks it as GCF_000002315.6/, which the download rule can't find.
+        ("GCF_000002315", False),
+    ],
+)
+def test_reference_source_must_exist_or_be_an_accession(request, source, accepted):
+    """A mistyped local path, or an accession without its version, must fail
+    at startup, not be sent to NCBI or fail later inside the reference job."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        cfg = write_reference_source_config(get_config_file(), tmpdir, source=source)
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=cfg,
+            samples=get_samples_file(),
+        )
+
+        output = result.stdout + result.stderr
+        if accepted:
+            result.assert_success()
+            assert "datasets download genome accession" in output
+        else:
+            assert not result.succeeded
+            assert f"reference.source '{source}' is not an existing file" in output
 
 
 @pytest.mark.full_run
@@ -2798,6 +2971,73 @@ def test_minimal_metadata_dry_run(request):
             config_overrides={"sample_metadata": str(METADATA_DIR / "minimal_metadata.csv")},
         )
         result.assert_success()
+
+
+@pytest.mark.dry_run
+def test_metadata_accepts_yes_no_and_1_0(request):
+    """The docs allow yes/no and 1/0 for exclude. It must be parsed before
+    schema validation, which expects a boolean. A leftover outgroup column,
+    no longer used, is ignored."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        metadata = Path(tmpdir) / "metadata.csv"
+        metadata.write_text(
+            "sample_id,exclude,outgroup\n"
+            "sample1,yes,0\n"
+            "sample2,no,1\n"
+        )
+        numeric = Path(tmpdir) / "numeric_metadata.csv"
+        numeric.write_text("sample_id,exclude\nsample1,1\nsample2,0\n")
+
+        for path in (metadata, numeric):
+            result = smk.dry_run(
+                target="setup",
+                configfile=get_config_file(),
+                samples=get_samples_file(),
+                config_overrides={"sample_metadata": str(path)},
+            )
+            result.assert_success()
+
+
+@pytest.mark.dry_run
+def test_metadata_rejects_numbers_other_than_1_and_0(request):
+    """exclude=2 is a typo, not a yes: it must fail, not silently drop the
+    sample from postprocess and the coverage mask."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        metadata = Path(tmpdir) / "metadata.csv"
+        metadata.write_text("sample_id,exclude\nsample1,0\nsample2,2\n")
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+            config_overrides={"sample_metadata": str(metadata)},
+        )
+        assert not result.succeeded
+        assert "Invalid exclude value at row 3: 2" in result.stdout + result.stderr
+
+        # The postprocess module parses the column itself, for standalone runs.
+        fixture_dir = TEST_DATA_DIR / "postprocess"
+        standalone = subprocess.run(
+            [
+                "snakemake", "-n",
+                "-s", str(WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile"),
+                "--directory", tmpdir,
+                "--config",
+                f"samples={fixture_dir / 'samples.csv'}",
+                f"sample_metadata={metadata}",
+                f"vcf={fixture_dir / 'raw.vcf'}",
+                f"ref_fai={fixture_dir / 'ref.fai'}",
+                f"callable_sites_bed={fixture_dir / 'callable_sites.bed'}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert standalone.returncode != 0
+        assert "Invalid exclude value at row 3: 2" in standalone.stdout + standalone.stderr
 
 
 @pytest.mark.dry_run

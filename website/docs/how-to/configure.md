@@ -20,7 +20,7 @@ The `reference.source` field accepts:
 
 - A **local file path** to a FASTA (optionally gzipped)
 - A **URL** to a remote FASTA
-- A **GenBank or RefSeq accession** (e.g., `GCF_000002315.6`). snpArcher will download and index it automatically.
+- A **GenBank or RefSeq accession**, including its version (e.g., `GCF_000002315.6`). snpArcher will download and index it automatically.
 
 ## Choose a variant caller
 

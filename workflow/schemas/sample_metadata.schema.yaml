@@ -18,12 +18,6 @@ properties:
       If true, sample is excluded from postprocess output.
     default: false
 
-  outgroup:
-    type: boolean
-    description: >
-      If true, sample is treated as outgroup for MK analysis.
-    default: false
-
   lat:
     type: number
     description: Latitude for geographic QC plots.
