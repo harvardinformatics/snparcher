@@ -108,16 +108,15 @@ rule gatk_haplotypecaller_interval:
 
 rule concat_interval_gvcfs_stage:
     input:
-        gvcfs=get_interval_gvcf_stage_inputs,
+        vcfs=get_interval_gvcf_stage_inputs,
         tbis=get_interval_gvcf_stage_tbis,
     output:
-        gvcf=temp(STAGED_GVCF_PATTERN),
+        vcf=temp(STAGED_GVCF_PATTERN),
         idx=temp(get_vcf_index(STAGED_GVCF_PATTERN)),
     params:
         index_args=BCFTOOLS_INDEX_ARGS,
         picard_inputs=get_interval_gvcf_stage_picard_inputs,
         sortvcf_record_bytes=sortvcf_record_bytes(1),
-        long_mode=LONG_CONTIG_MODE,
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -125,27 +124,7 @@ rule concat_interval_gvcfs_stage:
     log:
         "logs/concat_interval_gvcfs/staged/{sample}/r{round}/c{chunk}.txt"
     shell:
-        """
-        if [ "{params.long_mode}" = "True" ]; then
-            # Keep half the heap's worth of records in RAM, at most Picard's
-            # default of 500,000 (see SORTVCF_RECORD_BYTES).
-            max_records=$(( {resources.mem_mb_reduced} * 1048576 / 2 / {params.sortvcf_record_bytes} ))
-            max_records=$(( max_records > 500000 ? 500000 : (max_records < 1 ? 1 : max_records) ))
-            picard SortVcf \
-                -Xmx{resources.mem_mb_reduced}m \
-                {params.picard_inputs} \
-                O={output.gvcf} \
-                TMP_DIR={resources.tmpdir} \
-                MAX_RECORDS_IN_RAM=$max_records \
-                CREATE_INDEX=false \
-                > {log} 2>&1
-            gatk IndexFeatureFile -I {output.gvcf} >> {log} 2>&1
-        else
-            bcftools concat -D -a -Ou {input.gvcfs} 2> {log} \
-                | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.gvcf} - 2>> {log}
-            bcftools index {params.index_args} {output.gvcf} 2>> {log}
-        fi
-        """
+        STAGED_GATHER_SHELL
 
 
 rule concat_interval_gvcfs:

@@ -148,14 +148,38 @@ def format_picard_vcf_inputs(files):
 # the heap, using this conservative per-record estimate. The heap is only known
 # when the job runs, so the division happens in the shell.
 SORTVCF_RECORD_BYTES = 2048
-
-
 SORTVCF_SAMPLE_BYTES = 250
 
 
 def sortvcf_record_bytes(n_samples):
     """Estimate the heap one SortVcf record with n_samples occupies."""
     return SORTVCF_RECORD_BYTES + SORTVCF_SAMPLE_BYTES * n_samples
+
+
+# One staged gather of {input.vcfs} into {output.vcf}, for gVCFs and VCFs
+# alike: picard SortVcf in long-contig mode, bcftools otherwise.
+if LONG_CONTIG_MODE:
+    STAGED_GATHER_SHELL = """
+        # Keep half the heap's worth of records in RAM, at most Picard's
+        # default of 500,000 (see SORTVCF_RECORD_BYTES).
+        max_records=$(( {resources.mem_mb_reduced} * 1048576 / 2 / {params.sortvcf_record_bytes} ))
+        max_records=$(( max_records > 500000 ? 500000 : (max_records < 1 ? 1 : max_records) ))
+        picard SortVcf \
+            -Xmx{resources.mem_mb_reduced}m \
+            {params.picard_inputs} \
+            O={output.vcf} \
+            TMP_DIR={resources.tmpdir} \
+            MAX_RECORDS_IN_RAM=$max_records \
+            CREATE_INDEX=false \
+            > {log} 2>&1
+        gatk IndexFeatureFile -I {output.vcf} >> {log} 2>&1
+        """
+else:
+    STAGED_GATHER_SHELL = """
+        bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
+            | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}
+        bcftools index {params.index_args} {output.vcf} 2>> {log}
+        """
 
 
 def get_final_stage_file(base_files, wc, path_builder):
@@ -284,7 +308,6 @@ rule concat_interval_vcfs_stage:
         index_args=BCFTOOLS_INDEX_ARGS,
         picard_inputs=get_interval_vcf_stage_picard_inputs,
         sortvcf_record_bytes=sortvcf_record_bytes(len(SAMPLES_ALL)),
-        long_mode=LONG_CONTIG_MODE,
     conda:
         "../../envs/gatk.yaml"
     benchmark:
@@ -292,27 +315,7 @@ rule concat_interval_vcfs_stage:
     log:
         "logs/concat_interval_vcfs/staged/r{round}/c{chunk}.txt"
     shell:
-        """
-        if [ "{params.long_mode}" = "True" ]; then
-            # Keep half the heap's worth of records in RAM, at most Picard's
-            # default of 500,000 (see SORTVCF_RECORD_BYTES).
-            max_records=$(( {resources.mem_mb_reduced} * 1048576 / 2 / {params.sortvcf_record_bytes} ))
-            max_records=$(( max_records > 500000 ? 500000 : (max_records < 1 ? 1 : max_records) ))
-            picard SortVcf \
-                -Xmx{resources.mem_mb_reduced}m \
-                {params.picard_inputs} \
-                O={output.vcf} \
-                TMP_DIR={resources.tmpdir} \
-                MAX_RECORDS_IN_RAM=$max_records \
-                CREATE_INDEX=false \
-                > {log} 2>&1
-            gatk IndexFeatureFile -I {output.vcf} >> {log} 2>&1
-        else
-            bcftools concat -D -a -Ou {input.vcfs} 2> {log} \
-                | bcftools sort -T {resources.tmpdir}/ -Oz -o {output.vcf} - 2>> {log}
-            bcftools index {params.index_args} {output.vcf} 2>> {log}
-        fi
-        """
+        STAGED_GATHER_SHELL
 
 
 rule concat_interval_vcfs:
