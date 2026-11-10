@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -83,6 +84,24 @@ class SnakemakeRunner:
 
             dest.symlink_to(src.resolve())
 
+    def copy_fixtures(self, *paths):
+        """Copy fixture paths into the workdir.
+
+        Use this for inputs the workflow deletes as temp() files: deleting
+        through a symlink would remove the tracked fixture itself.
+        """
+        for rel_path in paths:
+            src = FIXTURES_DIR / rel_path
+            if not src.exists():
+                raise FileNotFoundError(f"Fixture not found: {src}")
+
+            dest = self.workdir / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                shutil.copytree(src, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dest)
+
     def run(
         self,
         target,
@@ -139,6 +158,16 @@ class SnakemakeRunner:
 
         env = os.environ.copy()
         env.setdefault("XDG_CACHE_HOME", str(self.workdir / ".cache"))
+        # Snakemake requires a `singularity` binary whenever Apptainer is
+        # enabled, even for a dry run, and CI runners have none. A dry run only
+        # reads its version, so a stub that prints one is enough.
+        if "--use-apptainer" in cmd and "--dry-run" in cmd and not shutil.which("singularity"):
+            stub_dir = self.workdir / ".apptainer-stub"
+            stub_dir.mkdir(exist_ok=True)
+            stub = stub_dir / "singularity"
+            stub.write_text("#!/bin/sh\necho 'apptainer version 1.3.4'\n")
+            stub.chmod(0o755)
+            env["PATH"] = f"{stub_dir}{os.pathsep}{env['PATH']}"
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         return SnakemakeResult(result, self.workdir)
 

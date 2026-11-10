@@ -59,7 +59,7 @@ modules:
   postprocess:
     enabled: true
     filtering:
-      contig_size: 10000  # <-- exclude contigs smaller than this (bp)
+      contig_size: 10000  # <-- exclude contigs shorter than this (bp)
       maf: 0.01  # <-- minimum minor allele frequency
       missingness: 0.75  # <-- maximum fraction of missing genotypes per site
       exclude_scaffolds: "mtDNA,Y"  # <-- comma-separated scaffold names to remove
@@ -69,10 +69,10 @@ modules:
 
 | Filter | Default | Effect |
 |---|---|---|
-| `contig_size` | `10000` | SNPs on contigs/scaffolds this size or smaller are excluded. |
+| `contig_size` | `10000` | Sites on contigs/scaffolds shorter than this are excluded. |
 | `maf` | `0.01` | SNPs with minor allele frequency below this threshold are excluded. |
 | `missingness` | `0.75` | SNPs where more than this fraction of genotypes are missing are excluded. |
-| `exclude_scaffolds` | `"mtDNA,Y"` | SNPs on these scaffolds are excluded entirely. Comma-separated, no spaces. |
+| `exclude_scaffolds` | `"mtDNA,Y"` | SNPs on these scaffolds are excluded entirely. Comma-separated; spaces around names are ignored. |
 
 !!! tip
     For many organisms, you will want to exclude sex chromosomes and mitochondrial scaffolds.
@@ -82,7 +82,7 @@ modules:
 
 If callable sites are enabled (the default), the postprocess module automatically intersects the VCF with the callable sites BED file, restricting the clean VCF to regions that pass both coverage and mappability filters.
 
-If you disabled callable sites, the postprocess module will warn and skip this intersection step.
+If callable sites are disabled, or produce no BED for this cohort, the postprocess module is disabled with a warning.
 
 To configure callable sites thresholds, see [How to configure your run](configure.md#configure-callable-sites).
 
@@ -92,7 +92,7 @@ After postprocessing, the following files are produced in `results/postprocess/`
 
 | File | Description |
 |---|---|
-| `filtered.vcf.gz` | VCF after removing excluded samples and sites failing hard filters or with ref=N or AF=0. |
+| `filtered.vcf.gz` | Excluded samples removed; sites kept only if they passed the caller's filters, lie in `callable_sites_filtered.bed`, are biallelic, and pass the MAF and missingness thresholds. |
 | `clean_snps.vcf.gz` | Biallelic SNPs from the filtered VCF, after applying missingness, MAF, callable-site, and scaffold-exclusion filters. |
 | `clean_indels.vcf.gz` | Indels from the filtered VCF, after applying the same filters. |
 
@@ -139,10 +139,12 @@ Suppose you ran snpArcher on 50 bird samples, reviewed the [QC report](qc-report
       --snakefile /path/to/snpArcher/workflow/Snakefile \
       --directory /path/to/my_project \
       --use-conda \
+      --workflow-profile /path/to/snpArcher/workflow-profiles/default \
       --cores 8
     ```
 
-    Snakemake will only run the postprocessing steps, since the core pipeline outputs already exist.
+    Snakemake runs the postprocessing steps. It first rebuilds callable sites, because excluded samples are left out of the coverage mask, so mosdepth reruns on each remaining BAM.
+    Variant calling is not rerun.
 
 ## Next steps
 

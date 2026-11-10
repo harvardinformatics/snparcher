@@ -1,5 +1,4 @@
 from importlib.metadata import PackageNotFoundError, version
-import logging
 import os
 import platform
 import pwd
@@ -8,6 +7,7 @@ import socket
 import subprocess
 import sys
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +17,11 @@ from jsonschema import Draft202012Validator
 from snakemake.exceptions import WorkflowError
 from snakemake.logging import logger
 from snakemake.utils import validate
+
+# Plain Python shared by the workflow's rules, importable and unit-testable.
+sys.path.insert(0, str(Path(workflow.basedir) / "lib"))
+from booleans import parse_bool_column
+from staged_concat import final_stage_file, stage_inputs
 
 
 # --- Config defaults and validation ---
@@ -51,89 +56,19 @@ def set_defaults(cfg, defaults):
             set_defaults(cfg[key], value)
 
 
-DEFAULTS = {
-    "samples": "config/samples.csv",
-    "sample_metadata": "",
-    "reads": {
-        "mark_duplicates": True,
-    },
-    "variant_calling": {
-        "expected_coverage": "low",
-        "tool": "gatk",
-        "long_contig_mode": "auto",
-        "generate_filtered_vcf": True,
-        "ploidy": 2,
-        "gatk": {
-            "het_prior": 0.005,
-            "concat_batch_size": 250,
-            "concat_max_rounds": 20,
-        },
-        "sentieon": {
-            "license": "",
-        },
-        "bcftools": {
-            "min_mapq": 20,
-            "min_baseq": 20,
-            "max_depth": 250,
-        },
-        "deepvariant": {
-            "model_type": "WGS",
-            "num_shards": 8,
-        },
-        "parabricks": {
-            "container_image": "",
-            "num_gpus": 1,
-            "num_cpu_threads": 16,
-            "extra_args": "",
-        },
-    },
-    "intervals": {
-        "enabled": True,
-        "min_nmer": 500,
-        "num_gvcf_intervals": 50,
-        "db_scatter_factor": 0.15,
-        "min_contig_length": 0,
-        "db_max_intervals_per_shard": 200,
-        "db_max_contigs_per_shard": 200,
-    },
-    "callable_sites": {
-        "generate_bed_file": True,
-        "coverage": {
-            "enabled": True,
-            "fraction": 1.0,
-            "min_coverage": "auto",
-            "max_coverage": "auto",
-            "merge_distance": 100,
-        },
-        "mappability": {
-            "enabled": True,
-            "kmer": 150,
-            "min_score": 1,
-            "merge_distance": 100,
-        },
-    },
-    "modules": {
-        "qc": {
-            "enabled": False,
-            "clusters": 3,
-            "min_depth": 2,
-            "max_sample_missingness": 0.49,
-            "google_api_key": "",
-            "exclude_scaffolds": "",
-        },
-        "postprocess": {
-            "enabled": False,
-            "filtering": {
-                "contig_size": 10000,
-                "maf": 0.01,
-                "missingness": 0.75,
-                "exclude_scaffolds": "mtDNA,Y",
-                "split_by_type": True,
-                "keep_basic_filter": False,
-            },
-        },
-    },
-}
+def schema_defaults(schema):
+    """The defaults declared in a JSON schema, as a nested dict. Objects whose
+    properties have no defaults (such as reference) are left out, so a missing
+    required block still fails validation."""
+    defaults = {}
+    for key, prop in schema.get("properties", {}).items():
+        if prop.get("type") == "object" and "properties" in prop:
+            nested = schema_defaults(prop)
+            if nested:
+                defaults[key] = nested
+        elif "default" in prop:
+            defaults[key] = prop["default"]
+    return defaults
 
 
 GENOMICSDB_MERGE_CONTIG_THRESHOLD = 50
@@ -144,7 +79,6 @@ REMOVED_MODULES = ("mk", "trackhub")
 V1_CONFIG_MARKERS = (
     "final_prefix",
     "resource_config",
-    "intervals",
     "sentieon",
     "sentieon_lic",
     "remote_reads_prefix",
@@ -193,8 +127,10 @@ def detect_v1_config_markers(cfg):
     """Return legacy v1-style keys when config does not have the v2 block structure."""
     found = [key for key in V1_CONFIG_MARKERS if key in cfg]
 
-    if isinstance(cfg.get("remote_reads"), bool):
-        found.append("remote_reads")
+    # These were booleans in v1; in v2, `intervals` is a block of settings.
+    for key in ("remote_reads", "intervals"):
+        if isinstance(cfg.get(key), bool):
+            found.append(key)
 
     if not found or _config_has_v2_blocks(cfg):
         return []
@@ -233,6 +169,22 @@ def normalize_supported_config_aliases(cfg):
                 "Ignoring deprecated config key 'variant_calling.gatk.ploidy' because 'variant_calling.ploidy' is set."
             )
         gatk_cfg.pop("ploidy", None)
+
+
+def pop_replaced_coverage_keys(cfg):
+    """Remove the coverage thresholds that the summed-depth mask replaced.
+
+    Returns their full names. They only stop callable sites from running (see
+    CALLABLE_SITES_BLOCKED), so the rest of the workflow is unaffected.
+    """
+    callable_cfg = cfg.get("callable_sites")
+    coverage_cfg = callable_cfg.get("coverage") if isinstance(callable_cfg, dict) else None
+    if not isinstance(coverage_cfg, dict):
+        return []
+    replaced = [key for key in ("min_coverage", "max_coverage") if key in coverage_cfg]
+    for key in replaced:
+        coverage_cfg.pop(key)
+    return [f"callable_sites.coverage.{key}" for key in replaced]
 
 
 def remove_unsupported_module_blocks(cfg):
@@ -323,11 +275,14 @@ if v1_markers:
         "Detected a v1-style snpArcher config. "
         "This workflow expects the v2 config structure and will not auto-migrate v1 configs.\n"
         f"Legacy keys detected: {markers_text}\n"
-        "See docs/v2-migration.md for the v1 -> v2 mapping."
+        "See the v1 -> v2 key mapping at "
+        "https://snparcher.github.io/reference/changelog/#config-key-mapping-v1-to-v2"
     )
 
 normalize_supported_config_aliases(config)
+REPLACED_COVERAGE_KEYS = pop_replaced_coverage_keys(config)
 remove_unsupported_module_blocks(config)
+DEFAULTS = schema_defaults(yaml.safe_load(CONFIG_SCHEMA_PATH.read_text()))
 set_defaults(config, DEFAULTS)
 validate_config_with_warnings(config, CONFIG_SCHEMA_PATH)
 
@@ -370,58 +325,20 @@ def get_gatk_hard_filter_args():
 
 # --- Sample sheet loading and validation ---
 
-def _parse_mark_duplicates(values, default):
-    truthy = {"true", "t", "yes", "y", "1"}
-    falsy = {"false", "f", "no", "n", "0"}
-    parsed = []
-    invalid = []
-
-    for idx, value in values.items():
-        if pd.isna(value):
-            parsed.append(default)
-            continue
-
-        if isinstance(value, bool):
-            parsed.append(value)
-            continue
-
-        if isinstance(value, (int, float)):
-            if value == 1:
-                parsed.append(True)
-                continue
-            if value == 0:
-                parsed.append(False)
-                continue
-
-        value_str = str(value).strip().lower()
-        if value_str in truthy:
-            parsed.append(True)
-        elif value_str in falsy:
-            parsed.append(False)
-        else:
-            invalid.append((idx, value))
-
-    if invalid:
-        idx, value = invalid[0]
-        raise ValueError(
-            f"Invalid mark_duplicates value at row {idx + 2}: {value!r}. "
-            "Use true/false (or equivalent boolean values)."
-        )
-
-    return pd.Series(parsed, index=values.index, dtype=bool)
-
-
-SAMPLE_SHEET_DTYPES = {
-    "sample_id": "string",
-    "library_id": "string",
+# Read ID columns as plain text. pandas would otherwise read IDs such as "NA",
+# "null" or "None" as missing values; a library_id of "NA" would then fall
+# back to the sample_id and merge libraries the user declared separate.
+SAMPLE_SHEET_CONVERTERS = {
+    "sample_id": str,
+    "library_id": str,
 }
 
-SAMPLE_METADATA_DTYPES = {
-    "sample_id": "string",
+SAMPLE_METADATA_CONVERTERS = {
+    "sample_id": str,
 }
 
 
-samples_df = pd.read_csv(config["samples"], dtype=SAMPLE_SHEET_DTYPES)
+samples_df = pd.read_csv(config["samples"], converters=SAMPLE_SHEET_CONVERTERS)
 global_mark_duplicates = bool(config["reads"]["mark_duplicates"])
 
 if "library_id" not in samples_df.columns:
@@ -436,8 +353,9 @@ else:
 if "mark_duplicates" not in samples_df.columns:
     samples_df["mark_duplicates"] = global_mark_duplicates
 else:
-    samples_df["mark_duplicates"] = _parse_mark_duplicates(
+    samples_df["mark_duplicates"] = parse_bool_column(
         samples_df["mark_duplicates"],
+        "mark_duplicates",
         default=global_mark_duplicates,
     )
 
@@ -469,6 +387,18 @@ for sample_id, group in samples_df.groupby("sample_id"):
                 "Only one row is supported for bam/gvcf inputs."
             )
 
+    # A repeated FASTQ file or accession becomes a second input unit, and its
+    # reads would be counted twice.
+    seen_inputs = set()
+    for value, input_type in zip(group["input"], group["input_type"]):
+        for item in value.split(";") if input_type == "fastq" else [value]:
+            if item in seen_inputs:
+                raise ValueError(
+                    f"Sample '{sample_id}' lists input '{item}' more than once. "
+                    "Each FASTQ file or SRA accession may appear only once per sample."
+                )
+            seen_inputs.add(item)
+
 if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
     gvcf_samples = (
         samples_df[samples_df["input_type"] == "gvcf"]["sample_id"]
@@ -483,12 +413,40 @@ if VARIANT_TOOL in {"bcftools", "deepvariant", "parabricks"}:
             "Use 'gatk' or 'sentieon', or provide FASTQ/BAM inputs for all samples."
         )
 
+# Ploidies each caller can honor; callers not listed take any ploidy. bcftools
+# call and Parabricks HaplotypeCaller support only haploid and diploid calling,
+# and DeepVariant always calls diploid genotypes.
+SUPPORTED_PLOIDY = {"bcftools": (1, 2), "parabricks": (1, 2), "deepvariant": (2,)}
+if VARIANT_TOOL in SUPPORTED_PLOIDY:
+    supported = SUPPORTED_PLOIDY[VARIANT_TOOL]
+    ploidy = config["variant_calling"]["ploidy"]
+    if ploidy not in supported:
+        raise ValueError(
+            f"variant_calling.tool '{VARIANT_TOOL}' supports variant_calling.ploidy "
+            f"{' or '.join(map(str, supported))} only (got {ploidy})."
+        )
+
 if VARIANT_TOOL == "parabricks":
     image = config["variant_calling"]["parabricks"]["container_image"].strip()
     if not image:
         raise ValueError(
             "variant_calling.parabricks.container_image is required when variant_calling.tool='parabricks'."
         )
+
+# Every Sentieon rule exports SENTIEON_LICENSE from this setting, so an empty
+# value fails every Sentieon job, after the run has started.
+SENTIEON_LICENSE = config["variant_calling"]["sentieon"]["license"]
+if VARIANT_TOOL == "sentieon" and not str(SENTIEON_LICENSE).strip():
+    raise ValueError(
+        "variant_calling.sentieon.license is required when variant_calling.tool='sentieon'. "
+        "Set it to your Sentieon license server (host:port) or license file path."
+    )
+
+# HaplotypeCaller graph pruning (GATK and Parabricks): keep more of the
+# assembly graph when coverage is low.
+_LOW_COVERAGE = config["variant_calling"]["expected_coverage"] == "low"
+HC_MIN_PRUNING = 1 if _LOW_COVERAGE else 2
+HC_MIN_DANGLING = 1 if _LOW_COVERAGE else 4
 
 samples_df["input_unit"] = (
     samples_df.groupby(["sample_id", "library_id"]).cumcount().add(1).map(lambda x: f"u{x}")
@@ -586,7 +544,6 @@ if LONG_CONTIG_MODE and VARIANT_TOOL in {"sentieon", "parabricks"}:
 
 COMPRESSED_VCF_INDEX_SUFFIX = ".csi" if LONG_CONTIG_MODE else ".tbi"
 BCFTOOLS_INDEX_ARGS = "-f -c" if LONG_CONTIG_MODE else "-f -t"
-BCFTOOLS_WRITE_INDEX_FORMAT = "csi" if LONG_CONTIG_MODE else "tbi"
 
 
 def get_compressed_vcf_index(vcf):
@@ -649,6 +606,26 @@ APPLY_HARD_FILTERS = GATK_LINEAGE_CALLER and GENERATE_FILTERED_VCF
 FINAL_VCF = FILTERED_VCF if APPLY_HARD_FILTERS else RAW_VCF
 
 
+def raw_vcf_output(path):
+    """Declare the raw call set (or its index) as an output.
+
+    When hard filtering follows, filtered.vcf.gz carries every raw record
+    unchanged except FILTER, so the raw VCF is a temporary intermediate rather
+    than a second copy of the largest output. Otherwise the raw VCF is the
+    final call set and must persist, with its index.
+    """
+    return temp(path) if APPLY_HARD_FILTERS else path
+
+
+# Outputs of the rule that writes the raw joint VCF (joint_genotype_gvcfs, or
+# concat_interval_vcfs with intervals). In long-contig mode it is an
+# uncompressed work VCF, which a compress rule turns into raw.vcf.gz.
+if LONG_CONTIG_MODE:
+    RAW_VCF_OUTPUT = {"vcf": temp(RAW_VCF_WORK), "idx": temp(RAW_VCF_WORK_INDEX)}
+else:
+    RAW_VCF_OUTPUT = {"vcf": raw_vcf_output(RAW_VCF), "idx": raw_vcf_output(RAW_VCF_INDEX)}
+
+
 # --- Sample lists ---
 
 SAMPLES_ALL = samples_df["sample_id"].unique().tolist()
@@ -659,20 +636,52 @@ SAMPLES_NEED_ALIGNMENT = samples_df[
 SAMPLES_WITH_BAM = samples_df[
     samples_df["input_type"].isin(["srr", "fastq", "bam"])
 ]["sample_id"].unique().tolist()
-SAMPLES_WITH_FASTQ = samples_df[
-    samples_df["input_type"].isin(["srr", "fastq"])
-]["sample_id"].unique().tolist()
 SAMPLES_WITH_GVCF = samples_df[
     samples_df["input_type"] == "gvcf"
 ]["sample_id"].unique().tolist()
 
 CALLABLE_COVERAGE_REQUESTED = bool(config["callable_sites"]["coverage"]["enabled"])
+CALLABLE_MAPPABILITY_ENABLED = bool(config["callable_sites"]["mappability"]["enabled"])
+CALLABLE_GENERATE_BED_FILE = bool(config["callable_sites"]["generate_bed_file"])
+
+REPLACED_COVERAGE_KEYS_MESSAGE = (
+    " and ".join(REPLACED_COVERAGE_KEYS)
+    + " are no longer supported. The coverage mask now uses depth summed across "
+    "samples: set callable_sites.coverage.max_depth ('auto', or a multiple of the "
+    "median summed depth) and min_sample_depth (reads a sample needs at a site to "
+    "count toward fraction). See the callable sites section of the filtering docs."
+)
+
+# Replaced settings stop only callable sites, so a stale config still maps and
+# calls variants. Skipping all of callable sites, not just coverage, avoids
+# producing a mappability-only callable_sites.bed that looks like the real one.
+CALLABLE_SITES_BLOCKED = bool(REPLACED_COVERAGE_KEYS) and CALLABLE_COVERAGE_REQUESTED
+if CALLABLE_SITES_BLOCKED:
+    logger.warning(
+        REPLACED_COVERAGE_KEYS_MESSAGE
+        + " Callable sites will not be generated for this run; the rest of the "
+        "workflow is unaffected."
+    )
+    CALLABLE_COVERAGE_REQUESTED = False
+    CALLABLE_MAPPABILITY_ENABLED = False
+    CALLABLE_GENERATE_BED_FILE = False
+elif REPLACED_COVERAGE_KEYS:
+    logger.warning(
+        REPLACED_COVERAGE_KEYS_MESSAGE
+        + " They are ignored because callable_sites.coverage.enabled is false."
+    )
+
+
+def check_callable_sites_not_blocked():
+    """Fail a requested callable-sites target when replaced settings block it."""
+    if CALLABLE_SITES_BLOCKED:
+        raise WorkflowError(REPLACED_COVERAGE_KEYS_MESSAGE)
+
+
 CALLABLE_COVERAGE_STATS_ENABLED = CALLABLE_COVERAGE_REQUESTED and bool(SAMPLES_WITH_BAM)
 CALLABLE_COVERAGE_BED_ENABLED = (
     CALLABLE_COVERAGE_STATS_ENABLED and not bool(SAMPLES_WITH_GVCF)
 )
-CALLABLE_MAPPABILITY_ENABLED = bool(config["callable_sites"]["mappability"]["enabled"])
-CALLABLE_GENERATE_BED_FILE = bool(config["callable_sites"]["generate_bed_file"])
 
 if CALLABLE_COVERAGE_REQUESTED and SAMPLES_WITH_GVCF:
     gvcf_summary = ", ".join(SAMPLES_WITH_GVCF)
@@ -706,7 +715,8 @@ if CALLABLE_GENERATE_BED_FILE and not CALLABLE_BED_SOURCE_ENABLED:
     )
     CALLABLE_GENERATE_BED_FILE = False
 
-CALLABLE_FINAL_BED_ENABLED = CALLABLE_GENERATE_BED_FILE and CALLABLE_BED_SOURCE_ENABLED
+# Reset above when no source is enabled, so this implies a source.
+CALLABLE_FINAL_BED_ENABLED = CALLABLE_GENERATE_BED_FILE
 
 POSTPROCESS_ENABLED = bool(config["modules"]["postprocess"]["enabled"])
 if POSTPROCESS_ENABLED and not CALLABLE_FINAL_BED_ENABLED:
@@ -736,20 +746,30 @@ if (
 
 # --- Helper functions ---
 
+# The sample sheet is fixed once parsed. Input functions call these helpers for
+# every sample from every job, and the number of DB-shard jobs grows with the
+# sample count, so scanning the whole sheet on each call made building the job
+# graph quadratic in samples. Split the sheet by sample once and cache lookups.
+SAMPLE_ROWS = {
+    sample: rows for sample, rows in samples_df.groupby("sample_id", sort=False)
+}
+
+
 def get_sample_libraries(sample):
     """Get all library IDs for a sample."""
-    sample_rows = samples_df[samples_df["sample_id"] == sample]
-    return sample_rows["library_id"].drop_duplicates().tolist()
+    if sample not in SAMPLE_ROWS:
+        return []
+    return SAMPLE_ROWS[sample]["library_id"].drop_duplicates().tolist()
 
 
 def get_sample_rows(sample):
-    """Get all rows for a sample."""
-    sample_rows = samples_df[samples_df["sample_id"] == sample]
-    if sample_rows.empty:
+    """Get all rows for a sample. Callers must not modify the result."""
+    if sample not in SAMPLE_ROWS:
         raise ValueError(f"Sample '{sample}' not found in sample sheet")
-    return sample_rows
+    return SAMPLE_ROWS[sample]
 
 
+@cache
 def get_sample_scalar(sample, column):
     """Get a scalar metadata value that must be constant within a sample."""
     sample_rows = get_sample_rows(sample)
@@ -761,15 +781,11 @@ def get_sample_scalar(sample, column):
     return values[0]
 
 
-def get_sample_input_type(sample):
-    """Get sample input_type."""
-    return get_sample_scalar(sample, "input_type")
-
-
+@cache
 def get_sample_input_types(sample):
     """Get unique input_type values for a sample."""
     sample_rows = get_sample_rows(sample)
-    return sample_rows["input_type"].dropna().unique().tolist()
+    return tuple(sample_rows["input_type"].dropna().unique().tolist())
 
 
 def sample_has_input_type(sample, input_type):
@@ -849,6 +865,16 @@ def get_final_gvcf(sample):
     return get_archive_gvcf(sample)
 
 
+def get_gvcfs_target(wildcards):
+    """Input for the gvcfs target: every sample's final gVCF."""
+    if VARIANT_TOOL == "bcftools":
+        raise WorkflowError(
+            "variant_calling.tool 'bcftools' calls all samples together and writes no "
+            "per-sample gVCFs, so the gvcfs target is not available."
+        )
+    return [get_final_gvcf(sample) for sample in SAMPLES_ALL]
+
+
 def get_archive_gvcf(sample):
     """Return the durable, workflow-generated compressed gVCF path."""
     return f"results/gvcfs/{sample}.g.vcf.gz"
@@ -913,16 +939,6 @@ def get_joint_gvcf_indexes():
     return [get_vcf_index(gvcf) for gvcf in get_joint_gvcf_paths()]
 
 
-def get_glnexus_joint_gvcf_indexes():
-    """Return only compressed gVCF indexes needed before GLnexus can run."""
-    return [get_vcf_index(gvcf) for gvcf in get_joint_gvcf_paths()]
-
-
-def get_joint_gvcf_tbis():
-    """Backward-compatible alias for older rule code."""
-    return get_joint_gvcf_indexes()
-
-
 def write_joint_gvcf_mapfile(path):
     """Write a GenomicsDB sample-name map keyed by sample_id."""
     with open(path, "w") as handle:
@@ -932,39 +948,17 @@ def write_joint_gvcf_mapfile(path):
 
 # --- Sample metadata loading (optional) ---
 
-def _parse_bool_column(series, column_name):
-    """Parse a boolean column from metadata CSV, tolerating string representations."""
-    truthy = {"true", "t", "yes", "y", "1"}
-    falsy = {"false", "f", "no", "n", "0", ""}
-    parsed = []
-    for idx, value in series.items():
-        if pd.isna(value):
-            parsed.append(False)
-        elif isinstance(value, bool):
-            parsed.append(value)
-        elif isinstance(value, (int, float)):
-            parsed.append(bool(value))
-        else:
-            v = str(value).strip().lower()
-            if v in truthy:
-                parsed.append(True)
-            elif v in falsy:
-                parsed.append(False)
-            else:
-                raise ValueError(
-                    f"Invalid {column_name} value at row {idx + 2}: {value!r}. "
-                    "Use true/false (or equivalent boolean values)."
-                )
-    return pd.Series(parsed, index=series.index, dtype=bool)
-
-
 metadata_df = None
 
 if config.get("sample_metadata"):
     metadata_df = pd.read_csv(
         config["sample_metadata"],
-        dtype=SAMPLE_METADATA_DTYPES,
+        converters=SAMPLE_METADATA_CONVERTERS,
     )
+    # pandas reads yes/no as strings and 1/0 as numbers; the schema expects
+    # a boolean, so parse the column before validating.
+    if "exclude" in metadata_df.columns:
+        metadata_df["exclude"] = parse_bool_column(metadata_df["exclude"], "exclude")
     validate(metadata_df, Path(workflow.basedir, "schemas/sample_metadata.schema.yaml"))
 
     # Validate sample_id values exist in the main sample sheet
@@ -973,11 +967,6 @@ if config.get("sample_metadata"):
         raise ValueError(
             f"sample_metadata contains sample_id(s) not in the samples CSV: {sorted(unknown)}"
         )
-
-    # Parse boolean columns if present
-    for col in ("exclude", "outgroup"):
-        if col in metadata_df.columns:
-            metadata_df[col] = _parse_bool_column(metadata_df[col], col)
 
     # Warn about samples without metadata
     missing = set(samples_df["sample_id"]) - set(metadata_df["sample_id"])
@@ -993,26 +982,6 @@ def get_excluded_samples():
     if metadata_df is None or "exclude" not in metadata_df.columns:
         return []
     return metadata_df.loc[metadata_df["exclude"], "sample_id"].tolist()
-
-
-def get_included_samples():
-    """Return list of sample_ids NOT marked for exclusion."""
-    excluded = set(get_excluded_samples())
-    return [s for s in SAMPLES_ALL if s not in excluded]
-
-
-def get_outgroup_samples():
-    """Return list of sample_ids where outgroup=True. Empty list if no metadata."""
-    if metadata_df is None or "outgroup" not in metadata_df.columns:
-        return []
-    return metadata_df.loc[metadata_df["outgroup"], "sample_id"].tolist()
-
-
-def get_ingroup_samples():
-    """Return list of sample_ids that are not outgroup and not excluded."""
-    excluded = set(get_excluded_samples())
-    outgroup = set(get_outgroup_samples())
-    return [s for s in SAMPLES_ALL if s not in excluded and s not in outgroup]
 
 
 # --- Debug banner ---

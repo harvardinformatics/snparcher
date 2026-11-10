@@ -18,7 +18,7 @@ Required positional arguments:
 
 Optional arguments:
   --bam-stats        QC metrics TSV for the mapping-rate panel
-  --sample-metadata  Sample metadata CSV with optional exclude/outgroup/lat/long columns
+  --sample-metadata  Sample metadata CSV with optional lat/long columns
   --cores            Number of cores to pass to Snakemake (default: 4)
   -h, --help         Show this help message
 EOF

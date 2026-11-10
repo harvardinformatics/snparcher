@@ -30,14 +30,6 @@ tmp/
 slurm_logs/
 *_dryrun.txt
 
-# Test outputs
-.test/*/benchmarks/
-.test/*/logs/
-.test/*/results/
-.test/*/.snakemake/
-.test/trackhub/*.sizes
-.test/trackhub/out.log
-
 # Licenses and secrets
 *.lic
 

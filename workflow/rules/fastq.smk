@@ -1,3 +1,9 @@
+def sra_fastq(sample, library, input_unit, accession, read):
+    """Path of a downloaded SRA FASTQ. With wildcard names as arguments, it is
+    download_sra's output pattern."""
+    return f"results/fastqs/{sample}/{library}/{input_unit}/{accession}_{read}.fastq.gz"
+
+
 def fastp_input(wildcards):
     """Get input fastqs for filtering."""
     sample_rows = get_sample_rows(wildcards.sample)
@@ -16,17 +22,8 @@ def fastp_input(wildcards):
     input_type = row["input_type"]
     
     if input_type == "srr":
-        accession = row["input"]
-        return {
-            "r1": (
-                f"results/fastqs/{wildcards.sample}/{wildcards.library}/"
-                f"{wildcards.input_unit}/{accession}_1.fastq.gz"
-            ),
-            "r2": (
-                f"results/fastqs/{wildcards.sample}/{wildcards.library}/"
-                f"{wildcards.input_unit}/{accession}_2.fastq.gz"
-            ),
-        }
+        unit = (wildcards.sample, wildcards.library, wildcards.input_unit, row["input"])
+        return {"r1": sra_fastq(*unit, 1), "r2": sra_fastq(*unit, 2)}
     elif input_type == "fastq":
         r1, r2 = row["input"].split(";")
         return {"r1": r1, "r2": r2}
@@ -36,10 +33,10 @@ def fastp_input(wildcards):
 
 rule download_sra:
     output:
-        r1=temp("results/fastqs/{sample}/{library}/{input_unit}/{accession}_1.fastq.gz"),
-        r2=temp("results/fastqs/{sample}/{library}/{input_unit}/{accession}_2.fastq.gz"),
+        r1=temp(sra_fastq("{sample}", "{library}", "{input_unit}", "{accession}", 1)),
+        r2=temp(sra_fastq("{sample}", "{library}", "{input_unit}", "{accession}", 2)),
     params:
-        outdir="results/fastqs/{sample}/{library}/{input_unit}",
+        outdir=os.path.dirname(sra_fastq("{sample}", "{library}", "{input_unit}", "{accession}", 1)),
         csra_census=Path(workflow.basedir) / "scripts" / "csra_expected_reads.awk",
     threads: 4
     conda:
@@ -64,7 +61,15 @@ rule download_sra:
         # the rule's own `rm -rf <accession>` could delete another job's
         # in-flight download whenever two sample rows shared an accession.
         WORK=$(mktemp -d "{resources.tmpdir}/sra_{wildcards.accession}_XXXXXX")
-        trap 'rm -rf "$WORK"' EXIT
+        # Extracted and downloaded FASTQs land in OUT, beside the outputs so the
+        # final move is a rename, and only the declared pair leaves it. Files
+        # left in the output directory by an earlier attempt, such as the
+        # single-read {wildcards.accession}.fastq.gz, are never read again. Only
+        # this job writes OUT, so a leftover from a killed attempt is cleared.
+        OUT={params.outdir}/{wildcards.accession}_extract
+        rm -rf "$OUT"
+        mkdir -p "$OUT"
+        trap 'rm -rf "$WORK" "$OUT"' EXIT
 
         SEQ=0
         ALIGNED=0
@@ -190,14 +195,15 @@ rule download_sra:
                 # No alignment table: there is no reference to walk, so
                 # fasterq-dump's multi-threaded read of the SEQUENCE table is
                 # the right access pattern and sam-dump has no advantage.
+                # tee keeps fasterq-dump's messages in the log even when it fails
+                # and the trap removes WORK.
                 mkdir -p "$WORK/fasterq"
                 fasterq-dump "$SRA" \
-                    -O {params.outdir} \
+                    -O "$OUT" \
                     -e {threads} \
                     -t "$WORK/fasterq" \
-                    > "$WORK/fasterq-dump.log" 2>&1
-                cat "$WORK/fasterq-dump.log" >> {log}
-                pigz -p {threads} {params.outdir}/{wildcards.accession}*.fastq
+                    2>&1 | tee "$WORK/fasterq-dump.log" >> {log}
+                pigz -p {threads} "$OUT"/{wildcards.accession}*.fastq
 
                 # 2 x SEQ is not the right expectation here: fasterq-dump drops
                 # technical and zero-length reads, and a spot need not hold two
@@ -229,7 +235,7 @@ rule download_sra:
             ENA_NO_MD5=0
             while read -r url md5; do
                 [[ -n "$url" ]] || continue
-                dest={params.outdir}/$(basename "$url")
+                dest="$OUT/$(basename "$url")"
                 echo "Downloading: $url" >> {log}
                 if ! curl -fSL "$url" -o "$dest" >> {log} 2>&1; then
                     echo "ERROR: {wildcards.accession}: download failed for $url" >> {log}
@@ -262,6 +268,13 @@ rule download_sra:
             fi
         fi
         
+        # Move the pair into place; the aligned path already wrote it there. A
+        # missing mate is reported by the empty-output check below.
+        if [ "$ALIGNED" -eq 0 ]; then
+            [ ! -f "$OUT/{wildcards.accession}_1.fastq.gz" ] || mv "$OUT/{wildcards.accession}_1.fastq.gz" {output.r1}
+            [ ! -f "$OUT/{wildcards.accession}_2.fastq.gz" ] || mv "$OUT/{wildcards.accession}_2.fastq.gz" {output.r2}
+        fi
+
         # The previous test only asked whether the output files exist. That
         # passes for a pigz that compressed nothing and exited 0, for a
         # wall-killed extractor that left a partial FASTQ, and for silent read
@@ -279,7 +292,7 @@ rule download_sra:
         # carrying a single read, which pigz compresses alongside the pair;
         # samtools fastq writes the equivalent to -0/-s. They are counted so
         # that reads landing there are not mistaken for reads lost.
-        NORPHAN=$(count_reads {params.outdir}/{wildcards.accession}.fastq.gz)
+        NORPHAN=$(count_reads "$OUT/{wildcards.accession}.fastq.gz")
         NU=$(count_reads "$WORK/unpaired.fastq.gz")
         NS=$(count_reads "$WORK/singleton.fastq.gz")
 
@@ -385,8 +398,6 @@ rule collect_fastp_stats:
         unpack(collect_fastp_input),
     output:
         json="results/qc_metrics/fastp/{sample}.json",
-    log:
-        "logs/collect_fastp_stats/{sample}.txt"
     run:
         import json
         

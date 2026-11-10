@@ -116,7 +116,7 @@ Duplicated regions that are not properly resolved in the reference assembly crea
 When two paralogous regions are collapsed into one in the reference assembly, reads from both copies map to the same location, inflating depth and creating false heterozygous calls.
 The hallmark is a spike at frequency 0.5 in the SFS.
 
-snpArcher addresses this through coverage filtering (the callable sites module flags regions with depth > 2x the genome-wide mean), the QD hard filter, and SFS diagnostics.
+snpArcher addresses this through coverage filtering (the callable sites module masks sites whose summed depth is an outlier above the genome-wide median), the QD hard filter, and SFS diagnostics.
 See [filtering philosophy](filtering.md) for the full explanation of how these filters interact and how to assess whether they are sufficient.
 
 For organisms with recent whole-genome duplications (e.g., salmonids, many plant species), paralogy may require specialized approaches beyond what snpArcher provides.

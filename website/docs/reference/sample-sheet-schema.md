@@ -9,7 +9,7 @@ Validated at startup against `workflow/schemas/samples.schema.yaml`.
 |--------|------|-------------|-------------|
 | `sample_id` | string | 1-80 characters, pattern `^[A-Za-z0-9._-]+$` | Unique sample identifier. Used as the key across the entire workflow. |
 | `input_type` | string | `srr`, `fastq`, `bam`, `gvcf` | Type of input data for this row. |
-| `input` | string | Non-empty. For `fastq`, must contain a semicolon. | Input path, SRA accession, or semicolon-separated FASTQ pair. Interpretation depends on `input_type` (see below). |
+| `input` | string | Non-empty. For `fastq`, exactly two paths separated by one semicolon, with no spaces. | Input path, SRA accession, or semicolon-separated FASTQ pair. Interpretation depends on `input_type` (see below). |
 
 ## Optional columns
 
@@ -25,9 +25,9 @@ The meaning of the `input` column depends on `input_type`:
 | `input_type` | `input` interpretation | Multiple rows per sample | Notes |
 |--------------|----------------------|:------------------------:|-------|
 | `srr` | SRA run accession (e.g., `SRR12345678`) | yes | Each row represents one SRA run. FASTQ files are downloaded automatically. |
-| `fastq` | Semicolon-separated pair of FASTQ paths: `R1;R2` | yes | Paths can be absolute or relative to the working directory. Files must be gzipped (`.fastq.gz`). |
-| `bam` | Path to an aligned BAM file | no | Exactly one row per sample. The BAM is used directly (no alignment step). |
-| `gvcf` | Path to a gVCF file | no | Exactly one row per sample. Skips alignment and per-sample variant calling. |
+| `fastq` | Semicolon-separated pair of FASTQ paths: `R1;R2` | yes | Paths can be absolute or relative to the working directory, and must not contain spaces. Files must be gzipped (`.fastq.gz`). |
+| `bam` | Path to an aligned BAM file | no | Exactly one row per sample. The BAM is used directly (no alignment step). Output VCFs name the sample by `sample_id`, not the BAM's `SM`, except with `sentieon`, which needs `SM` to equal `sample_id`. With `gatk`, each BAM must have a single `SM`. |
+| `gvcf` | Path to a gVCF file | no | Exactly one row per sample. Skips alignment and per-sample variant calling. With `sentieon`, the sample name inside the gVCF must equal `sample_id`. |
 
 !!! warning "gVCF compatibility"
     `gvcf` input is only supported with the `gatk` and `sentieon` variant calling tools.
@@ -42,6 +42,7 @@ The rules are:
 - **`bam` and `gvcf`:** Exactly one row per `sample_id`.
 - **`input_type` consistency:** All rows for a given `sample_id` must have the same `input_type`.
 - **`mark_duplicates` consistency:** All rows for a given `sample_id` must have the same `mark_duplicates` value (or leave it blank on all rows).
+- **No repeated inputs:** A FASTQ file or SRA accession may appear only once per `sample_id`, since a repeat would count its reads twice.
 - **`library_id`:** Rows with the same `library_id` are treated as the same library (e.g., multiple lanes). Rows with different `library_id` values are treated as different libraries. Within each `(sample_id, library_id)` group, rows are assigned ordinal input units (`u1`, `u2`, ...) internally.
 
 ## Boolean parsing
@@ -64,7 +65,7 @@ Additional columns beyond those listed below are permitted (the schema allows `a
 | Column | Type | Required | Default | Constraints | Used by |
 |--------|------|:--------:|---------|-------------|---------|
 | `sample_id` | string | yes | | Must match a `sample_id` in the main samples CSV. Pattern `^[A-Za-z0-9._-]+$`. | All modules |
-| `exclude` | boolean | no | `false` | Boolean-like (same parsing as `mark_duplicates`). | Postprocess: excluded samples are removed from filtered VCFs. |
+| `exclude` | boolean | no | `false` | Boolean-like (same parsing as `mark_duplicates`). | Postprocess: excluded samples are removed from filtered VCFs. Callable sites: excluded samples are left out of the coverage mask, so changing exclusions rebuilds it. |
 | `lat` | number | no | | -90 to 90 | QC: latitude for geographic map panels. |
 | `long` | number | no | | -180 to 180 | QC: longitude for geographic map panels. |
 

@@ -40,8 +40,8 @@ An optional key is also accepted at the top level:
 |-----|------|---------|----------------|-------------|
 | `variant_calling.expected_coverage` | string | `"low"` | `low`, `high` | Expected sequencing coverage regime. |
 | `variant_calling.tool` | string | `"gatk"` | `gatk`, `sentieon`, `bcftools`, `deepvariant`, `parabricks` | Variant caller to use. |
-| `variant_calling.ploidy` | integer | `2` | >= 1 | Ploidy of the organism. |
-| `variant_calling.generate_filtered_vcf` | boolean | `true` | `true`, `false` | Produce `results/vcfs/filtered.vcf.gz` (raw calls annotated with the GATK hard-filter FILTER column) as a default output. Applies only to GATK-family callers (`gatk`, `sentieon`, `parabricks`); ignored with a warning for `bcftools`/`deepvariant`. When `false`, hard filtering is skipped entirely and the raw VCF becomes the final call set consumed by the postprocess/qc modules and the `call_variants` target. |
+| `variant_calling.ploidy` | integer | `2` | >= 1 | Ploidy of the organism. `bcftools` and `parabricks` support 1 or 2; `deepvariant` supports 2 only. |
+| `variant_calling.generate_filtered_vcf` | boolean | `true` | `true`, `false` | Produce `results/vcfs/filtered.vcf.gz` (raw calls annotated with the GATK hard-filter FILTER column) as a default output. Applies only to GATK-family callers (`gatk`, `sentieon`, `parabricks`); ignored with a warning for `bcftools`/`deepvariant`. When `false`, hard filtering is skipped entirely and the raw VCF becomes the final call set consumed by the postprocess/qc modules and the `call_variants` target. When `true`, `raw.vcf.gz` is a temporary intermediate: `filtered.vcf.gz` holds every raw record, with FILTER set. |
 | `variant_calling.long_contig_mode` | boolean or `"auto"` | `"auto"` | `true`, `false`, `"auto"` | Use CSI-capable (and, for DeepVariant, GLnexus-based) paths for references with contigs longer than the Tabix coordinate limit (~512 Mb). `"auto"` inspects the reference `.fai` when available while building the DAG. Enabling it switches VCF/gVCF indexes to `.csi`. Because GATK cannot read a CSI-indexed compressed VCF, GATK steps (including hard filtering) run on uncompressed work VCFs and the results are compressed and CSI-indexed afterwards. |
 
 !!! note "Deprecated alias: `variant_calling.gatk.ploidy`"
@@ -66,7 +66,7 @@ Applies when `variant_calling.tool` is `sentieon`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `variant_calling.sentieon.license` | string | `""` | Sentieon license server address or license file path. Required at runtime when `tool` is `sentieon`. |
+| `variant_calling.sentieon.license` | string | `""` | Sentieon license server address or license file path. Required when `tool` is `sentieon`: startup stops if it is empty. |
 
 ### `variant_calling.bcftools`
 
@@ -81,6 +81,7 @@ Applies when `variant_calling.tool` is `bcftools`.
 ### `variant_calling.deepvariant`
 
 Applies when `variant_calling.tool` is `deepvariant`.
+DeepVariant runs from the `google/deepvariant` container image, so Snakemake must run with `--use-apptainer`.
 
 | Key | Type | Default | Allowed values | Description |
 |-----|------|---------|----------------|-------------|
@@ -102,6 +103,10 @@ Applies when `variant_calling.tool` is `parabricks`.
 
 Interval-based parallelization settings.
 See [Parallelization](../explanation/parallelization.md) for background.
+
+The interval lists are built once per project, in `results/intervals/`.
+Changing these settings later, or the number of samples, does not rebuild them.
+To apply new values, delete `results/intervals/db/` (GenomicsDB shards) or `results/intervals/gvcf/` (per-sample calling intervals) before the next run.
 
 | Key | Type | Default | Constraints | Description |
 |-----|------|---------|-------------|-------------|
@@ -126,9 +131,10 @@ Callable-sites BED generation settings.
 | Key | Type | Default | Constraints | Description |
 |-----|------|---------|-------------|-------------|
 | `callable_sites.coverage.enabled` | boolean | `true` | | Enable coverage-based callable site detection. |
-| `callable_sites.coverage.fraction` | number | `1.0` | 0 to 1 | Fraction of samples that must meet coverage thresholds at a site for it to be called "callable". |
-| `callable_sites.coverage.min_coverage` | number or `"auto"` | `"auto"` | >= 0 or `"auto"` | Minimum per-sample depth threshold. `"auto"` computes the threshold from the depth distribution. |
-| `callable_sites.coverage.max_coverage` | number or `"auto"` | `"auto"` | >= 0 or `"auto"` | Maximum per-sample depth threshold. `"auto"` computes the threshold from the depth distribution. |
+| `callable_sites.coverage.min_sample_depth` | integer | `1` | >= 1 | Reads a sample needs at a site to count as having data there. |
+| `callable_sites.coverage.fraction` | number | `0.25` | 0 to 1 | Fraction of samples that must have data (at least `min_sample_depth` reads) at a site for it to be callable. |
+| `callable_sites.coverage.max_depth` | number or `"auto"` | `"auto"` | >= 1 or `"auto"` | Upper bound on depth summed across samples. `"auto"` excludes sites whose summed depth is an outlier above the genome-wide median (see `max_depth_k`); a number sets the bound to that multiple of the median, e.g. `1.5`. |
+| `callable_sites.coverage.max_depth_k` | number | `4` | > 0 | With `max_depth: auto`, how many robust standard deviations (square-root scale) above the median summed depth the cutoff sits. |
 | `callable_sites.coverage.merge_distance` | integer | `100` | >= 0 | Merge callable regions within this many bases of each other. |
 
 ### `callable_sites.mappability`
@@ -160,8 +166,8 @@ See the [Modules](modules.md) reference for full details.
 | Key | Type | Default | Constraints | Description |
 |-----|------|---------|-------------|-------------|
 | `modules.postprocess.enabled` | boolean | `false` | | Enable the postprocessing/filtering module. |
-| `modules.postprocess.filtering.contig_size` | integer | `10000` | >= 0 | Exclude SNPs on contigs with length equal to or smaller than this value (bp). |
-| `modules.postprocess.filtering.maf` | number | `0.01` | 0 to 1 | Minimum minor allele frequency. Sites below this threshold are excluded. |
+| `modules.postprocess.filtering.contig_size` | integer | `10000` | >= 0 | Exclude sites on contigs shorter than this value (bp). Set to `0` to disable. |
+| `modules.postprocess.filtering.maf` | number | `0.01` | 0 to 0.5 | Minimum minor allele frequency. Sites below this threshold are excluded. |
 | `modules.postprocess.filtering.missingness` | number | `0.75` | 0 to 1 | Maximum fraction of samples with a missing genotype. Sites with a higher missing fraction are excluded. Set to 1 to disable. |
 | `modules.postprocess.filtering.exclude_scaffolds` | string | `"mtDNA,Y"` | | Comma-separated list of scaffold/contig names to exclude from filtered output. |
 | `modules.postprocess.filtering.split_by_type` | boolean | `true` | `true`, `false` | Also emit `clean_snps.vcf.gz` and `clean_indels.vcf.gz` (the strict-filtered VCF split by variant type). |
@@ -214,9 +220,10 @@ callable_sites:
   generate_bed_file: true
   coverage:
     enabled: true
-    fraction: 1.0
-    min_coverage: auto
-    max_coverage: auto
+    min_sample_depth: 1
+    fraction: 0.25
+    max_depth: auto
+    max_depth_k: 4
     merge_distance: 100
   mappability:
     enabled: true

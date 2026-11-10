@@ -2,7 +2,7 @@
 
 samples: "config/samples.csv"
 
-# Optional: per-sample metadata for modules (exclude, outgroup, lat, long, etc.)
+# Optional: per-sample metadata for modules (exclude, lat, long, etc.)
 # sample_metadata: "config/sample_metadata.csv"
 
 reference:
@@ -44,7 +44,6 @@ callable_sites:
   generate_bed_file: True
   coverage:
     enabled: true
-    stdev: 2
     merge_distance: 100
   mappability:
     enabled: true

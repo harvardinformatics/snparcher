@@ -1,13 +1,12 @@
 # mapping.smk
 
-from pathlib import Path
-
 def bwa_mem_input(wildcards):
-    """Get input fastqs for alignment."""
+    """Get input fastqs, the reference and its BWA index for alignment."""
     return {
         "r1": f"results/filtered_fastqs/{wildcards.sample}/{wildcards.library}/{wildcards.input_unit}_1.fastq.gz",
         "r2": f"results/filtered_fastqs/{wildcards.sample}/{wildcards.library}/{wildcards.input_unit}_2.fastq.gz",
         **REF_FILES,
+        "bwa_idx": REF_BWA_IDX,
     }
 
 
@@ -40,11 +39,13 @@ def merge_library_bams_input(wildcards):
     }
 
 
-def dedup_library_input(wildcards):
-    """Get input BAM for library-level duplicate marking."""
-    bam = f"results/bams/library/{wildcards.sample}/{wildcards.library}.bam"
+def _library_bams(sample, directory):
+    """One BAM per library of a sample, from results/bams/{directory}/."""
     return {
-        "bam": bam,
+        "bams": [
+            f"results/bams/{directory}/{sample}/{lib}.bam"
+            for lib in get_sample_libraries(sample)
+        ],
     }
 
 
@@ -55,13 +56,7 @@ def merge_dedup_libraries_input(wildcards):
             f"Sample '{wildcards.sample}' has mark_duplicates=False, "
             "but merge_dedup_libraries was requested."
         )
-    libraries = get_sample_libraries(wildcards.sample)
-    return {
-        "bams": [
-            f"results/bams/library_markdup/{wildcards.sample}/{lib}.bam"
-            for lib in libraries
-        ],
-    }
+    return _library_bams(wildcards.sample, "library_markdup")
 
 
 def merge_library_level_bams_input(wildcards):
@@ -71,10 +66,7 @@ def merge_library_level_bams_input(wildcards):
             f"Sample '{wildcards.sample}' has mark_duplicates=True, "
             "but merge_library_level_bams was requested."
         )
-    libraries = get_sample_libraries(wildcards.sample)
-    return {
-        "bams": [f"results/bams/library/{wildcards.sample}/{lib}.bam" for lib in libraries],
-    }
+    return _library_bams(wildcards.sample, "library")
 
 
 rule stage_external_bam:
@@ -85,24 +77,13 @@ rule stage_external_bam:
     log:
         "logs/stage_external_bam/{sample}.txt"
     run:
+        # Snakemake checks that the input exists, removes any previous output
+        # (dangling symlinks included) and creates the output and log
+        # directories before the job runs.
         src = Path(input.bam).resolve()
-        dest = Path(output.bam)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        Path(log[0]).parent.mkdir(parents=True, exist_ok=True)
-
-        if not src.exists():
-            raise FileNotFoundError(f"External BAM not found for sample {wildcards.sample}: {src}")
-
-        if dest.exists() or dest.is_symlink():
-            if dest.resolve() == src:
-                with open(log[0], "w") as handle:
-                    handle.write(f"External BAM already staged: {dest} -> {src}\n")
-                return
-            dest.unlink()
-
-        dest.symlink_to(src)
+        Path(output.bam).symlink_to(src)
         with open(log[0], "w") as handle:
-            handle.write(f"Staged external BAM: {dest} -> {src}\n")
+            handle.write(f"Staged external BAM: {output.bam} -> {src}\n")
 
 
 rule index_bam_csi:
@@ -131,7 +112,7 @@ if USE_SENTIEON:
             bam=temp("results/bams/raw/{sample}/{library}/{input_unit}.bam"),
         params:
             rg=get_read_group,
-            lic=config["variant_calling"]["sentieon"]["license"],
+            lic=SENTIEON_LICENSE,
         threads: 8
         conda:
             "../envs/sentieon.yaml"
@@ -149,13 +130,13 @@ if USE_SENTIEON:
 
     rule sentieon_dedup_library:
         input:
-            unpack(dedup_library_input),
+            bam="results/bams/library/{sample}/{library}.bam",
         output:
             bam=temp("results/bams/library_markdup/{sample}/{library}.bam"),
             score=temp("results/bams/library_markdup/{sample}/{library}_score.txt"),
             metrics=temp("results/bams/library_markdup/{sample}/{library}_metrics.txt"),
         params:
-            lic=config["variant_calling"]["sentieon"]["license"],
+            lic=SENTIEON_LICENSE,
         threads: 4
         conda:
             "../envs/sentieon.yaml"
@@ -181,13 +162,13 @@ if USE_SENTIEON:
             bam=lambda wc: get_final_bam(wc.sample),
             **REF_FILES,
         output:
-            insert="results/qc_metrics/sentieon/{sample}_insert_metrics.txt",
+            insert_metrics="results/qc_metrics/sentieon/{sample}_insert_metrics.txt",
             qd="results/qc_metrics/sentieon/{sample}_qd_metrics.txt",
             gc="results/qc_metrics/sentieon/{sample}_gc_metrics.txt",
             gc_summary="results/qc_metrics/sentieon/{sample}_gc_summary.txt",
             mq="results/qc_metrics/sentieon/{sample}_mq_metrics.txt",
         params:
-            lic=config["variant_calling"]["sentieon"]["license"],
+            lic=SENTIEON_LICENSE,
         threads: 4
         conda:
             "../envs/sentieon.yaml"
@@ -205,7 +186,7 @@ if USE_SENTIEON:
                 --algo MeanQualityByCycle {output.mq} \
                 --algo QualDistribution {output.qd} \
                 --algo GCBias --summary {output.gc_summary} {output.gc} \
-                --algo InsertSizeMetricAlgo {output.insert} \
+                --algo InsertSizeMetricAlgo {output.insert_metrics} \
                 2> {log}
             """
 
@@ -233,7 +214,7 @@ else:
 
     rule markdup_library:
         input:
-            unpack(dedup_library_input),
+            bam="results/bams/library/{sample}/{library}.bam",
         output:
             bam=temp("results/bams/library_markdup/{sample}/{library}.bam"),
         threads: 4

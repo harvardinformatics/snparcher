@@ -1,5 +1,4 @@
 import csv
-import shutil
 
 
 def load_admixture_map(map_file):
@@ -16,10 +15,6 @@ def load_admixture_map(map_file):
 
 def generate_mapping(map_file, bim_file, output_file):
     conversion_dict = load_admixture_map(map_file)
-
-    # Copy original bim file to a new file with ".orig" appended to its name
-    orig_bim_file = bim_file + ".orig"
-    shutil.copyfile(bim_file, orig_bim_file)
 
     # read bim file and replace the scaffold names with numbering 1:n (n = number of scaffolds)
     updated_lines = []

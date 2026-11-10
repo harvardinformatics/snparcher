@@ -1,9 +1,4 @@
 def parabricks_haplotypecaller_input(wildcards):
-    if sample_has_input_type(wildcards.sample, "gvcf"):
-        raise ValueError(
-            f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotypecaller"
-        )
-
     return {
         **get_indexed_final_bam_input(wildcards.sample),
         **REF_FILES,
@@ -20,8 +15,8 @@ rule parabricks_haplotypecaller:
         image=config["variant_calling"]["parabricks"]["container_image"],
         extra_args=config["variant_calling"]["parabricks"]["extra_args"],
         ploidy=config["variant_calling"]["ploidy"],
-        min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
-        min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
+        min_pruning=HC_MIN_PRUNING,
+        min_dangling=HC_MIN_DANGLING,
     threads: config["variant_calling"]["parabricks"]["num_cpu_threads"]
     resources:
         gpus=config["variant_calling"]["parabricks"]["num_gpus"]

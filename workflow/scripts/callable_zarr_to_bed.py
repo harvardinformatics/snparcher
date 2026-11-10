@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-Convert a clam per-sample callable Zarr into merged BED intervals.
+Convert a clam population-count callable Zarr into merged BED intervals.
+
+clam loci zeroes the count at every site that fails its thresholds, so a site
+is callable when any population count is non-zero.
 
 Example:
-    python scripts/callable_zarr_to_bed.py callable_masks.zarr callable.bed
-    python scripts/callable_zarr_to_bed.py callable_masks.zarr callable.bed --fraction 0.8
-    python scripts/callable_zarr_to_bed.py callable_masks.zarr callable.bed --merge-distance 100
+    python scripts/callable_zarr_to_bed.py callable_loci.zarr callable.bed
+    python scripts/callable_zarr_to_bed.py callable_loci.zarr callable.bed --merge-distance 100
 """
 
 from __future__ import annotations
 
 import argparse
-import math
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -23,25 +24,19 @@ import numpy as np
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Convert a clam --per-sample callable Zarr into BED intervals for sites "
-            "where at least a given fraction of samples are callable."
+            "Convert a clam population-count callable Zarr into BED intervals for "
+            "the sites clam marked callable."
         )
     )
     parser.add_argument(
         "callable_zarr",
         type=Path,
-        help="Path to a clam callable Zarr produced with `clam loci --per-sample`.",
+        help="Path to a clam callable Zarr produced by `clam loci` (without --per-sample).",
     )
     parser.add_argument(
         "output_bed",
         type=Path,
         help="Path to the output BED file.",
-    )
-    parser.add_argument(
-        "--fraction",
-        type=float,
-        default=1.0,
-        help="Minimum fraction of samples that must be callable at a site. Default: 1.0",
     )
     parser.add_argument(
         "--merge-distance",
@@ -58,11 +53,6 @@ def parse_args() -> argparse.Namespace:
 def die(message: str) -> int:
     print(f"error: {message}", file=sys.stderr)
     return 1
-
-
-def validate_fraction(fraction: float) -> None:
-    if not 0.0 <= fraction <= 1.0:
-        raise ValueError(f"--fraction must be between 0 and 1 inclusive, got {fraction}")
 
 
 def validate_merge_distance(merge_distance: int) -> None:
@@ -109,10 +99,10 @@ def get_clam_metadata(group: Any) -> dict[str, Any]:
 
 def validate_callable_metadata(metadata: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     loci_type = metadata.get("callable_loci_type")
-    if loci_type != "sample_masks":
-        if loci_type == "population_counts":
+    if loci_type != "population_counts":
+        if loci_type == "sample_masks":
             raise ValueError(
-                "This callable Zarr stores population counts. Re-run `clam loci` with "
+                "This callable Zarr stores per-sample masks. Re-run `clam loci` without "
                 "`--per-sample` and use that output instead."
             )
         if loci_type is None:
@@ -120,7 +110,9 @@ def validate_callable_metadata(metadata: dict[str, Any]) -> tuple[list[dict[str,
                 "Missing `callable_loci_type` in clam metadata. This may be a depth Zarr or "
                 "an unsupported older layout."
             )
-        raise ValueError(f"Unsupported callable_loci_type `{loci_type}`; expected `sample_masks`.")
+        raise ValueError(
+            f"Unsupported callable_loci_type `{loci_type}`; expected `population_counts`."
+        )
 
     contigs = metadata.get("contigs")
     if not isinstance(contigs, list):
@@ -160,8 +152,7 @@ def iter_true_runs(mask: np.ndarray) -> Iterable[tuple[int, int]]:
 def write_bed_intervals(
     group: Any,
     contigs: list[dict[str, Any]],
-    total_samples: int,
-    min_callable_samples: int,
+    total_columns: int,
     merge_distance: int,
     output_bed: Path,
 ) -> None:
@@ -186,9 +177,9 @@ def write_bed_intervals(
                     f"Contig `{name}` length mismatch: metadata says {expected_length}, "
                     f"array has {array.shape[0]} rows."
                 )
-            if array.shape[1] != total_samples:
+            if array.shape[1] != total_columns:
                 raise ValueError(
-                    f"Contig `{name}` sample count mismatch: metadata says {total_samples}, "
+                    f"Contig `{name}` column count mismatch: metadata says {total_columns}, "
                     f"array has {array.shape[1]} columns."
                 )
 
@@ -197,9 +188,8 @@ def write_bed_intervals(
             current_end = 0
 
             for offset in range(0, expected_length, row_chunk):
-                chunk = np.asarray(array[offset : offset + row_chunk, :], dtype=bool)
-                callable_counts = np.count_nonzero(chunk, axis=1)
-                passing = callable_counts >= min_callable_samples
+                chunk = np.asarray(array[offset : offset + row_chunk, :])
+                passing = chunk.sum(axis=1) > 0
 
                 for rel_start, rel_end in iter_true_runs(passing):
                     abs_start = offset + rel_start
@@ -218,65 +208,18 @@ def write_bed_intervals(
             if current_start is not None:
                 handle.write(f"{name}\t{current_start}\t{current_end}\n")
 
-def register_packbits_codec() -> None:
-    """Register a zarrs-compatible PackBits codec for zarr v3.
-
-    The clam tool (via zarrs/Rust) writes boolean arrays with a 'packbits'
-    array-to-bytes codec. The Python zarr library doesn't have this codec
-    registered by default, so we provide a compatible implementation here.
-    """
-    try:
-        from dataclasses import dataclass
-
-        from zarr.abc.codec import ArrayBytesCodec
-        from zarr.registry import register_codec
-
-        @dataclass(frozen=True)
-        class ZarrsPackBitsCodec(ArrayBytesCodec):
-            async def _decode_single(self, chunk_bytes, chunk_spec):
-                raw = np.frombuffer(chunk_bytes.as_numpy_array(), dtype=np.uint8)
-                total_elements = int(np.prod(chunk_spec.shape))
-                unpacked = np.unpackbits(raw)[:total_elements].astype(bool)
-                unpacked = unpacked.reshape(chunk_spec.shape)
-                return chunk_spec.prototype.nd_buffer.from_numpy_array(unpacked)
-
-            async def _encode_single(self, chunk_array, chunk_spec):
-                flat = chunk_array.as_numpy_array().astype(bool).ravel()
-                packed = np.packbits(flat)
-                return chunk_spec.prototype.buffer.from_bytes(packed.tobytes())
-
-            def compute_encoded_size(self, input_byte_length, chunk_spec):
-                total_elements = int(np.prod(chunk_spec.shape))
-                return (total_elements + 7) // 8
-
-            @classmethod
-            def from_dict(cls, data):
-                return cls()
-
-            def to_dict(self):
-                return {"name": "packbits"}
-
-        register_codec("packbits", ZarrsPackBitsCodec)
-    except ImportError:
-        pass
-
 def main() -> int:
     args = parse_args()
-    register_packbits_codec()
     try:
-        validate_fraction(args.fraction)
         validate_merge_distance(args.merge_distance)
         group = open_group(args.callable_zarr)
         metadata = get_clam_metadata(group)
         contigs, column_names = validate_callable_metadata(metadata)
-        total_samples = len(column_names)
-        min_callable_samples = math.ceil(args.fraction * total_samples)
 
         write_bed_intervals(
             group=group,
             contigs=contigs,
-            total_samples=total_samples,
-            min_callable_samples=min_callable_samples,
+            total_columns=len(column_names),
             merge_distance=args.merge_distance,
             output_bed=args.output_bed,
         )

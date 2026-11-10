@@ -3,16 +3,41 @@ def get_reference_type():
     source = config["reference"]["source"]
     if source.startswith(("http://", "https://", "ftp://")):
         return "url"
-    elif Path(source).exists() or source.startswith("/"):
+    if Path(source).exists():
         return "local"
-    else:
+    # The version is required: the download rule reads the FASTA from
+    # ncbi_dataset/data/{source}/, and NCBI names that directory with it.
+    if re.fullmatch(r"GC[AF]_\d+\.\d+", source):
         return "accession"
+    if Path(REF_FILES["ref"]).exists():
+        # Already prepared, so the source is never read again.
+        return "local"
+    return "invalid"
 
 
 REF_TYPE = get_reference_type()
 
 
-if REF_TYPE == "local":
+if REF_TYPE == "invalid":
+
+    def invalid_reference_source(wildcards):
+        raise WorkflowError(
+            f"reference.source '{config['reference']['source']}' is not an existing file, "
+            "a URL, or an NCBI assembly accession with its version (GCA_ or GCF_, "
+            "e.g. GCF_000002315.6). "
+            "Relative paths are resolved from the working directory."
+        )
+
+    # Fails while the job graph is built, and only for runs that need the
+    # reference; targets such as staging an external BAM still run.
+    rule prepare_reference:
+        input:
+            invalid_reference_source,
+        output:
+            ref="results/reference/{name}.fa.gz",
+
+
+elif REF_TYPE == "local":
 
     rule prepare_reference:
         output:

@@ -4,8 +4,6 @@ rule parse_bam_stats:
         flagstat="results/qc_metrics/bam/{sample}_flagstat.txt",
     output:
         json="results/qc_metrics/bam/{sample}.json",
-    log:
-        "logs/parse_bam_stats/{sample}.txt"
     run:
         import json
         
@@ -27,15 +25,26 @@ rule parse_bam_stats:
         total_sites = sum(num_sites)
         mean_depth = sum(d * n / total_sites for d, n in zip(depths, num_sites)) if total_sites > 0 else 0
         
-        # Parse flagstat
+        # Parse flagstat -O tsv: QC-passed count, QC-failed count, description.
+        flagstat = {}
         with open(input.flagstat) as f:
-            lines = f.readlines()
-        
-        total_reads = int(lines[0].split()[0])
-        num_dups = int(lines[4].split()[0])
-        num_mapped = int(lines[6].split()[0])
-        pct_mapped = float(lines[7].split()[0].strip("%")) if total_reads > 0 else 0
-        pct_proper_paired = float(lines[14].split()[0].strip("%")) if total_reads > 0 else 0
+            for line in f:
+                passed, _failed, description = line.rstrip("\n").split("\t")
+                flagstat[description] = passed
+
+        def flagstat_percent(description):
+            value = flagstat[description].rstrip("%")
+            return None if value == "N/A" else float(value)
+
+        # Count primary records only. Secondary and supplementary records are
+        # extra alignments of reads already counted, and would inflate the
+        # read total and skew the mapping and duplicate rates.
+        total_reads = int(flagstat["primary"])
+        num_dups = int(flagstat["primary duplicates"])
+        num_mapped = int(flagstat["primary mapped"])
+        pct_mapped = flagstat_percent("primary mapped %") if total_reads > 0 else 0
+        # None (NA in the report) for an unpaired BAM, which has no pairs.
+        pct_proper_paired = flagstat_percent("properly paired %") if total_reads > 0 else 0
         
         out = {
             "sample": wildcards.sample,
@@ -58,8 +67,6 @@ rule parse_sentieon_stats:
         insert_file="results/qc_metrics/sentieon/{sample}_insert_metrics.txt",
     output:
         json="results/qc_metrics/sentieon/{sample}.json",
-    log:
-        "logs/parse_sentieon_stats/{sample}.txt"
     run:
         import json
         
@@ -88,7 +95,7 @@ rule parse_sentieon_stats:
 def combine_qc_input(wildcards):
     """Get all QC metric files based on tool choice."""
     inputs = {
-        "fastp": expand("results/qc_metrics/fastp/{sample}.json", sample=SAMPLES_WITH_FASTQ),
+        "fastp": expand("results/qc_metrics/fastp/{sample}.json", sample=SAMPLES_NEED_ALIGNMENT),
         "bam": expand("results/qc_metrics/bam/{sample}.json", sample=SAMPLES_WITH_BAM),
     }
     if USE_SENTIEON:
@@ -101,8 +108,6 @@ rule combine_qc_metrics:
         unpack(combine_qc_input),
     output:
         tsv="results/qc_metrics/qc_report.tsv",
-    log:
-        "logs/combine_qc_metrics.txt"
     run:
         import json
         
@@ -122,7 +127,7 @@ rule combine_qc_metrics:
         
         # Load sentieon stats if available
         sentieon_stats = {}
-        if hasattr(input, "sentieon"):
+        if USE_SENTIEON:
             for fn in input.sentieon:
                 sample = os.path.basename(fn).replace(".json", "")
                 with open(fn) as f:
@@ -170,20 +175,21 @@ rule combine_qc_metrics:
                     f"{bam['percent_mapped']:.2f}",
                     str(bam["num_duplicates"]),
                     f"{bam['percent_duplicates']:.2f}",
-                    f"{bam['percent_properly_paired']:.2f}",
+                    (
+                        f"{bam['percent_properly_paired']:.2f}"
+                        if bam["percent_properly_paired"] is not None
+                        else "NA"
+                    ),
                     f"{bam['mean_depth']:.2f}",
                     str(bam["covered_bases"]),
                 ])
                 
-                # Sentieon stats
+                # Sentieon stats (every BAM-backed sample has them when Sentieon runs)
                 if sentieon_stats:
-                    if sample in sentieon_stats:
-                        sent = sentieon_stats[sample]
-                        row.extend([
-                            str(sent["median_insert_size"]) if sent["median_insert_size"] else "NA",
-                            str(sent["median_abs_dev_insert"]) if sent["median_abs_dev_insert"] else "NA",
-                        ])
-                    else:
-                        row.extend(["NA", "NA"])
+                    sent = sentieon_stats[sample]
+                    row.extend([
+                        str(sent["median_insert_size"]) if sent["median_insert_size"] else "NA",
+                        str(sent["median_abs_dev_insert"]) if sent["median_abs_dev_insert"] else "NA",
+                    ])
                 
                 f.write("\t".join(row) + "\n")

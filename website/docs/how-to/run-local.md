@@ -44,6 +44,7 @@ snakemake \
   --snakefile /path/to/snpArcher/workflow/Snakefile \
   --directory /path/to/my_project \
   --use-conda \
+  --workflow-profile /path/to/snpArcher/workflow-profiles/default \
   --dry-run
 ```
 
@@ -62,6 +63,7 @@ snakemake \
   --snakefile /path/to/snpArcher/workflow/Snakefile \
   --directory /path/to/my_project \
   --use-conda \
+  --workflow-profile /path/to/snpArcher/workflow-profiles/default \
   --cores 8  # <-- change to the number of cores available
 ```
 
@@ -72,8 +74,9 @@ snakemake \
 | `--snakefile` / `-s` | Path to snpArcher's `workflow/Snakefile`. Not needed if you run from inside the snpArcher directory. |
 | `--directory` / `-d` | Path to your project directory (where `config/config.yaml` lives). |
 | `--use-conda` | Required. Tells Snakemake to create isolated environments for each pipeline step. |
+| `--use-apptainer` | Required only for the `deepvariant` caller, which runs from a container image. |
 | `--cores` | Maximum number of CPU cores to use concurrently. Set this to the number of available cores. |
-| `--workflow-profile` | Path to a workflow profile directory for resource settings. Defaults to `workflow-profiles/default` in the snpArcher repo. |
+| `--workflow-profile` | Required. Path to the workflow profile directory: `/path/to/snpArcher/workflow-profiles/default`, or your own copy. It supplies the memory and thread settings that pipeline rules expect; Snakemake does not find it on its own, and without it GATK and Picard jobs fail. |
 
 ### Share conda environments across projects
 
@@ -86,6 +89,7 @@ snakemake \
   --snakefile /path/to/snpArcher/workflow/Snakefile \
   --directory /path/to/my_project \
   --use-conda \
+  --workflow-profile /path/to/snpArcher/workflow-profiles/default \
   --conda-prefix ~/snparcher_envs \
   --cores 8
 ```
@@ -121,6 +125,7 @@ snakemake \
   --snakefile /path/to/snpArcher/workflow/Snakefile \
   --directory /path/to/my_project \
   --use-conda \
+  --workflow-profile /path/to/snpArcher/workflow-profiles/default \
   --conda-prefix ~/snparcher_envs \
   --cores 8
 # Detach: Ctrl-b, then d
@@ -138,6 +143,7 @@ snakemake \
   --snakefile /path/to/snpArcher/workflow/Snakefile \
   --directory /path/to/my_project \
   --use-conda \
+  --workflow-profile /path/to/snpArcher/workflow-profiles/default \
   --cores 8
 ```
 
@@ -149,6 +155,7 @@ snakemake \
       --snakefile /path/to/snpArcher/workflow/Snakefile \
       --directory /path/to/my_project \
       --use-conda \
+      --workflow-profile /path/to/snpArcher/workflow-profiles/default \
       --cores 8 \
       --rerun-incomplete
     ```
@@ -160,8 +167,8 @@ Key output files include:
 
 | Output | Path |
 |---|---|
-| Hard-filtered VCF | `results/vcfs/filtered.vcf.gz` |
-| Raw (unfiltered) VCF | `results/vcfs/raw.vcf.gz` |
+| Final call set: hard-filtered VCF (GATK-family callers) | `results/vcfs/filtered.vcf.gz` |
+| Final call set: raw VCF (bcftools, DeepVariant, or no hard filtering) | `results/vcfs/raw.vcf.gz` |
 | Per-sample BAMs | `results/bams/markdup/{sample}.bam` |
 | Per-sample gVCFs | `results/gvcfs/{sample}.g.vcf.gz` |
 | QC dashboard | `results/qc/qc_dashboard.html` |

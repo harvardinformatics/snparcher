@@ -1,9 +1,13 @@
+import gzip
+import json
 import re
 import subprocess
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pytest
+import yaml
 
 from conftest import SnakemakeRunner, FIXTURES_DIR
 
@@ -92,8 +96,9 @@ def test_markdup(request):
             "data",
             "results/reference",
             "results/intervals",
-            "results/bams/raw/sample0",
         )
+        # The raw BAMs are temp() inputs that Snakemake deletes after use.
+        smk.copy_fixtures("results/bams/raw/sample0")
 
         result = smk.run(
             target=[
@@ -107,6 +112,7 @@ def test_markdup(request):
             "results/bams/markdup/sample0.bam",
             "results/bams/markdup/sample0.bam.csi",
         )
+        assert (FIXTURES_DIR / "results/bams/raw/sample0/sample0/u1.bam").exists()
 
 
 @pytest.mark.unit
@@ -134,6 +140,39 @@ def test_external_bam_staging_and_indexing(request):
             "results/bams/input/sample_ext.bam",
             "results/bams/input/sample_ext.bam.csi",
         )
+
+
+@pytest.mark.unit
+def test_bcftools_names_samples_by_sample_id(request):
+    """bcftools mpileup names samples by the BAMs' read-group SM, and merges
+    BAMs that share one into a single sample. Two external BAMs with the same
+    SM must stay two samples, named by their sample_ids."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures("config", "data", "results/reference")
+
+        external_bam = FIXTURES_DIR / "results/bams/markdup/sample0.bam"  # SM:sample0
+        samples = tmpdir / "shared_sm_samples.csv"
+        samples.write_text(
+            "sample_id,input_type,input\n"
+            f"indA,bam,{external_bam}\n"
+            f"indB,bam,{external_bam}\n"
+        )
+        config = yaml.safe_load((FIXTURES_DIR / "config" / "config.yaml").read_text())
+        config["variant_calling"]["tool"] = "bcftools"
+        configfile = tmpdir / "bcftools_config.yaml"
+        configfile.write_text(yaml.safe_dump(config))
+
+        result = smk.run(target="call_variants", configfile=configfile, samples=samples)
+        result.print_log()
+        result.assert_success()
+
+        with gzip.open(tmpdir / "results/vcfs/raw.vcf.gz", "rt") as handle:
+            header = next(line for line in handle if line.startswith("#CHROM"))
+        assert header.rstrip("\n").split("\t")[9:] == ["indA", "indB"]
 
 
 @pytest.mark.unit
@@ -189,6 +228,125 @@ def test_qc_metrics(request):
         result.assert_output_exists(
             "results/qc_metrics/bam/sample0.json",
         )
+
+
+# samtools 1.24 `flagstat -O tsv` for three read pairs (one marked duplicate,
+# one with an unmapped mate) plus two secondary and one supplementary record.
+FLAGSTAT_PAIRED = """\
+9\t0\ttotal (QC-passed reads + QC-failed reads)
+6\t0\tprimary
+2\t0\tsecondary
+1\t0\tsupplementary
+3\t0\tduplicates
+2\t0\tprimary duplicates
+8\t0\tmapped
+88.89%\tN/A\tmapped %
+5\t0\tprimary mapped
+83.33%\tN/A\tprimary mapped %
+6\t0\tpaired in sequencing
+3\t0\tread1
+3\t0\tread2
+4\t0\tproperly paired
+66.67%\tN/A\tproperly paired %
+4\t0\twith itself and mate mapped
+1\t0\tsingletons
+16.67%\tN/A\tsingletons %
+0\t0\twith mate mapped to a different chr
+0\t0\twith mate mapped to a different chr (mapQ>=5)
+"""
+
+
+# The same for three single-end reads, two of them mapped.
+FLAGSTAT_UNPAIRED = """\
+3\t0\ttotal (QC-passed reads + QC-failed reads)
+3\t0\tprimary
+0\t0\tsecondary
+0\t0\tsupplementary
+0\t0\tduplicates
+0\t0\tprimary duplicates
+2\t0\tmapped
+66.67%\tN/A\tmapped %
+2\t0\tprimary mapped
+66.67%\tN/A\tprimary mapped %
+0\t0\tpaired in sequencing
+0\t0\tread1
+0\t0\tread2
+0\t0\tproperly paired
+N/A\tN/A\tproperly paired %
+0\t0\twith itself and mate mapped
+0\t0\tsingletons
+N/A\tN/A\tsingletons %
+0\t0\twith mate mapped to a different chr
+0\t0\twith mate mapped to a different chr (mapQ>=5)
+"""
+
+
+def run_parse_bam_stats(request, tmpdir, flagstat, target):
+    """Run only the BAM-stats parsing for one external-BAM sample, from given
+    samtools outputs, so no BAM has to be built."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    tmpdir = Path(tmpdir)
+    samples = tmpdir / "bam_samples.csv"
+    samples.write_text(
+        "sample_id,input_type,input\n"
+        f"sample_ext,bam,{FIXTURES_DIR / 'results/bams/markdup/sample0.bam'}\n"
+    )
+    stats_dir = tmpdir / "results/qc_metrics/bam"
+    stats_dir.mkdir(parents=True)
+    (stats_dir / "sample_ext_flagstat.txt").write_text(flagstat)
+    (stats_dir / "sample_ext_coverage.txt").write_text(
+        "#rname\tstartpos\tendpos\tnumreads\tcovbases\tcoverage\tmeandepth\tmeanbaseq\tmeanmapq\n"
+        "chr1\t1\t1000\t5\t50\t5\t0.25\t40\t60\n"
+    )
+
+    smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
+    smk.link_fixtures("config", "data", "results/reference")
+    return smk.run(
+        target=target,
+        samples=samples,
+        extra_args=["--allowed-rules", "parse_bam_stats", "combine_qc_metrics"],
+    )
+
+
+@pytest.mark.unit
+def test_bam_stats_count_primary_records(request):
+    """Secondary and supplementary records are extra alignments of reads already
+    counted, so read totals and rates must come from the primary records."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = run_parse_bam_stats(
+            request, tmpdir, FLAGSTAT_PAIRED, "results/qc_metrics/bam/sample_ext.json"
+        )
+        result.print_log()
+        result.assert_success()
+
+        stats = json.loads((Path(tmpdir) / "results/qc_metrics/bam/sample_ext.json").read_text())
+        assert stats["total_reads"] == 6
+        assert stats["num_duplicates"] == 2
+        assert stats["num_mapped"] == 5
+        assert stats["percent_mapped"] == 83.33
+        assert stats["percent_properly_paired"] == 66.67
+
+
+@pytest.mark.unit
+def test_bam_stats_unpaired_bam_reports_na(request):
+    """samtools flagstat prints N/A for the properly-paired percentage of an
+    unpaired BAM. Calling works on such BAMs, so QC must report NA, not crash."""
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = run_parse_bam_stats(
+            request, tmpdir, FLAGSTAT_UNPAIRED, "results/qc_metrics/qc_report.tsv"
+        )
+        result.print_log()
+        result.assert_success()
+
+        stats = json.loads((Path(tmpdir) / "results/qc_metrics/bam/sample_ext.json").read_text())
+        assert stats["total_reads"] == 3
+        assert stats["percent_properly_paired"] is None
+        header, row = (Path(tmpdir) / "results/qc_metrics/qc_report.tsv").read_text().splitlines()
+        report = dict(zip(header.split("\t"), row.split("\t")))
+        assert report["percent_properly_paired"] == "NA"
+        assert report["percent_mapped"] == "66.67"
 
 
 @pytest.mark.unit
@@ -349,6 +507,63 @@ def test_collect_fastp_stats(request):
 
 
 @pytest.mark.unit
+def test_clam_collect_keeps_sample_ids_with_dots(request):
+    """depths.zarr names its columns by sample_id, dots included.
+
+    clam names samples by file name up to the first dot unless it is given
+    the names, so ind.1 and ind.2 both became "ind" and clam_collect failed.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures(
+            "config",
+            "data",
+            "results/reference",
+            "results/intervals",
+            "results/bams/markdup",
+        )
+        result = smk.run(
+            target=[
+                f"results/callable_sites/depths/{s}.per-base.d4" for s in ("sample0", "sample1")
+            ],
+            samples=SAMPLES,
+        )
+        result.assert_success()
+
+        # Rename the samples, and their depth files, to IDs with dots.
+        depths_dir = Path(tmpdir) / "results" / "callable_sites" / "depths"
+        dotted = {"sample0": "ind.1", "sample1": "ind.2"}
+        for old, new in dotted.items():
+            (depths_dir / f"{old}.per-base.d4").rename(depths_dir / f"{new}.per-base.d4")
+        sheet_lines = SAMPLES.read_text().splitlines()
+        samples = Path(tmpdir) / "dotted_samples.csv"
+        samples.write_text("\n".join(
+            [sheet_lines[0]]
+            + [
+                line.replace(old, new, 1)
+                for line in sheet_lines[1:]
+                for old, new in dotted.items()
+                if line.startswith(f"{old},")
+            ]
+        ) + "\n")
+
+        result = smk.run(
+            target="results/callable_sites/depths.zarr",
+            samples=samples,
+            extra_args=["--allowed-rules", "clam_collect"],
+        )
+        result.print_log()
+        result.assert_success()
+
+        metadata = json.loads(
+            (Path(tmpdir) / "results/callable_sites/depths.zarr/zarr.json").read_text()
+        )["attributes"]["clam_metadata"]
+        assert metadata["column_names"] == ["ind.1", "ind.2"]
+
+
+@pytest.mark.unit
 def test_mosdepth(request):
     """Mosdepth for one sample."""
     no_conda = request.config.getoption("--no-conda")
@@ -439,6 +654,221 @@ def test_callable_sites_bed_is_intersection(request):
         assert bed == "chr2l\t50\t100\nchr2l\t200\t250\n", bed
 
 
+def write_clam_depth_zarr(zarr_dir, contig, depths, chunk_rows=1000):
+    """Write a depth store laid out the way `clam collect` writes one.
+
+    `depths` is a (positions, samples) array. clam compresses its chunks; this
+    writes them uncompressed (bytes codec only), which clam reads the same way.
+    """
+    length, n_samples = depths.shape
+    samples = [f"s{i}" for i in range(n_samples)]
+    zarr_dir.mkdir(parents=True)
+    (zarr_dir / "zarr.json").write_text(json.dumps({
+        "zarr_format": 3,
+        "node_type": "group",
+        "attributes": {
+            "clam_metadata": {
+                "contigs": [{"name": contig, "length": length}],
+                "column_names": samples,
+                "chunk_size": chunk_rows,
+                "populations": [{"name": "default", "samples": samples}],
+            }
+        },
+    }))
+
+    array_dir = zarr_dir / contig
+    array_dir.mkdir()
+    (array_dir / "zarr.json").write_text(json.dumps({
+        "zarr_format": 3,
+        "node_type": "array",
+        "shape": [length, n_samples],
+        "data_type": "uint32",
+        "chunk_grid": {
+            "name": "regular",
+            "configuration": {"chunk_shape": [chunk_rows, n_samples]},
+        },
+        "chunk_key_encoding": {"name": "default", "configuration": {"separator": "/"}},
+        "fill_value": 0,
+        "codecs": [{"name": "bytes", "configuration": {"endian": "little"}}],
+    }))
+
+    for index, start in enumerate(range(0, length, chunk_rows)):
+        chunk = np.zeros((chunk_rows, n_samples), dtype="<u4")
+        block = depths[start : start + chunk_rows]
+        chunk[: len(block)] = block
+        chunk_path = array_dir / "c" / str(index) / "0"
+        chunk_path.parent.mkdir(parents=True)
+        chunk_path.write_bytes(chunk.tobytes())
+
+
+def run_coverage_mask(request, tmpdir, depths, mappability_bed, **coverage):
+    """Run thresholds -> clam loci -> coverage.bed on a hand-written depth store.
+
+    Returns the BED lines and the thresholds TSV as a dict.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda, conda_prefix=conda_prefix)
+    smk.link_fixtures("config", "data")
+
+    callable_dir = Path(tmpdir) / "results" / "callable_sites"
+    write_clam_depth_zarr(callable_dir / "depths.zarr", "chr2l", depths)
+    if mappability_bed is not None:
+        (callable_dir / "mappability.bed").write_text(mappability_bed)
+
+    config = yaml.safe_load((FIXTURES_DIR / "config" / "config.yaml").read_text())
+    config["callable_sites"]["coverage"].update(merge_distance=0, **coverage)
+    config["callable_sites"]["mappability"]["enabled"] = mappability_bed is not None
+    configfile = Path(tmpdir) / "coverage_mask_config.yaml"
+    configfile.write_text(yaml.safe_dump(config))
+
+    # --allowed-rules keeps Snakemake from rebuilding the inputs with mosdepth,
+    # clam collect and genmap.
+    result = smk.run(
+        target="results/callable_sites/coverage.bed",
+        configfile=configfile,
+        samples=SAMPLES,
+        extra_args=[
+            "--allowed-rules", "callable_coverage_thresholds", "clam_loci", "coverage_bed",
+        ],
+    )
+    result.print_log()
+    result.assert_success()
+
+    thresholds = dict(
+        line.split("\t")
+        for line in (callable_dir / "coverage_thresholds.tsv").read_text().splitlines()
+    )
+    return (callable_dir / "coverage.bed").read_text().splitlines(), thresholds
+
+
+def coverage_mask_depths():
+    """5 samples on one contig, built so each region's fate follows by hand.
+
+    Single-copy sites sum to exactly 50 (per-sample depths 8-12). Over the
+    mappable sites with data the median is 50 and the robust spread is zero,
+    so the spread floor (0.5 on the square-root scale) sets the auto cutoff:
+    (sqrt(50) + 4 * 0.5) ** 2 = 82.3, i.e. summed depth <= 82.
+    """
+    length, n_samples = 5000, 5
+    positions = np.arange(length)[:, None]
+    depths = (10 + (positions + np.arange(n_samples)) % 5 - 2).astype(np.uint32)
+    depths[500:600] = 20                    # collapsed duplication: summed 100
+    depths[700:800] = 16                    # summed 80: within auto, above 1.5x
+    depths[900:1000] = 0
+    depths[900:1000, 0] = 10                # data in 1 of 5 samples: below 0.25
+    depths[1000:1100] = 0
+    depths[1000:1100, :2] = 25              # data in 2 of 5 samples: passes
+    depths[1100:1200] = 0                   # no data anywhere
+    # Unmappable and very deep, and 60% of all sites: if it entered the depth
+    # distribution, the median would be 1000 and nothing would be excluded.
+    depths[2000:] = 200
+    return depths
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "max_depth, expected",
+    [
+        ("auto", ["chr2l\t0\t500", "chr2l\t600\t900", "chr2l\t1000\t1100", "chr2l\t1200\t2000"]),
+        # 1.5 x 50 = 75: summed 80 is now excluded too.
+        (1.5, ["chr2l\t0\t500", "chr2l\t600\t700", "chr2l\t800\t900",
+               "chr2l\t1000\t1100", "chr2l\t1200\t2000"]),
+        # 2 x 50 = 100: the boundary is inclusive, so summed 100 is kept.
+        (2, ["chr2l\t0\t900", "chr2l\t1000\t1100", "chr2l\t1200\t2000"]),
+    ],
+)
+def test_coverage_mask(request, max_depth, expected):
+    """Summed-depth upper bound, presence fraction, and mappable-only anchor.
+
+    Runs the real threshold script and clam loci. The unmappable region
+    (2000-5000) lies outside mappability.bed and fails the depth bound
+    anyway; it is in the test to show that it does not move the median.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        lines, thresholds = run_coverage_mask(
+            request,
+            tmpdir,
+            coverage_mask_depths(),
+            mappability_bed="chr2l\t0\t2000\n",
+            max_depth=max_depth,
+        )
+
+    assert lines == expected
+    assert float(thresholds["median_summed_depth"]) == 50
+    assert int(thresholds["min_samples_with_data"]) == 2
+    if max_depth == "auto":
+        assert int(thresholds["summed_depth_cutoff"]) == 82
+
+
+@pytest.mark.unit
+def test_coverage_mask_fraction_boundary_is_exact(request):
+    """fraction 0.55 of 200 samples keeps a site where exactly 110 have data.
+
+    0.55 * 200 is 110.00000000000001 in floating point, and clam's -d drops
+    a site at exactly that proportion. The thresholds step computes the count
+    exactly and hands clam a proportion half a sample lower.
+    """
+    depths = np.ones((400, 200), dtype=np.uint32)
+    for start, with_data in ((300, 109), (310, 110), (320, 111)):
+        depths[start : start + 10, with_data:] = 0
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        lines, thresholds = run_coverage_mask(
+            request, tmpdir, depths, mappability_bed=None, fraction=0.55
+        )
+
+    assert int(thresholds["min_samples_with_data"]) == 110
+    assert lines == ["chr2l\t0\t300", "chr2l\t310\t400"]
+
+
+@pytest.mark.unit
+def test_coverage_mask_max_depth_boundary_is_exact(request):
+    """max_depth 2.3 of a median of 50 keeps a site whose summed depth is 115.
+
+    2.3 * 50 is 114.99999999999999 in floating point, which floors to 114.
+    """
+    depths = np.full((400, 5), 10, dtype=np.uint32)  # summed 50
+    depths[300:310] = 23  # summed 115: on the bound
+    depths[310:320] = (23, 23, 23, 23, 24)  # summed 116: above it
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        lines, thresholds = run_coverage_mask(
+            request, tmpdir, depths, mappability_bed=None, max_depth=2.3
+        )
+
+    assert int(thresholds["summed_depth_cutoff"]) == 115
+    assert lines == ["chr2l\t0\t310", "chr2l\t320\t400"]
+
+
+@pytest.mark.unit
+def test_genmap_index_leaves_reference_fasta_alone(request):
+    """genmap_index must not touch results/reference/{name}.fa.
+
+    It used to decompress the reference to exactly that path and delete it on
+    exit, destroying any FASTA already there.
+    """
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures("config", "data", "results/reference/my_organism.fa.gz")
+
+        fasta = Path(tmpdir) / "results" / "reference" / "my_organism.fa"
+        fasta.write_text(">user_owned\nACGT\n")
+
+        result = smk.run(
+            target="results/callable_sites/genmap_index",
+            samples=SAMPLES,
+            extra_args=["--allowed-rules", "genmap_index"],
+        )
+        result.print_log()
+        result.assert_success()
+
+        assert fasta.read_text() == ">user_owned\nACGT\n"
+        assert any((Path(tmpdir) / "results" / "callable_sites" / "genmap_index").iterdir())
+
+
 @pytest.mark.unit
 def test_download_sra_completeness(request):
     """download_sra emits every read the archive holds.
@@ -447,6 +877,10 @@ def test_download_sra_completeness(request):
     counted and compared against the archive's own spot count, rather than the
     rule merely checking that the files exist. A truncated extractor, or a pigz
     that compresses nothing and exits 0, fails here.
+
+    The output directory starts with a stale single-read file, as a retry finds
+    it: the raw FASTQs are temp(), but that file was never declared. The rule
+    must neither trip over it nor count its reads.
 
     Requires network access: prefetch pulls SRR000001 (~312 MB) from NCBI.
     """
@@ -460,6 +894,10 @@ def test_download_sra_completeness(request):
 
         r1 = "results/fastqs/sample_mixed_reads/libA/u2/SRR000001_1.fastq.gz"
         r2 = "results/fastqs/sample_mixed_reads/libA/u2/SRR000001_2.fastq.gz"
+        leftover = Path(tmpdir) / "results/fastqs/sample_mixed_reads/libA/u2/SRR000001.fastq.gz"
+        leftover.parent.mkdir(parents=True)
+        with gzip.open(leftover, "wt") as handle:
+            handle.write("@stale\nACGT\n+\nIIII\n" * 3)
 
         result = smk.run(target=[r1, r2], samples=samples)
         result.print_log()

@@ -6,7 +6,9 @@ small contigs, and low-quality variants.  Produces filtered, clean-SNP,
 and clean-indel VCF files.
 
 Can run standalone:
-    snakemake --snakefile workflow/modules/postprocess/Snakefile
+    snakemake --snakefile workflow/modules/postprocess/Snakefile \
+        --configfile workflow/modules/postprocess/config/config.yaml \
+        --config samples=... vcf=... ref_fai=... callable_sites_bed=...
 
 Or imported by the main workflow via Snakemake's `module` directive
 (config is passed in, overriding the configfile below).
@@ -17,17 +19,28 @@ Config keys (flat):
     vcf                 - path to raw VCF input (required)
     ref_fai             - path to reference .fai index (required)
     callable_sites_bed  - path to callable sites BED (required)
-    contig_size         - contigs <= this size are excluded (default 10000)
+    contig_size         - contigs shorter than this are excluded (default 10000)
     maf                 - MAF filter threshold (default 0.01)
     missingness         - max missingness threshold (default 0.75)
     exclude_scaffolds   - comma-separated scaffolds to exclude (default "")
+    long_contig_mode    - write CSI instead of TBI indexes (default false)
 """
+
+import shlex
+import sys
+from pathlib import Path
 
 import pandas as pd
 
+# Shared helpers in workflow/lib, two directories up from this module.
+sys.path.insert(0, str(Path(workflow.current_basedir).parents[1] / "lib"))
+from booleans import parse_bool_column
+
 # ---------- Config / defaults ------------------------------------------------
-# When imported via `module ... config: config`, this configfile is ignored.
-configfile: "config/config.yaml"
+# No configfile directive: it resolved against the working directory, so a
+# standalone run failed outside a project, or silently read the project's main
+# config. Pass --configfile (as run-postprocess.sh does) or --config; anything
+# unset falls back to these defaults.
 
 _PP_DEFAULTS = {
     "samples": "config/samples.csv",
@@ -64,10 +77,22 @@ def _as_bool(value):
 config["split_by_type"] = _as_bool(config["split_by_type"])
 config["keep_basic_filter"] = _as_bool(config["keep_basic_filter"])
 
-_LONG_CONTIG_MODE = bool(config.get("long_contig_mode", False))
+config["long_contig_mode"] = _as_bool(config["long_contig_mode"])
+
+# The main workflow's schema also caps maf at 0.5, but a standalone run skips
+# that schema. Above 0.5, AF<maf | AF>1-maf removes every variant.
+if not 0 <= float(config["maf"]) <= 0.5:
+    raise ValueError(f"maf must be between 0 and 0.5, got {config['maf']}")
+
+_LONG_CONTIG_MODE = config["long_contig_mode"]
 _BCFTOOLS_INDEX_ARGS = "-f -c" if _LONG_CONTIG_MODE else "-f -t"
-_TABIX_INDEX_ARGS = "-C" if _LONG_CONTIG_MODE else ""
 _VCF_INDEX_SUFFIX = ".csi" if _LONG_CONTIG_MODE else ".tbi"
+
+
+def _excluded_scaffolds():
+    """exclude_scaffolds as a list, tolerating spaces and an empty or null value."""
+    value = config["exclude_scaffolds"]
+    return [name.strip() for name in str(value or "").split(",") if name.strip()]
 
 
 def _vcf_index(vcf):
@@ -82,52 +107,29 @@ def _maybe_temp(path):
 
 # ---------- Sample sheet + metadata ------------------------------------------
 
-_SAMPLE_SHEET_DTYPES = {
-    "sample_id": "string",
-    "library_id": "string",
+# Read ID columns as plain text, so IDs such as "NA" are not read as missing
+# (matches common.smk).
+_SAMPLE_SHEET_CONVERTERS = {
+    "sample_id": str,
+    "library_id": str,
 }
 
-_SAMPLE_METADATA_DTYPES = {
-    "sample_id": "string",
+_SAMPLE_METADATA_CONVERTERS = {
+    "sample_id": str,
 }
 
 
-_samples_df = pd.read_csv(config["samples"], dtype=_SAMPLE_SHEET_DTYPES)
+_samples_df = pd.read_csv(config["samples"], converters=_SAMPLE_SHEET_CONVERTERS)
 _ALL_SAMPLES = _samples_df["sample_id"].unique().tolist()
 
 _metadata_df = None
 _meta_path = config.get("sample_metadata", "")
 if _meta_path:
-    _metadata_df = pd.read_csv(_meta_path, dtype=_SAMPLE_METADATA_DTYPES)
-
-
-def _parse_bool(series, col_name):
-    """Tolerant boolean parser (matches common.smk logic)."""
-    truthy = {"true", "t", "yes", "y", "1"}
-    falsy  = {"false", "f", "no", "n", "0", ""}
-    out = []
-    for idx, v in series.items():
-        if pd.isna(v):
-            out.append(False)
-        elif isinstance(v, bool):
-            out.append(v)
-        elif isinstance(v, (int, float)):
-            out.append(bool(v))
-        else:
-            s = str(v).strip().lower()
-            if s in truthy:
-                out.append(True)
-            elif s in falsy:
-                out.append(False)
-            else:
-                raise ValueError(
-                    f"Invalid {col_name} value at row {idx + 2}: {v!r}"
-                )
-    return pd.Series(out, index=series.index, dtype=bool)
+    _metadata_df = pd.read_csv(_meta_path, converters=_SAMPLE_METADATA_CONVERTERS)
 
 
 if _metadata_df is not None and "exclude" in _metadata_df.columns:
-    _metadata_df["exclude"] = _parse_bool(_metadata_df["exclude"], "exclude")
+    _metadata_df["exclude"] = parse_bool_column(_metadata_df["exclude"], "exclude")
 
 
 def _get_excluded_samples():
@@ -165,10 +167,12 @@ rule filter_individuals:
     """
     output:
         include="results/postprocess/include_samples.txt",
+    params:
+        # As a param, the list reruns this rule whenever exclusions change.
+        included=_get_included_samples(),
     run:
-        included = _get_included_samples()
         with open(output.include, "w") as fh:
-            for s in included:
+            for s in params.included:
                 fh.write(s + "\n")
 
 
@@ -187,45 +191,65 @@ rule basic_filter:
         index_args=_BCFTOOLS_INDEX_ARGS,
     conda:
         "envs/filter.yml"
+    log:
+        "logs/postprocess/basic_filter.txt",
     shell:
         """
-        bcftools view -S {input.include} -f .,PASS {input.vcf} -a -U -O u \
-            | bcftools +fill-tags -Ou \
-            | bcftools view -m2 -e 'AF==0 | ref="N" | ALT="."' -O z -o {output.filtered}
-        bcftools index {params.index_args} {output.filtered}
+        # -a trims ALT alleles unseen in the kept samples, which can leave only
+        # the spanning-deletion allele *: such a record carries no variant.
+        # ALT="*" alone would match any record with a * allele, so require it
+        # to be the only one.
+        bcftools view -S {input.include} -f .,PASS {input.vcf} -a -U -O u 2> {log} \
+            | bcftools +fill-tags -Ou 2>> {log} \
+            | bcftools view -m2 -e 'AF==0 | ref="N" | ALT="." | (N_ALT=1 & ALT="*")' \
+                -O z -o {output.filtered} 2>> {log}
+        bcftools index {params.index_args} {output.filtered} 2>> {log}
         """
 
 
 rule update_bed:
     """
-    Refine callable-sites BED: remove regions on contigs smaller than the
-    configured threshold.  Input BED contains INCLUDE regions; output also
-    contains INCLUDE regions (small contigs subtracted).
+    Refine callable-sites BED: remove contigs shorter than contig_size and the
+    excluded scaffolds. Input and output BEDs both contain INCLUDE regions.
+    strict_filter restricts the VCF to this BED, so the filtered VCF and BED
+    agree on which contigs were dropped.
     """
     input:
         bed=config["callable_sites_bed"],
         fai=config["ref_fai"],
     output:
         bed="results/postprocess/callable_sites_filtered.bed",
-        small_contigs=temp("results/postprocess/small_contigs.bed"),
+        dropped_contigs=temp("results/postprocess/dropped_contigs.bed"),
     conda:
         "envs/bed.yml"
     params:
         size_filter=config["contig_size"],
+        excluded=shlex.quote(",".join(_excluded_scaffolds())),
+    log:
+        "logs/postprocess/update_bed.txt",
     shell:
         """
-        awk 'BEGIN{{OFS="\\t"}}{{if ($2<{params.size_filter}) {{print $1,0,$2}}}}' \
-            {input.fai} > {output.small_contigs}
-        bedtools subtract -a {input.bed} -b {output.small_contigs} \
-            | bedtools sort -i - \
-            | bedtools merge -i - > {output.bed}
+        awk -v size={params.size_filter} -v excluded={params.excluded} \
+            'BEGIN {{OFS = "\\t"; n = split(excluded, names, ","); for (i = 1; i <= n; i++) skip[names[i]] = 1}}
+             $2 < size || ($1 in skip) {{print $1, 0, $2}}' \
+            {input.fai} > {output.dropped_contigs} 2> {log}
+        bedtools subtract -a {input.bed} -b {output.dropped_contigs} 2>> {log} \
+            | bedtools sort -i - 2>> {log} \
+            | bedtools merge -i - > {output.bed} 2>> {log}
+        # bcftools rejects an empty targets file in strict_filter.
+        if [ ! -s {output.bed} ]; then
+            echo "No callable sites remain after removing contigs shorter than" \
+                "contig_size ({params.size_filter} bp) and those in exclude_scaffolds." \
+                | tee -a {log} >&2
+            exit 1
+        fi
         """
 
 
 rule strict_filter:
     """
-    Apply missingness, MAF, and scaffold-exclusion filters.
-    Restrict to callable (include) regions.
+    Apply missingness and MAF filters, and restrict to the refined callable
+    regions (which already exclude small contigs and excluded scaffolds).
     """
     input:
         bed="results/postprocess/callable_sites_filtered.bed",
@@ -240,21 +264,18 @@ rule strict_filter:
         miss=config["missingness"],
         maf=config["maf"],
         upper_bound=lambda wildcards: 1 - float(config["maf"]),
-        chr_ex=config["exclude_scaffolds"],
         index_args=_BCFTOOLS_INDEX_ARGS,
+    log:
+        "logs/postprocess/strict_filter.txt",
     shell:
         """
-        if [ -z "{params.chr_ex}" ]
-        then
-            bcftools view -R {input.bed} -m2 -M2 \
-                -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
-                {input.vcf} -O z -o {output.vcf}
-        else
-            bcftools view -t ^{params.chr_ex} -R {input.bed} -m2 -M2 \
-                -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
-                {input.vcf} -O z -o {output.vcf}
-        fi
-        bcftools index {params.index_args} {output.vcf}
+        # -T keeps a record when its POS is callable. -R keeps any record whose
+        # REF overlaps a callable region, admitting indels anchored at a
+        # non-callable base; -T also streams instead of seeking per interval.
+        bcftools view -T {input.bed} -m2 -M2 \
+            -e 'F_MISSING > {params.miss} | AF<{params.maf} | AF>{params.upper_bound}' \
+            {input.vcf} -O z -o {output.vcf} 2> {log}
+        bcftools index {params.index_args} {output.vcf} 2>> {log}
         """
 
 
@@ -274,8 +295,8 @@ rule subset_indels:
         "logs/postprocess/subset_indels.txt"
     shell:
         """
-        bcftools view -v indels -O z -o {output.vcf} {input.vcf}
-        bcftools index {params.index_args} {output.vcf}
+        bcftools view -v indels -O z -o {output.vcf} {input.vcf} 2> {log}
+        bcftools index {params.index_args} {output.vcf} 2>> {log}
         """
 
 
@@ -295,8 +316,8 @@ rule subset_snps:
         "logs/postprocess/subset_snps.txt"
     shell:
         """
-        bcftools view -v snps -e 'TYPE ~ "indel"' -O z -o {output.vcf} {input.vcf}
-        bcftools index {params.index_args} {output.vcf}
+        bcftools view -v snps -e 'TYPE ~ "indel"' -O z -o {output.vcf} {input.vcf} 2> {log}
+        bcftools index {params.index_args} {output.vcf} 2>> {log}
         """
 
 
@@ -306,22 +327,16 @@ rule drop_indel_SNPs:
         vcf="results/postprocess/clean_snps_prefilter.vcf.gz",
         idx=_vcf_index("results/postprocess/clean_snps_prefilter.vcf.gz"),
     output:
-        keep_snps=temp("results/postprocess/keep_snp_positions.txt"),
         vcf="results/postprocess/clean_snps.vcf.gz",
         idx=_vcf_index("results/postprocess/clean_snps.vcf.gz"),
     params:
         index_args=_BCFTOOLS_INDEX_ARGS,
-        tabix_index_args=_TABIX_INDEX_ARGS,
     conda:
         "envs/filter.yml"
     log:
         "logs/postprocess/drop_indel_snps.txt"
     shell:
         """
-        bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\n' {input.vcf} \
-            | awk 'length($3) == 1 {{print $1"\t"$2}}' \
-            | bgzip -c > {output.keep_snps}
-        tabix {params.tabix_index_args} -s1 -b2 -e2 {output.keep_snps}
-        bcftools view -T {output.keep_snps} {input.vcf} -Oz -o {output.vcf}
-        bcftools index {params.index_args} {output.vcf}
+        bcftools view -e 'strlen(REF)>1' {input.vcf} -Oz -o {output.vcf} 2> {log}
+        bcftools index {params.index_args} {output.vcf} 2>> {log}
         """

@@ -20,7 +20,7 @@ The `reference.source` field accepts:
 
 - A **local file path** to a FASTA (optionally gzipped)
 - A **URL** to a remote FASTA
-- A **GenBank or RefSeq accession** (e.g., `GCF_000002315.6`). snpArcher will download and index it automatically.
+- A **GenBank or RefSeq accession**, including its version (e.g., `GCF_000002315.6`). snpArcher will download and index it automatically.
 
 ## Choose a variant caller
 
@@ -37,12 +37,20 @@ variant_calling:
 | `gatk` | GATK HaplotypeCaller + GenomicsDB + GenotypeGVCFs | Default. Well-tested for population genomics. |
 | `sentieon` | Sentieon DNAseq (GATK-compatible, faster) | Requires a valid license (`variant_calling.sentieon.license`). |
 | `bcftools` | bcftools mpileup + call | No per-sample gVCF step. Cannot accept `gvcf` input. |
-| `deepvariant` | Google DeepVariant + GLnexus | ML-based caller. Cannot accept `gvcf` input. |
+| `deepvariant` | Google DeepVariant + GLnexus | ML-based caller. Requires Apptainer (see below). Cannot accept `gvcf` input. |
 | `parabricks` | NVIDIA Parabricks | GPU-accelerated. Requires Apptainer image and NVIDIA GPUs. Cannot accept `gvcf` input. |
 
 !!! note
     You only need to configure the sub-block for the tool you selected.
     Settings for other callers are ignored.
+
+!!! note "DeepVariant needs Apptainer"
+    snpArcher runs DeepVariant from Google's container image.
+    Apptainer (or Singularity) must be installed, and Snakemake must run with `--use-apptainer` in addition to `--use-conda`, or with `use-apptainer: True` in your workflow profile.
+    Without it, snpArcher stops with an error while planning the run.
+
+    Inside the container, Snakemake makes the working directory visible, along with whatever your site's Apptainer configuration binds.
+    If your sample sheet lists BAM files stored elsewhere, bind their directory too, for example `--apptainer-args "--bind /path/to/bams"`.
 
 ## Set the heterozygosity prior (GATK)
 
@@ -69,6 +77,10 @@ variant_calling:
   ploidy: 2  # <-- change if not diploid
   expected_coverage: "low"  # "low" for <30x, "high" for >30x
 ```
+
+`gatk` and `sentieon` accept any ploidy.
+`bcftools` and `parabricks` support haploid or diploid calling only (1 or 2), and `deepvariant` always calls diploid genotypes (2).
+snpArcher stops at startup if the ploidy doesn't suit the selected caller.
 
 The `expected_coverage` setting controls internal caller tuning.
 Use `low` for most resequencing projects (5-15x per sample) and `high` for datasets with consistently deep coverage (>30x).
@@ -105,9 +117,10 @@ callable_sites:
   generate_bed_file: true
   coverage:
     enabled: true
-    fraction: 1.0  # fraction of samples that must be callable
-    min_coverage: auto  # "auto" = floor(mean_depth / 2)
-    max_coverage: auto  # "auto" = ceil(mean_depth * 2)
+    min_sample_depth: 1  # reads a sample needs at a site to count as having data
+    fraction: 0.25       # fraction of samples that must have data at a site
+    max_depth: auto      # "auto" = outlier cutoff on summed depth; or a multiple of its median, e.g. 1.5
+    max_depth_k: 4       # robust SDs above the median when max_depth is "auto"
     merge_distance: 100
   mappability:
     enabled: true
@@ -139,7 +152,7 @@ modules:
       contig_size: 10000  # exclude contigs smaller than this (bp)
       maf: 0.01  # minimum minor allele frequency
       missingness: 0.75  # maximum fraction of missing genotypes per site
-      exclude_scaffolds: "mtDNA,Y"  # <-- comma-separated, no spaces
+      exclude_scaffolds: "mtDNA,Y"  # <-- comma-separated
 ```
 
 Sample exclusions are controlled through a separate metadata file.
@@ -173,9 +186,10 @@ callable_sites:
   generate_bed_file: true
   coverage:
     enabled: true
-    fraction: 1.0
-    min_coverage: auto
-    max_coverage: auto
+    min_sample_depth: 1
+    fraction: 0.25
+    max_depth: auto
+    max_depth_k: 4
   mappability:
     enabled: true
     kmer: 150

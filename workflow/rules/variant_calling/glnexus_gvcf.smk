@@ -1,7 +1,7 @@
 def glnexus_joint_input(wc):
     return {
         "gvcfs": get_joint_gvcf_paths(),
-        "indexes": get_glnexus_joint_gvcf_indexes(),
+        "indexes": get_joint_gvcf_indexes(),
     }
 
 
@@ -9,8 +9,8 @@ rule glnexus_joint:
     input:
         unpack(glnexus_joint_input),
     output:
-        vcf=temp(RAW_VCF),
-        idx=temp(RAW_VCF_INDEX),
+        vcf=raw_vcf_output(RAW_VCF),
+        idx=raw_vcf_output(RAW_VCF_INDEX),
     params:
         db="results/vcfs/GLnexus.DB",
         config="DeepVariant",
