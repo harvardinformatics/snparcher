@@ -4,8 +4,6 @@ rule parse_bam_stats:
         flagstat="results/qc_metrics/bam/{sample}_flagstat.txt",
     output:
         json="results/qc_metrics/bam/{sample}.json",
-    log:
-        "logs/parse_bam_stats/{sample}.txt"
     run:
         import json
         
@@ -69,8 +67,6 @@ rule parse_sentieon_stats:
         insert_file="results/qc_metrics/sentieon/{sample}_insert_metrics.txt",
     output:
         json="results/qc_metrics/sentieon/{sample}.json",
-    log:
-        "logs/parse_sentieon_stats/{sample}.txt"
     run:
         import json
         
@@ -99,7 +95,7 @@ rule parse_sentieon_stats:
 def combine_qc_input(wildcards):
     """Get all QC metric files based on tool choice."""
     inputs = {
-        "fastp": expand("results/qc_metrics/fastp/{sample}.json", sample=SAMPLES_WITH_FASTQ),
+        "fastp": expand("results/qc_metrics/fastp/{sample}.json", sample=SAMPLES_NEED_ALIGNMENT),
         "bam": expand("results/qc_metrics/bam/{sample}.json", sample=SAMPLES_WITH_BAM),
     }
     if USE_SENTIEON:
@@ -112,8 +108,6 @@ rule combine_qc_metrics:
         unpack(combine_qc_input),
     output:
         tsv="results/qc_metrics/qc_report.tsv",
-    log:
-        "logs/combine_qc_metrics.txt"
     run:
         import json
         
@@ -133,7 +127,7 @@ rule combine_qc_metrics:
         
         # Load sentieon stats if available
         sentieon_stats = {}
-        if hasattr(input, "sentieon"):
+        if USE_SENTIEON:
             for fn in input.sentieon:
                 sample = os.path.basename(fn).replace(".json", "")
                 with open(fn) as f:
@@ -190,15 +184,12 @@ rule combine_qc_metrics:
                     str(bam["covered_bases"]),
                 ])
                 
-                # Sentieon stats
+                # Sentieon stats (every BAM-backed sample has them when Sentieon runs)
                 if sentieon_stats:
-                    if sample in sentieon_stats:
-                        sent = sentieon_stats[sample]
-                        row.extend([
-                            str(sent["median_insert_size"]) if sent["median_insert_size"] else "NA",
-                            str(sent["median_abs_dev_insert"]) if sent["median_abs_dev_insert"] else "NA",
-                        ])
-                    else:
-                        row.extend(["NA", "NA"])
+                    sent = sentieon_stats[sample]
+                    row.extend([
+                        str(sent["median_insert_size"]) if sent["median_insert_size"] else "NA",
+                        str(sent["median_abs_dev_insert"]) if sent["median_abs_dev_insert"] else "NA",
+                    ])
                 
                 f.write("\t".join(row) + "\n")

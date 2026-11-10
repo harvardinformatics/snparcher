@@ -1,7 +1,7 @@
 def glnexus_joint_input(wc):
     return {
         "gvcfs": get_joint_gvcf_paths(),
-        "indexes": get_glnexus_joint_gvcf_indexes(),
+        "indexes": get_joint_gvcf_indexes(),
     }
 
 

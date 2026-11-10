@@ -35,14 +35,9 @@ pytest-xdist = "*"
 pytest-split = "*"
 pytest-dependency = ">=0.5.1,<0.6"
 
-[tool.pixi.feature.docs.dependencies]
-mkdocs = "*"
-mkdocs-material = "*"
-
 [tool.pixi.environments]
 default = { features = [], solve-group = "default" }
 dev = { features = ["dev"], solve-group = "default" }
-docs = { features = ["docs"], solve-group = "default" }
 
 # ============ TASKS ============
 
@@ -76,10 +71,6 @@ unit-test-debug = "pytest -v tests/unit_tests.py -s --conda-prefix $(pwd)/.snake
 
 # Dry run
 dry-run = "snakemake -s workflow/Snakefile --configfile tests/configs/local_genome.yaml --config samples=tests/sample_sheets/local_fastqs_no_dedup.csv -n -p all"
-
-[tool.pixi.feature.docs.tasks]
-docs-serve = "mkdocs serve"
-docs-build = "mkdocs build"
 
 # ============ RUFF CONFIGURATION ============
 

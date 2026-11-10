@@ -1,6 +1,3 @@
-from pathlib import Path
-import os
-
 configfile: "config/config.yaml"
 
 include: "rules/common.smk"
@@ -14,7 +11,12 @@ include: "rules/callable_sites.smk"
 if VARIANT_TOOL == "sentieon":
     include: "rules/variant_calling/sentieon.smk"
 elif VARIANT_TOOL == "gatk":
+    include: "rules/variant_calling/gatk_gvcf.smk"
+    include: "rules/variant_calling/genomicsdb_mapfile.smk"
     if config["intervals"]["enabled"]:
+        # Joint genotyping, shared with Parabricks; it also defines the staged
+        # concat helpers that gatk_intervals.smk uses.
+        include: "rules/variant_calling/joint_gvcf_intervals.smk"
         include: "rules/variant_calling/gatk_intervals.smk"
     else:
         include: "rules/variant_calling/gatk.smk"
@@ -26,6 +28,7 @@ elif VARIANT_TOOL == "deepvariant":
     include: "rules/variant_calling/glnexus_gvcf.smk"
 elif VARIANT_TOOL == "parabricks":
     include: "rules/variant_calling/parabricks.smk"
+    include: "rules/variant_calling/genomicsdb_mapfile.smk"
     include: "rules/variant_calling/joint_gvcf_intervals.smk"
 else:
     raise ValueError(f"Unsupported variant_calling.tool: {VARIANT_TOOL}")
@@ -63,10 +66,7 @@ if POSTPROCESS_ENABLED:
     # Forward only the documented filtering keys, and set the workflow's own
     # inputs last: an unsupported key such as filtering.vcf (warned about and
     # "ignored" by config validation) used to override the input VCF.
-    _POSTPROCESS_FILTERING_KEYS = (
-        "contig_size", "maf", "missingness", "exclude_scaffolds",
-        "split_by_type", "keep_basic_filter",
-    )
+    _POSTPROCESS_FILTERING_KEYS = DEFAULTS["modules"]["postprocess"]["filtering"]
     _postprocess_config = {
         **{
             key: value
@@ -97,11 +97,11 @@ if config["modules"]["qc"]["enabled"]:
         # are valid for contigs of any length.
         "fai": REF_FILES["ref_fai"],
         "qc_report": "results/qc_metrics/qc_report.tsv",
-        "clusters": config["modules"]["qc"]["clusters"],
-        "min_depth": config["modules"]["qc"]["min_depth"],
-        "max_sample_missingness": config["modules"]["qc"]["max_sample_missingness"],
-        "google_api_key": config["modules"]["qc"]["google_api_key"],
-        "exclude_scaffolds": config["modules"]["qc"]["exclude_scaffolds"],
+        **{
+            key: config["modules"]["qc"][key]
+            for key in DEFAULTS["modules"]["qc"]
+            if key != "enabled"
+        },
     }
 
     module qc:
@@ -133,7 +133,9 @@ rule download_reads:
     """Download fastqs for all SRA samples."""
     input:
         [
-            f"results/fastqs/{record['sample_id']}/{record['library_id']}/{record['input_unit']}/{record['input']}_{read}.fastq.gz"
+            sra_fastq(
+                record["sample_id"], record["library_id"], record["input_unit"], record["input"], read
+            )
             for sample in SAMPLES_SRR
             for record in get_sample_srr_records(sample)
             for read in [1, 2]

@@ -9,6 +9,27 @@ def get_db_interval_count(wildcards):
 INTERVAL_LIST_TOOLS = str(Path(workflow.basedir, "scripts/interval_list_tools.py"))
 
 
+def interval_list_ids(kind, wildcards):
+    """IDs of the interval lists in results/intervals/{kind}/ (gvcf or db).
+
+    Once the lists exist they are read straight from disk, because
+    checkpoint.get() does not see a checkpoint output made by an earlier run:
+    running `setup` and then `all` failed (snakemake/snakemake#3879).
+    """
+    intervals_file = f"results/intervals/{kind}/intervals.txt"
+    if not exists(intervals_file):
+        list_checkpoint = {
+            "gvcf": checkpoints.create_gvcf_intervals,
+            "db": checkpoints.create_db_intervals,
+        }[kind]
+        intervals_file = list_checkpoint.get(**wildcards).output[0]
+    with open(intervals_file) as f:
+        return [
+            os.path.basename(line.strip()).replace("-scattered.interval_list", "")
+            for line in f
+        ]
+
+
 rule picard_intervals:
     input:
         **REF_FILES,

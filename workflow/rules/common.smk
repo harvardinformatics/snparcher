@@ -1,5 +1,4 @@
 from importlib.metadata import PackageNotFoundError, version
-import logging
 import os
 import platform
 import pwd
@@ -18,6 +17,11 @@ from jsonschema import Draft202012Validator
 from snakemake.exceptions import WorkflowError
 from snakemake.logging import logger
 from snakemake.utils import validate
+
+# Plain Python shared by the workflow's rules, importable and unit-testable.
+sys.path.insert(0, str(Path(workflow.basedir) / "lib"))
+from booleans import parse_bool_column
+from staged_concat import final_stage_file, stage_inputs
 
 
 # --- Config defaults and validation ---
@@ -52,90 +56,19 @@ def set_defaults(cfg, defaults):
             set_defaults(cfg[key], value)
 
 
-DEFAULTS = {
-    "samples": "config/samples.csv",
-    "sample_metadata": "",
-    "reads": {
-        "mark_duplicates": True,
-    },
-    "variant_calling": {
-        "expected_coverage": "low",
-        "tool": "gatk",
-        "long_contig_mode": "auto",
-        "generate_filtered_vcf": True,
-        "ploidy": 2,
-        "gatk": {
-            "het_prior": 0.005,
-            "concat_batch_size": 250,
-            "concat_max_rounds": 20,
-        },
-        "sentieon": {
-            "license": "",
-        },
-        "bcftools": {
-            "min_mapq": 20,
-            "min_baseq": 20,
-            "max_depth": 250,
-        },
-        "deepvariant": {
-            "model_type": "WGS",
-            "num_shards": 8,
-        },
-        "parabricks": {
-            "container_image": "",
-            "num_gpus": 1,
-            "num_cpu_threads": 16,
-            "extra_args": "",
-        },
-    },
-    "intervals": {
-        "enabled": True,
-        "min_nmer": 500,
-        "num_gvcf_intervals": 50,
-        "db_scatter_factor": 0.15,
-        "min_contig_length": 0,
-        "db_max_intervals_per_shard": 200,
-        "db_max_contigs_per_shard": 200,
-    },
-    "callable_sites": {
-        "generate_bed_file": True,
-        "coverage": {
-            "enabled": True,
-            "min_sample_depth": 1,
-            "fraction": 0.25,
-            "max_depth": "auto",
-            "max_depth_k": 4,
-            "merge_distance": 100,
-        },
-        "mappability": {
-            "enabled": True,
-            "kmer": 150,
-            "min_score": 1,
-            "merge_distance": 100,
-        },
-    },
-    "modules": {
-        "qc": {
-            "enabled": False,
-            "clusters": 3,
-            "min_depth": 2,
-            "max_sample_missingness": 0.49,
-            "google_api_key": "",
-            "exclude_scaffolds": "",
-        },
-        "postprocess": {
-            "enabled": False,
-            "filtering": {
-                "contig_size": 10000,
-                "maf": 0.01,
-                "missingness": 0.75,
-                "exclude_scaffolds": "mtDNA,Y",
-                "split_by_type": True,
-                "keep_basic_filter": False,
-            },
-        },
-    },
-}
+def schema_defaults(schema):
+    """The defaults declared in a JSON schema, as a nested dict. Objects whose
+    properties have no defaults (such as reference) are left out, so a missing
+    required block still fails validation."""
+    defaults = {}
+    for key, prop in schema.get("properties", {}).items():
+        if prop.get("type") == "object" and "properties" in prop:
+            nested = schema_defaults(prop)
+            if nested:
+                defaults[key] = nested
+        elif "default" in prop:
+            defaults[key] = prop["default"]
+    return defaults
 
 
 GENOMICSDB_MERGE_CONTIG_THRESHOLD = 50
@@ -349,6 +282,7 @@ if v1_markers:
 normalize_supported_config_aliases(config)
 REPLACED_COVERAGE_KEYS = pop_replaced_coverage_keys(config)
 remove_unsupported_module_blocks(config)
+DEFAULTS = schema_defaults(yaml.safe_load(CONFIG_SCHEMA_PATH.read_text()))
 set_defaults(config, DEFAULTS)
 validate_config_with_warnings(config, CONFIG_SCHEMA_PATH)
 
@@ -391,47 +325,6 @@ def get_gatk_hard_filter_args():
 
 # --- Sample sheet loading and validation ---
 
-def _parse_mark_duplicates(values, default):
-    truthy = {"true", "t", "yes", "y", "1"}
-    falsy = {"false", "f", "no", "n", "0"}
-    parsed = []
-    invalid = []
-
-    for idx, value in values.items():
-        if pd.isna(value):
-            parsed.append(default)
-            continue
-
-        if isinstance(value, bool):
-            parsed.append(value)
-            continue
-
-        if isinstance(value, (int, float)):
-            if value == 1:
-                parsed.append(True)
-                continue
-            if value == 0:
-                parsed.append(False)
-                continue
-
-        value_str = str(value).strip().lower()
-        if value_str in truthy:
-            parsed.append(True)
-        elif value_str in falsy:
-            parsed.append(False)
-        else:
-            invalid.append((idx, value))
-
-    if invalid:
-        idx, value = invalid[0]
-        raise ValueError(
-            f"Invalid mark_duplicates value at row {idx + 2}: {value!r}. "
-            "Use true/false (or equivalent boolean values)."
-        )
-
-    return pd.Series(parsed, index=values.index, dtype=bool)
-
-
 # Read ID columns as plain text. pandas would otherwise read IDs such as "NA",
 # "null" or "None" as missing values; a library_id of "NA" would then fall
 # back to the sample_id and merge libraries the user declared separate.
@@ -460,8 +353,9 @@ else:
 if "mark_duplicates" not in samples_df.columns:
     samples_df["mark_duplicates"] = global_mark_duplicates
 else:
-    samples_df["mark_duplicates"] = _parse_mark_duplicates(
+    samples_df["mark_duplicates"] = parse_bool_column(
         samples_df["mark_duplicates"],
+        "mark_duplicates",
         default=global_mark_duplicates,
     )
 
@@ -541,11 +435,18 @@ if VARIANT_TOOL == "parabricks":
 
 # Every Sentieon rule exports SENTIEON_LICENSE from this setting, so an empty
 # value fails every Sentieon job, after the run has started.
-if VARIANT_TOOL == "sentieon" and not str(config["variant_calling"]["sentieon"]["license"]).strip():
+SENTIEON_LICENSE = config["variant_calling"]["sentieon"]["license"]
+if VARIANT_TOOL == "sentieon" and not str(SENTIEON_LICENSE).strip():
     raise ValueError(
         "variant_calling.sentieon.license is required when variant_calling.tool='sentieon'. "
         "Set it to your Sentieon license server (host:port) or license file path."
     )
+
+# HaplotypeCaller graph pruning (GATK and Parabricks): keep more of the
+# assembly graph when coverage is low.
+_LOW_COVERAGE = config["variant_calling"]["expected_coverage"] == "low"
+HC_MIN_PRUNING = 1 if _LOW_COVERAGE else 2
+HC_MIN_DANGLING = 1 if _LOW_COVERAGE else 4
 
 samples_df["input_unit"] = (
     samples_df.groupby(["sample_id", "library_id"]).cumcount().add(1).map(lambda x: f"u{x}")
@@ -643,7 +544,6 @@ if LONG_CONTIG_MODE and VARIANT_TOOL in {"sentieon", "parabricks"}:
 
 COMPRESSED_VCF_INDEX_SUFFIX = ".csi" if LONG_CONTIG_MODE else ".tbi"
 BCFTOOLS_INDEX_ARGS = "-f -c" if LONG_CONTIG_MODE else "-f -t"
-BCFTOOLS_WRITE_INDEX_FORMAT = "csi" if LONG_CONTIG_MODE else "tbi"
 
 
 def get_compressed_vcf_index(vcf):
@@ -717,6 +617,15 @@ def raw_vcf_output(path):
     return temp(path) if APPLY_HARD_FILTERS else path
 
 
+# Outputs of the rule that writes the raw joint VCF (joint_genotype_gvcfs, or
+# concat_interval_vcfs with intervals). In long-contig mode it is an
+# uncompressed work VCF, which a compress rule turns into raw.vcf.gz.
+if LONG_CONTIG_MODE:
+    RAW_VCF_OUTPUT = {"vcf": temp(RAW_VCF_WORK), "idx": temp(RAW_VCF_WORK_INDEX)}
+else:
+    RAW_VCF_OUTPUT = {"vcf": raw_vcf_output(RAW_VCF), "idx": raw_vcf_output(RAW_VCF_INDEX)}
+
+
 # --- Sample lists ---
 
 SAMPLES_ALL = samples_df["sample_id"].unique().tolist()
@@ -726,9 +635,6 @@ SAMPLES_NEED_ALIGNMENT = samples_df[
 ]["sample_id"].unique().tolist()
 SAMPLES_WITH_BAM = samples_df[
     samples_df["input_type"].isin(["srr", "fastq", "bam"])
-]["sample_id"].unique().tolist()
-SAMPLES_WITH_FASTQ = samples_df[
-    samples_df["input_type"].isin(["srr", "fastq"])
 ]["sample_id"].unique().tolist()
 SAMPLES_WITH_GVCF = samples_df[
     samples_df["input_type"] == "gvcf"
@@ -809,7 +715,8 @@ if CALLABLE_GENERATE_BED_FILE and not CALLABLE_BED_SOURCE_ENABLED:
     )
     CALLABLE_GENERATE_BED_FILE = False
 
-CALLABLE_FINAL_BED_ENABLED = CALLABLE_GENERATE_BED_FILE and CALLABLE_BED_SOURCE_ENABLED
+# Reset above when no source is enabled, so this implies a source.
+CALLABLE_FINAL_BED_ENABLED = CALLABLE_GENERATE_BED_FILE
 
 POSTPROCESS_ENABLED = bool(config["modules"]["postprocess"]["enabled"])
 if POSTPROCESS_ENABLED and not CALLABLE_FINAL_BED_ENABLED:
@@ -872,11 +779,6 @@ def get_sample_scalar(sample, column):
             f"Sample '{sample}' has non-unique values for '{column}': {values}"
         )
     return values[0]
-
-
-def get_sample_input_type(sample):
-    """Get sample input_type."""
-    return get_sample_scalar(sample, "input_type")
 
 
 @cache
@@ -1037,16 +939,6 @@ def get_joint_gvcf_indexes():
     return [get_vcf_index(gvcf) for gvcf in get_joint_gvcf_paths()]
 
 
-def get_glnexus_joint_gvcf_indexes():
-    """Return only compressed gVCF indexes needed before GLnexus can run."""
-    return [get_vcf_index(gvcf) for gvcf in get_joint_gvcf_paths()]
-
-
-def get_joint_gvcf_tbis():
-    """Backward-compatible alias for older rule code."""
-    return get_joint_gvcf_indexes()
-
-
 def write_joint_gvcf_mapfile(path):
     """Write a GenomicsDB sample-name map keyed by sample_id."""
     with open(path, "w") as handle:
@@ -1055,32 +947,6 @@ def write_joint_gvcf_mapfile(path):
 
 
 # --- Sample metadata loading (optional) ---
-
-def _parse_bool_column(series, column_name):
-    """Parse a boolean column from metadata CSV, tolerating string representations."""
-    truthy = {"true", "t", "yes", "y", "1"}
-    falsy = {"false", "f", "no", "n", "0", ""}
-    parsed = []
-    for idx, value in series.items():
-        if pd.isna(value):
-            parsed.append(False)
-        elif isinstance(value, bool):
-            parsed.append(value)
-        elif isinstance(value, (int, float)) and value in (0, 1):
-            parsed.append(bool(value))
-        else:
-            v = str(value).strip().lower()
-            if v in truthy:
-                parsed.append(True)
-            elif v in falsy:
-                parsed.append(False)
-            else:
-                raise ValueError(
-                    f"Invalid {column_name} value at row {idx + 2}: {value!r}. "
-                    "Use true/false (or equivalent boolean values)."
-                )
-    return pd.Series(parsed, index=series.index, dtype=bool)
-
 
 metadata_df = None
 
@@ -1092,7 +958,7 @@ if config.get("sample_metadata"):
     # pandas reads yes/no as strings and 1/0 as numbers; the schema expects
     # a boolean, so parse the column before validating.
     if "exclude" in metadata_df.columns:
-        metadata_df["exclude"] = _parse_bool_column(metadata_df["exclude"], "exclude")
+        metadata_df["exclude"] = parse_bool_column(metadata_df["exclude"], "exclude")
     validate(metadata_df, Path(workflow.basedir, "schemas/sample_metadata.schema.yaml"))
 
     # Validate sample_id values exist in the main sample sheet

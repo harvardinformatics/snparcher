@@ -22,7 +22,7 @@ rule sentieon_haplotyper:
         gvcf="results/gvcfs/{sample}.g.vcf.gz",
         tbi="results/gvcfs/{sample}.g.vcf.gz.tbi",
     params:
-        lic=config["variant_calling"]["sentieon"]["license"],
+        lic=SENTIEON_LICENSE,
         ploidy=config["variant_calling"]["ploidy"],
     threads: 8
     conda:
@@ -56,7 +56,7 @@ rule sentieon_combine_gvcf:
         vcf=raw_vcf_output(RAW_VCF),
         tbi=raw_vcf_output(RAW_VCF_INDEX),
     params:
-        lic=config["variant_calling"]["sentieon"]["license"],
+        lic=SENTIEON_LICENSE,
         gvcf_args=lambda wc, input: " ".join([f"-v {g}" for g in input.gvcfs]),
     threads: 8
     conda:

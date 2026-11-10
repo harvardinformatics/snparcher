@@ -11,6 +11,7 @@ properties:
 
   sample_metadata:
     type: string
+    default: ""
     description: >
       Optional path to a sample metadata CSV file. Must contain a sample_id
       column that matches entries in the samples CSV. Additional columns

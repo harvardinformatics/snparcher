@@ -349,7 +349,6 @@ rule subsample_snps:
     input:
         vcf=config["vcf"],
         samps="results/qc/individuals.samps.txt",
-        fai=config["fai"],
     output:
         filtered=temp("results/qc/filtered.vcf.gz"),
         filtered_idx=temp("results/qc/filtered.vcf.gz.csi"),
@@ -505,16 +504,12 @@ rule plink:
 
 
 rule setup_admixture:
-    """
-    Admixture requires integer chromosome names.
-    Back up original .bim, then remap contig names to 1..N.
-    """
+    """Admixture requires integer chromosome names: remap contig names to 1..N."""
     input:
         bim="results/qc/plink.bim",
         contig_map="results/qc/contig_map.tsv",
     output:
         bim="results/qc/plink.bim_fixed",
-        bim_back="results/qc/plink.bim.orig",
     script:
         "scripts/contigs4admixture.py"
 
@@ -523,10 +518,8 @@ rule admixture:
     """Run ADMIXTURE for K=2 and K=3."""
     input:
         bed="results/qc/plink.bed",
-        bim="results/qc/plink.bim",
         fam="results/qc/plink.fam",
         bim_fixed="results/qc/plink.bim_fixed",
-        bim_back="results/qc/plink.bim.orig",
     output:
         admix3="results/qc/plink.3.Q",
         admix2="results/qc/plink.2.Q",
