@@ -20,6 +20,7 @@ from snakemake.utils import validate
 
 # Plain Python shared by the workflow's rules, importable and unit-testable.
 sys.path.insert(0, str(Path(workflow.basedir) / "lib"))
+from booleans import parse_bool_column
 from staged_concat import final_stage_file, stage_inputs
 
 
@@ -394,47 +395,6 @@ def get_gatk_hard_filter_args():
 
 # --- Sample sheet loading and validation ---
 
-def _parse_mark_duplicates(values, default):
-    truthy = {"true", "t", "yes", "y", "1"}
-    falsy = {"false", "f", "no", "n", "0"}
-    parsed = []
-    invalid = []
-
-    for idx, value in values.items():
-        if pd.isna(value):
-            parsed.append(default)
-            continue
-
-        if isinstance(value, bool):
-            parsed.append(value)
-            continue
-
-        if isinstance(value, (int, float)):
-            if value == 1:
-                parsed.append(True)
-                continue
-            if value == 0:
-                parsed.append(False)
-                continue
-
-        value_str = str(value).strip().lower()
-        if value_str in truthy:
-            parsed.append(True)
-        elif value_str in falsy:
-            parsed.append(False)
-        else:
-            invalid.append((idx, value))
-
-    if invalid:
-        idx, value = invalid[0]
-        raise ValueError(
-            f"Invalid mark_duplicates value at row {idx + 2}: {value!r}. "
-            "Use true/false (or equivalent boolean values)."
-        )
-
-    return pd.Series(parsed, index=values.index, dtype=bool)
-
-
 # Read ID columns as plain text. pandas would otherwise read IDs such as "NA",
 # "null" or "None" as missing values; a library_id of "NA" would then fall
 # back to the sample_id and merge libraries the user declared separate.
@@ -463,8 +423,9 @@ else:
 if "mark_duplicates" not in samples_df.columns:
     samples_df["mark_duplicates"] = global_mark_duplicates
 else:
-    samples_df["mark_duplicates"] = _parse_mark_duplicates(
+    samples_df["mark_duplicates"] = parse_bool_column(
         samples_df["mark_duplicates"],
+        "mark_duplicates",
         default=global_mark_duplicates,
     )
 
@@ -1057,32 +1018,6 @@ def write_joint_gvcf_mapfile(path):
 
 # --- Sample metadata loading (optional) ---
 
-def _parse_bool_column(series, column_name):
-    """Parse a boolean column from metadata CSV, tolerating string representations."""
-    truthy = {"true", "t", "yes", "y", "1"}
-    falsy = {"false", "f", "no", "n", "0", ""}
-    parsed = []
-    for idx, value in series.items():
-        if pd.isna(value):
-            parsed.append(False)
-        elif isinstance(value, bool):
-            parsed.append(value)
-        elif isinstance(value, (int, float)) and value in (0, 1):
-            parsed.append(bool(value))
-        else:
-            v = str(value).strip().lower()
-            if v in truthy:
-                parsed.append(True)
-            elif v in falsy:
-                parsed.append(False)
-            else:
-                raise ValueError(
-                    f"Invalid {column_name} value at row {idx + 2}: {value!r}. "
-                    "Use true/false (or equivalent boolean values)."
-                )
-    return pd.Series(parsed, index=series.index, dtype=bool)
-
-
 metadata_df = None
 
 if config.get("sample_metadata"):
@@ -1093,7 +1028,7 @@ if config.get("sample_metadata"):
     # pandas reads yes/no as strings and 1/0 as numbers; the schema expects
     # a boolean, so parse the column before validating.
     if "exclude" in metadata_df.columns:
-        metadata_df["exclude"] = _parse_bool_column(metadata_df["exclude"], "exclude")
+        metadata_df["exclude"] = parse_bool_column(metadata_df["exclude"], "exclude")
     validate(metadata_df, Path(workflow.basedir, "schemas/sample_metadata.schema.yaml"))
 
     # Validate sample_id values exist in the main sample sheet

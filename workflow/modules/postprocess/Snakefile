@@ -27,8 +27,14 @@ Config keys (flat):
 """
 
 import shlex
+import sys
+from pathlib import Path
 
 import pandas as pd
+
+# Shared helpers in workflow/lib, two directories up from this module.
+sys.path.insert(0, str(Path(workflow.current_basedir).parents[1] / "lib"))
+from booleans import parse_bool_column
 
 # ---------- Config / defaults ------------------------------------------------
 # No configfile directive: it resolved against the working directory, so a
@@ -122,33 +128,8 @@ if _meta_path:
     _metadata_df = pd.read_csv(_meta_path, converters=_SAMPLE_METADATA_CONVERTERS)
 
 
-def _parse_bool(series, col_name):
-    """Tolerant boolean parser (matches common.smk logic)."""
-    truthy = {"true", "t", "yes", "y", "1"}
-    falsy  = {"false", "f", "no", "n", "0", ""}
-    out = []
-    for idx, v in series.items():
-        if pd.isna(v):
-            out.append(False)
-        elif isinstance(v, bool):
-            out.append(v)
-        elif isinstance(v, (int, float)) and v in (0, 1):
-            out.append(bool(v))
-        else:
-            s = str(v).strip().lower()
-            if s in truthy:
-                out.append(True)
-            elif s in falsy:
-                out.append(False)
-            else:
-                raise ValueError(
-                    f"Invalid {col_name} value at row {idx + 2}: {v!r}"
-                )
-    return pd.Series(out, index=series.index, dtype=bool)
-
-
 if _metadata_df is not None and "exclude" in _metadata_df.columns:
-    _metadata_df["exclude"] = _parse_bool(_metadata_df["exclude"], "exclude")
+    _metadata_df["exclude"] = parse_bool_column(_metadata_df["exclude"], "exclude")
 
 
 def _get_excluded_samples():
