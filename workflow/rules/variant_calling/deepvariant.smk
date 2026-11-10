@@ -7,8 +7,6 @@ def apptainer_enabled():
 
 
 def deepvariant_input(wildcards):
-    if sample_has_input_type(wildcards.sample, "gvcf"):
-        raise ValueError(f"Sample {wildcards.sample} has input_type 'gvcf', should not call deepvariant")
     # run_deepvariant exists only inside the container image, and Snakemake
     # ignores the container directive unless Apptainer is enabled. Fail while
     # building the DAG rather than after mapping has finished.

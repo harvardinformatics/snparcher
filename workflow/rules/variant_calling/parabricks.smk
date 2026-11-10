@@ -1,9 +1,4 @@
 def parabricks_haplotypecaller_input(wildcards):
-    if sample_has_input_type(wildcards.sample, "gvcf"):
-        raise ValueError(
-            f"Sample {wildcards.sample} has input_type 'gvcf', should not call haplotypecaller"
-        )
-
     return {
         **get_indexed_final_bam_input(wildcards.sample),
         **REF_FILES,

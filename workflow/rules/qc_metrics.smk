@@ -133,7 +133,7 @@ rule combine_qc_metrics:
         
         # Load sentieon stats if available
         sentieon_stats = {}
-        if hasattr(input, "sentieon"):
+        if USE_SENTIEON:
             for fn in input.sentieon:
                 sample = os.path.basename(fn).replace(".json", "")
                 with open(fn) as f:
@@ -190,15 +190,12 @@ rule combine_qc_metrics:
                     str(bam["covered_bases"]),
                 ])
                 
-                # Sentieon stats
+                # Sentieon stats (every BAM-backed sample has them when Sentieon runs)
                 if sentieon_stats:
-                    if sample in sentieon_stats:
-                        sent = sentieon_stats[sample]
-                        row.extend([
-                            str(sent["median_insert_size"]) if sent["median_insert_size"] else "NA",
-                            str(sent["median_abs_dev_insert"]) if sent["median_abs_dev_insert"] else "NA",
-                        ])
-                    else:
-                        row.extend(["NA", "NA"])
+                    sent = sentieon_stats[sample]
+                    row.extend([
+                        str(sent["median_insert_size"]) if sent["median_insert_size"] else "NA",
+                        str(sent["median_abs_dev_insert"]) if sent["median_abs_dev_insert"] else "NA",
+                    ])
                 
                 f.write("\t".join(row) + "\n")
