@@ -75,24 +75,13 @@ rule stage_external_bam:
     log:
         "logs/stage_external_bam/{sample}.txt"
     run:
+        # Snakemake checks that the input exists, removes any previous output
+        # (dangling symlinks included) and creates the output and log
+        # directories before the job runs.
         src = Path(input.bam).resolve()
-        dest = Path(output.bam)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        Path(log[0]).parent.mkdir(parents=True, exist_ok=True)
-
-        if not src.exists():
-            raise FileNotFoundError(f"External BAM not found for sample {wildcards.sample}: {src}")
-
-        if dest.exists() or dest.is_symlink():
-            if dest.resolve() == src:
-                with open(log[0], "w") as handle:
-                    handle.write(f"External BAM already staged: {dest} -> {src}\n")
-                return
-            dest.unlink()
-
-        dest.symlink_to(src)
+        Path(output.bam).symlink_to(src)
         with open(log[0], "w") as handle:
-            handle.write(f"Staged external BAM: {dest} -> {src}\n")
+            handle.write(f"Staged external BAM: {output.bam} -> {src}\n")
 
 
 rule index_bam_csi:
