@@ -18,6 +18,10 @@ from snakemake.exceptions import WorkflowError
 from snakemake.logging import logger
 from snakemake.utils import validate
 
+# Plain Python shared by the workflow's rules, importable and unit-testable.
+sys.path.insert(0, str(Path(workflow.basedir) / "lib"))
+from staged_concat import final_stage_file, stage_inputs
+
 
 # --- Config defaults and validation ---
 

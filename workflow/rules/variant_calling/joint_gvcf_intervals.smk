@@ -63,70 +63,20 @@ def get_concat_max_rounds():
     return rounds
 
 
-def _ceil_div(a, b):
-    return (a + b - 1) // b
-
-
-def get_stage_chunk_counts(num_files):
-    """Compute chunk counts for each staged concat round."""
-    if num_files < 1:
-        raise ValueError("Staged concat requires at least one input file")
-
-    batch_size = get_concat_batch_size()
-    max_rounds = get_concat_max_rounds()
-
-    counts = []
-    current = num_files
-    while current > 1:
-        if len(counts) >= max_rounds:
-            raise ValueError(
-                f"Staged concat exceeded variant_calling.gatk.concat_max_rounds={max_rounds}. "
-                "Increase concat_batch_size or concat_max_rounds."
-            )
-        n_chunks = _ceil_div(current, batch_size)
-        counts.append(n_chunks)
-        current = n_chunks
-    return counts
-
-
 def staged_vcf_path(wc, round_idx, chunk_idx):
     return STAGED_VCF_PATTERN.format(round=round_idx, chunk=chunk_idx)
 
 
 def get_stage_inputs(base_files, round_idx, chunk_idx, wc, path_builder):
-    """Return input files for one staged concat chunk."""
-    stage_counts = get_stage_chunk_counts(len(base_files))
-    if not stage_counts:
-        raise ValueError("Requested staged concat inputs with only one base file")
-
-    if round_idx < 1 or round_idx > len(stage_counts):
-        raise ValueError(
-            f"Invalid staged concat round {round_idx}. Valid rounds are 1..{len(stage_counts)}"
-        )
-
-    n_chunks = stage_counts[round_idx - 1]
-    if chunk_idx < 0 or chunk_idx >= n_chunks:
-        raise ValueError(
-            f"Invalid staged concat chunk {chunk_idx} for round {round_idx}. "
-            f"Valid chunks are 0..{n_chunks - 1}"
-        )
-
-    if round_idx == 1:
-        round_inputs = list(base_files)
-    else:
-        prev_chunks = stage_counts[round_idx - 2]
-        round_inputs = [path_builder(wc, round_idx - 1, i) for i in range(prev_chunks)]
-
-    batch_size = get_concat_batch_size()
-    start = chunk_idx * batch_size
-    end = min(start + batch_size, len(round_inputs))
-    selected = round_inputs[start:end]
-
-    if not selected:
-        raise ValueError(
-            f"No files selected for staged concat round={round_idx}, chunk={chunk_idx}"
-        )
-    return selected
+    """Input files for one staged concat chunk (see lib/staged_concat.py)."""
+    return stage_inputs(
+        base_files,
+        round_idx,
+        chunk_idx,
+        get_concat_batch_size(),
+        get_concat_max_rounds(),
+        lambda r, c: path_builder(wc, r, c),
+    )
 
 
 def format_picard_vcf_inputs(files):
@@ -183,16 +133,13 @@ else:
 
 
 def get_final_stage_file(base_files, wc, path_builder):
-    """Return final staged output path (or original file if no staging is needed)."""
-    if not base_files:
-        raise ValueError("No files available for concat")
-
-    stage_counts = get_stage_chunk_counts(len(base_files))
-    if not stage_counts:
-        return base_files[0]
-
-    final_round = len(stage_counts)
-    return path_builder(wc, final_round, 0)
+    """Final staged output, or the single base file if no staging is needed."""
+    return final_stage_file(
+        base_files,
+        get_concat_batch_size(),
+        get_concat_max_rounds(),
+        lambda r, c: path_builder(wc, r, c),
+    )
 
 
 def get_interval_vcf_stage_inputs(wc):

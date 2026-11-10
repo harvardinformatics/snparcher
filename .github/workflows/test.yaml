@@ -61,7 +61,7 @@ jobs:
           environments: dev
 
       - name: Run script tests
-        run: pixi run -e dev pytest -v tests/test_callable_zarr_to_bed.py
+        run: pixi run -e dev pytest -v tests/test_callable_zarr_to_bed.py tests/test_staged_concat.py
 
   build-conda-envs:
     name: build conda envs
