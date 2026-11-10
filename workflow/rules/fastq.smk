@@ -401,8 +401,6 @@ rule collect_fastp_stats:
         unpack(collect_fastp_input),
     output:
         json="results/qc_metrics/fastp/{sample}.json",
-    log:
-        "logs/collect_fastp_stats/{sample}.txt"
     run:
         import json
         

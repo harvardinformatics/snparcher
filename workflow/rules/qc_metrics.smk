@@ -4,8 +4,6 @@ rule parse_bam_stats:
         flagstat="results/qc_metrics/bam/{sample}_flagstat.txt",
     output:
         json="results/qc_metrics/bam/{sample}.json",
-    log:
-        "logs/parse_bam_stats/{sample}.txt"
     run:
         import json
         
@@ -69,8 +67,6 @@ rule parse_sentieon_stats:
         insert_file="results/qc_metrics/sentieon/{sample}_insert_metrics.txt",
     output:
         json="results/qc_metrics/sentieon/{sample}.json",
-    log:
-        "logs/parse_sentieon_stats/{sample}.txt"
     run:
         import json
         
@@ -112,8 +108,6 @@ rule combine_qc_metrics:
         unpack(combine_qc_input),
     output:
         tsv="results/qc_metrics/qc_report.tsv",
-    log:
-        "logs/combine_qc_metrics.txt"
     run:
         import json
         

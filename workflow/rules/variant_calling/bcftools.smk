@@ -13,7 +13,6 @@ checkpoint bcftools_regions:
     output:
         tsv="results/vcfs/regions/regions.tsv",
     run:
-        Path("results/vcfs/regions").mkdir(parents=True, exist_ok=True)
         with open(input.ref_fai) as fin, open(output.tsv, "w") as fout:
             for idx, line in enumerate(fin):
                 contig = line.split("\t", 1)[0].strip()
