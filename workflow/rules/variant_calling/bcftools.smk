@@ -1,6 +1,3 @@
-from pathlib import Path
-
-
 def bcftools_call_input(wc):
     bams = [get_final_bam(s) for s in SAMPLES_WITH_BAM]
     return {

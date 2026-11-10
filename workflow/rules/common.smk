@@ -1,5 +1,4 @@
 from importlib.metadata import PackageNotFoundError, version
-import logging
 import os
 import platform
 import pwd
@@ -643,7 +642,6 @@ if LONG_CONTIG_MODE and VARIANT_TOOL in {"sentieon", "parabricks"}:
 
 COMPRESSED_VCF_INDEX_SUFFIX = ".csi" if LONG_CONTIG_MODE else ".tbi"
 BCFTOOLS_INDEX_ARGS = "-f -c" if LONG_CONTIG_MODE else "-f -t"
-BCFTOOLS_WRITE_INDEX_FORMAT = "csi" if LONG_CONTIG_MODE else "tbi"
 
 
 def get_compressed_vcf_index(vcf):
@@ -727,9 +725,6 @@ SAMPLES_NEED_ALIGNMENT = samples_df[
 SAMPLES_WITH_BAM = samples_df[
     samples_df["input_type"].isin(["srr", "fastq", "bam"])
 ]["sample_id"].unique().tolist()
-SAMPLES_WITH_FASTQ = samples_df[
-    samples_df["input_type"].isin(["srr", "fastq"])
-]["sample_id"].unique().tolist()
 SAMPLES_WITH_GVCF = samples_df[
     samples_df["input_type"] == "gvcf"
 ]["sample_id"].unique().tolist()
@@ -809,7 +804,8 @@ if CALLABLE_GENERATE_BED_FILE and not CALLABLE_BED_SOURCE_ENABLED:
     )
     CALLABLE_GENERATE_BED_FILE = False
 
-CALLABLE_FINAL_BED_ENABLED = CALLABLE_GENERATE_BED_FILE and CALLABLE_BED_SOURCE_ENABLED
+# Reset above when no source is enabled, so this implies a source.
+CALLABLE_FINAL_BED_ENABLED = CALLABLE_GENERATE_BED_FILE
 
 POSTPROCESS_ENABLED = bool(config["modules"]["postprocess"]["enabled"])
 if POSTPROCESS_ENABLED and not CALLABLE_FINAL_BED_ENABLED:
@@ -872,11 +868,6 @@ def get_sample_scalar(sample, column):
             f"Sample '{sample}' has non-unique values for '{column}': {values}"
         )
     return values[0]
-
-
-def get_sample_input_type(sample):
-    """Get sample input_type."""
-    return get_sample_scalar(sample, "input_type")
 
 
 @cache
@@ -1035,16 +1026,6 @@ def get_joint_gvcf_paths():
 def get_joint_gvcf_indexes():
     """Return final gVCF index paths for GATK-style indexed readers."""
     return [get_vcf_index(gvcf) for gvcf in get_joint_gvcf_paths()]
-
-
-def get_glnexus_joint_gvcf_indexes():
-    """Return only compressed gVCF indexes needed before GLnexus can run."""
-    return [get_vcf_index(gvcf) for gvcf in get_joint_gvcf_paths()]
-
-
-def get_joint_gvcf_tbis():
-    """Backward-compatible alias for older rule code."""
-    return get_joint_gvcf_indexes()
 
 
 def write_joint_gvcf_mapfile(path):

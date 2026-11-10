@@ -26,15 +26,6 @@ def get_interval_vcfs(wc):
     )
 
 
-def get_interval_vcf_tbis(wc):
-    """Get unfiltered interval VCF index files."""
-    intervals = get_db_intervals(wc)
-    return expand(
-        "results/vcfs/intervals/L{interval}.vcf.gz.tbi",
-        interval=intervals,
-    )
-
-
 def get_gvcfs_for_db(wc):
     return {
         "gvcfs": get_joint_gvcf_paths(),

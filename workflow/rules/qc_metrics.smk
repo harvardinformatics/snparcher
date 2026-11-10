@@ -99,7 +99,7 @@ rule parse_sentieon_stats:
 def combine_qc_input(wildcards):
     """Get all QC metric files based on tool choice."""
     inputs = {
-        "fastp": expand("results/qc_metrics/fastp/{sample}.json", sample=SAMPLES_WITH_FASTQ),
+        "fastp": expand("results/qc_metrics/fastp/{sample}.json", sample=SAMPLES_NEED_ALIGNMENT),
         "bam": expand("results/qc_metrics/bam/{sample}.json", sample=SAMPLES_WITH_BAM),
     }
     if USE_SENTIEON:

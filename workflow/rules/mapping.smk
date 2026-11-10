@@ -1,7 +1,5 @@
 # mapping.smk
 
-from pathlib import Path
-
 def bwa_mem_input(wildcards):
     """Get input fastqs for alignment."""
     return {
@@ -37,14 +35,6 @@ def merge_library_bams_input(wildcards):
             f"results/bams/raw/{wildcards.sample}/{wildcards.library}/{input_unit}.bam"
             for input_unit in input_units
         ],
-    }
-
-
-def dedup_library_input(wildcards):
-    """Get input BAM for library-level duplicate marking."""
-    bam = f"results/bams/library/{wildcards.sample}/{wildcards.library}.bam"
-    return {
-        "bam": bam,
     }
 
 
@@ -149,7 +139,7 @@ if USE_SENTIEON:
 
     rule sentieon_dedup_library:
         input:
-            unpack(dedup_library_input),
+            bam="results/bams/library/{sample}/{library}.bam",
         output:
             bam=temp("results/bams/library_markdup/{sample}/{library}.bam"),
             score=temp("results/bams/library_markdup/{sample}/{library}_score.txt"),
@@ -233,7 +223,7 @@ else:
 
     rule markdup_library:
         input:
-            unpack(dedup_library_input),
+            bam="results/bams/library/{sample}/{library}.bam",
         output:
             bam=temp("results/bams/library_markdup/{sample}/{library}.bam"),
         threads: 4
