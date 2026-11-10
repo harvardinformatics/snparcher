@@ -132,7 +132,7 @@ def _parse_bool(series, col_name):
             out.append(False)
         elif isinstance(v, bool):
             out.append(v)
-        elif isinstance(v, (int, float)):
+        elif isinstance(v, (int, float)) and v in (0, 1):
             out.append(bool(v))
         else:
             s = str(v).strip().lower()

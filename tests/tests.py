@@ -2995,6 +2995,46 @@ def test_metadata_accepts_yes_no_and_1_0(request):
 
 
 @pytest.mark.dry_run
+def test_metadata_rejects_numbers_other_than_1_and_0(request):
+    """exclude=2 is a typo, not a yes: it must fail, not silently drop the
+    sample from postprocess and the coverage mask."""
+    no_conda = request.config.getoption("--no-conda")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        smk = SnakemakeRunner(Path(tmpdir), use_conda=not no_conda)
+        metadata = Path(tmpdir) / "metadata.csv"
+        metadata.write_text("sample_id,exclude\nsample1,0\nsample2,2\n")
+
+        result = smk.dry_run(
+            target="setup",
+            configfile=get_config_file(),
+            samples=get_samples_file(),
+            config_overrides={"sample_metadata": str(metadata)},
+        )
+        assert not result.succeeded
+        assert "Invalid exclude value at row 3: 2" in result.stdout + result.stderr
+
+        # The postprocess module parses the column itself, for standalone runs.
+        fixture_dir = TEST_DATA_DIR / "postprocess"
+        standalone = subprocess.run(
+            [
+                "snakemake", "-n",
+                "-s", str(WORKFLOW_DIR / "modules" / "postprocess" / "Snakefile"),
+                "--directory", tmpdir,
+                "--config",
+                f"samples={fixture_dir / 'samples.csv'}",
+                f"sample_metadata={metadata}",
+                f"vcf={fixture_dir / 'raw.vcf'}",
+                f"ref_fai={fixture_dir / 'ref.fai'}",
+                f"callable_sites_bed={fixture_dir / 'callable_sites.bed'}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert standalone.returncode != 0
+        assert "Invalid exclude value at row 3: 2" in standalone.stdout + standalone.stderr
+
+
+@pytest.mark.dry_run
 def test_partial_metadata_warns(request):
     """Pipeline warns when some samples lack metadata rows."""
     no_conda = request.config.getoption("--no-conda")

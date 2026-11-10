@@ -1058,7 +1058,7 @@ def _parse_bool_column(series, column_name):
             parsed.append(False)
         elif isinstance(value, bool):
             parsed.append(value)
-        elif isinstance(value, (int, float)):
+        elif isinstance(value, (int, float)) and value in (0, 1):
             parsed.append(bool(value))
         else:
             v = str(value).strip().lower()
