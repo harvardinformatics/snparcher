@@ -11,6 +11,7 @@ include: "rules/callable_sites.smk"
 if VARIANT_TOOL == "sentieon":
     include: "rules/variant_calling/sentieon.smk"
 elif VARIANT_TOOL == "gatk":
+    include: "rules/variant_calling/gatk_gvcf.smk"
     if config["intervals"]["enabled"]:
         # Joint genotyping, shared with Parabricks; it also defines the staged
         # concat helpers that gatk_intervals.smk uses.

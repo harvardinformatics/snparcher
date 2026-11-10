@@ -27,14 +27,6 @@ def haplotype_caller_input(wildcards):
     }
 
 
-def external_gvcf_input(wildcards):
-    if not sample_has_input_type(wildcards.sample, "gvcf"):
-        raise ValueError(
-            f"Sample {wildcards.sample} does not have input_type 'gvcf'"
-        )
-    return {"gvcf": get_final_gvcf(wildcards.sample)}
-
-
 def get_interval_gvcfs(wc):
     """Get interval gVCF files for a sample."""
     intervals = interval_list_ids("gvcf", wc)
@@ -161,8 +153,7 @@ rule concat_interval_gvcfs:
         gvcf=get_final_interval_gvcf_stage_file,
         tbi=get_final_interval_gvcf_stage_tbi,
     output:
-        gvcf=temp("results/gvcfs/work/{sample}.g.vcf") if LONG_CONTIG_MODE else "results/gvcfs/{sample}.g.vcf.gz",
-        idx=temp("results/gvcfs/work/{sample}.g.vcf.idx") if LONG_CONTIG_MODE else get_compressed_vcf_index("results/gvcfs/{sample}.g.vcf.gz"),
+        **GATK_SAMPLE_GVCF,
     benchmark:
         "benchmarks/concat_interval_gvcfs/{sample}.txt"
     log:
@@ -173,46 +164,3 @@ rule concat_interval_gvcfs:
         mv {input.tbi} {output.idx} 2>> {log}
         touch {output.gvcf} {output.idx}
         """
-
-
-if LONG_CONTIG_MODE:
-
-    rule normalize_external_gvcf_for_gatk:
-        input:
-            unpack(external_gvcf_input),
-        output:
-            gvcf=temp("results/gvcfs/work/external/{sample}.g.vcf"),
-            idx=temp("results/gvcfs/work/external/{sample}.g.vcf.idx"),
-        conda:
-            "../../envs/gatk.yaml"
-        benchmark:
-            "benchmarks/normalize_external_gvcf_for_gatk/{sample}.txt"
-        log:
-            "logs/normalize_external_gvcf_for_gatk/{sample}.txt"
-        shell:
-            """
-            bcftools view -O v -o {output.gvcf} {input.gvcf} 2> {log}
-            gatk IndexFeatureFile -I {output.gvcf} >> {log} 2>&1
-            """
-
-
-    rule archive_gatk_gvcf:
-        input:
-            gvcf=lambda wc: get_gatk_work_gvcf(wc.sample),
-            idx=lambda wc: get_gatk_work_gvcf_index(wc.sample),
-        output:
-            gvcf=get_archive_gvcf("{sample}"),
-            idx=get_archive_gvcf_index("{sample}"),
-        params:
-            index_args=BCFTOOLS_INDEX_ARGS,
-        conda:
-            "../../envs/bcftools.yaml"
-        benchmark:
-            "benchmarks/archive_gatk_gvcf/{sample}.txt"
-        log:
-            "logs/archive_gatk_gvcf/{sample}.txt"
-        shell:
-            """
-            bcftools view -Oz -o {output.gvcf} {input.gvcf} 2> {log}
-            bcftools index {params.index_args} {output.gvcf} 2>> {log}
-            """
