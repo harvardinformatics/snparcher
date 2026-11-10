@@ -56,90 +56,19 @@ def set_defaults(cfg, defaults):
             set_defaults(cfg[key], value)
 
 
-DEFAULTS = {
-    "samples": "config/samples.csv",
-    "sample_metadata": "",
-    "reads": {
-        "mark_duplicates": True,
-    },
-    "variant_calling": {
-        "expected_coverage": "low",
-        "tool": "gatk",
-        "long_contig_mode": "auto",
-        "generate_filtered_vcf": True,
-        "ploidy": 2,
-        "gatk": {
-            "het_prior": 0.005,
-            "concat_batch_size": 250,
-            "concat_max_rounds": 20,
-        },
-        "sentieon": {
-            "license": "",
-        },
-        "bcftools": {
-            "min_mapq": 20,
-            "min_baseq": 20,
-            "max_depth": 250,
-        },
-        "deepvariant": {
-            "model_type": "WGS",
-            "num_shards": 8,
-        },
-        "parabricks": {
-            "container_image": "",
-            "num_gpus": 1,
-            "num_cpu_threads": 16,
-            "extra_args": "",
-        },
-    },
-    "intervals": {
-        "enabled": True,
-        "min_nmer": 500,
-        "num_gvcf_intervals": 50,
-        "db_scatter_factor": 0.15,
-        "min_contig_length": 0,
-        "db_max_intervals_per_shard": 200,
-        "db_max_contigs_per_shard": 200,
-    },
-    "callable_sites": {
-        "generate_bed_file": True,
-        "coverage": {
-            "enabled": True,
-            "min_sample_depth": 1,
-            "fraction": 0.25,
-            "max_depth": "auto",
-            "max_depth_k": 4,
-            "merge_distance": 100,
-        },
-        "mappability": {
-            "enabled": True,
-            "kmer": 150,
-            "min_score": 1,
-            "merge_distance": 100,
-        },
-    },
-    "modules": {
-        "qc": {
-            "enabled": False,
-            "clusters": 3,
-            "min_depth": 2,
-            "max_sample_missingness": 0.49,
-            "google_api_key": "",
-            "exclude_scaffolds": "",
-        },
-        "postprocess": {
-            "enabled": False,
-            "filtering": {
-                "contig_size": 10000,
-                "maf": 0.01,
-                "missingness": 0.75,
-                "exclude_scaffolds": "mtDNA,Y",
-                "split_by_type": True,
-                "keep_basic_filter": False,
-            },
-        },
-    },
-}
+def schema_defaults(schema):
+    """The defaults declared in a JSON schema, as a nested dict. Objects whose
+    properties have no defaults (such as reference) are left out, so a missing
+    required block still fails validation."""
+    defaults = {}
+    for key, prop in schema.get("properties", {}).items():
+        if prop.get("type") == "object" and "properties" in prop:
+            nested = schema_defaults(prop)
+            if nested:
+                defaults[key] = nested
+        elif "default" in prop:
+            defaults[key] = prop["default"]
+    return defaults
 
 
 GENOMICSDB_MERGE_CONTIG_THRESHOLD = 50
@@ -353,6 +282,7 @@ if v1_markers:
 normalize_supported_config_aliases(config)
 REPLACED_COVERAGE_KEYS = pop_replaced_coverage_keys(config)
 remove_unsupported_module_blocks(config)
+DEFAULTS = schema_defaults(yaml.safe_load(CONFIG_SCHEMA_PATH.read_text()))
 set_defaults(config, DEFAULTS)
 validate_config_with_warnings(config, CONFIG_SCHEMA_PATH)
 
