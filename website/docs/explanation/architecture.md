@@ -166,8 +166,8 @@ This BED file is not used by the core pipeline itself, but it is critical for do
 
 The callable sites track has two components:
 
-- **Coverage filtering** uses aligned BAMs to identify regions where depth falls within acceptable bounds (by default, between half and twice the global mean coverage across all BAM-backed samples).
-  Regions outside these bounds are masked.
+- **Coverage filtering** uses aligned BAMs to mask sites whose depth, summed across samples, is an outlier above the genome-wide median, and sites where fewer than `fraction` of samples have reads.
+  There is no lower depth bound.
 - **Mappability filtering** uses GenMap to identify regions where short reads cannot map uniquely.
   Regions with ambiguous mappability (score below the threshold, default 1.0 = perfectly unique) are masked.
 

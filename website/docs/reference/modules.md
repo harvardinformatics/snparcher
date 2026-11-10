@@ -9,7 +9,7 @@ The QC module produces an interactive HTML dashboard with visualizations for qua
 ### Requirements
 
 - At least 3 samples in the sample sheet.
-- The core pipeline must produce `results/vcfs/raw.vcf.gz` and `results/qc_metrics/qc_report.tsv`.
+- The core pipeline must produce the final call set (`results/vcfs/filtered.vcf.gz` when hard filtering runs, otherwise `results/vcfs/raw.vcf.gz`) and `results/qc_metrics/qc_report.tsv`.
 
 ### Config options
 
@@ -52,14 +52,14 @@ The HTML dashboard (`results/qc/qc_dashboard.html`) contains:
 
 ## Postprocess
 
-The postprocess module filters the raw VCF to produce clean SNP and indel call sets by removing excluded samples, applying site-level filters, and intersecting with callable sites.
+The postprocess module filters the final call set to produce clean SNP and indel call sets by removing excluded samples, applying site-level filters, and intersecting with callable sites.
 
 Sample exclusion is controlled via the `exclude` column in the [sample metadata sheet](sample-sheet-schema.md#optional-metadata-sheet).
 
 ### Requirements
 
-- The core pipeline must produce `results/vcfs/raw.vcf.gz`.
-- Callable sites BED (`results/callable_sites/callable_sites.bed`) is used if available.
+- The core pipeline must produce the final call set (`results/vcfs/filtered.vcf.gz` when hard filtering runs, otherwise `results/vcfs/raw.vcf.gz`).
+- The callable sites BED (`results/callable_sites/callable_sites.bed`) is required; without it, postprocess is disabled with a warning.
 
 ### Config options
 

@@ -10,7 +10,7 @@ This page explains what each one does, when to choose it, and how snpArcher's ap
 | **GATK HaplotypeCaller** | Local reassembly + PairHMM | Open source | CPU | gVCF -> GenomicsDB -> GenotypeGVCFs |
 | **bcftools** | Pileup-based (mpileup + call) | Open source | CPU | Direct multi-sample calling |
 | **DeepVariant** | Deep learning (CNN) | Open source | CPU (GPU optional) | gVCF -> GLnexus |
-| **Sentieon** | GATK-compatible, optimized | Commercial | CPU | gVCF -> GenomicsDB -> GenotypeGVCFs |
+| **Sentieon** | GATK-compatible, optimized | Commercial | CPU | gVCF -> GVCFtyper |
 | **Parabricks** | GPU-accelerated GATK | Commercial (NVIDIA) | GPU | gVCF -> GenomicsDB -> GenotypeGVCFs |
 
 You choose a caller by setting `variant_calling.tool` in your configuration file.
@@ -117,7 +117,8 @@ Sentieon provides a commercially licensed, performance-optimized implementation 
 It produces near-identical results to GATK but runs significantly faster through better CPU utilization.
 
 Sentieon is a drop-in replacement if your institution already has a license.
-The workflow is identical to the GATK path (gVCF -> GenomicsDB -> GenotypeGVCFs), and the outputs are compatible.
+Like GATK, it writes a gVCF per sample, but it joint-genotypes them in a single Sentieon GVCFtyper job, with no GenomicsDB step; the outputs are compatible.
+Its sample names come from the BAM read groups (or the input gVCFs), so they must equal `sample_id`.
 
 A license must be specified in the configuration:
 
@@ -157,7 +158,7 @@ If you call variants in each sample independently and then merge the VCFs, you f
 First, a site that is variant in sample A but reference in sample B will simply be absent from sample B's VCF, so you cannot tell whether sample B is truly homozygous reference or simply was not called at that site.
 Second, you lose statistical power: the evidence for a variant at a given site accumulates across samples, and joint genotyping uses that shared evidence.
 
-**The gVCF + GenomicsDB approach (GATK, Sentieon, Parabricks):**
+**The gVCF + GenomicsDB approach (GATK, Parabricks):**
 These callers produce gVCFs that record genotype likelihoods at every site, including non-variant positions.
 The gVCFs are then loaded into a GenomicsDB datastore, which provides efficient columnar access to the multi-sample data.
 GenotypeGVCFs then jointly genotypes all samples simultaneously, using the evidence from all samples at each site to make the final call.

@@ -72,6 +72,7 @@ Each sample must have exactly one BAM row.
 
 The output VCFs name each sample by its `sample_id`, not by the read-group `SM` tag in its BAM, so the BAMs' `SM` values don't need to match the sheet.
 The exception is `sentieon`, which keeps the `SM` name: with it, each BAM's read groups must have a single `SM` equal to that row's `sample_id`.
+With `gatk`, the `SM` value can be anything, but each BAM must have only one: HaplotypeCaller rejects BAMs whose read groups name several samples.
 
 ## From gVCF files
 
