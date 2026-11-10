@@ -38,6 +38,16 @@ def merge_library_bams_input(wildcards):
     }
 
 
+def _library_bams(sample, directory):
+    """One BAM per library of a sample, from results/bams/{directory}/."""
+    return {
+        "bams": [
+            f"results/bams/{directory}/{sample}/{lib}.bam"
+            for lib in get_sample_libraries(sample)
+        ],
+    }
+
+
 def merge_dedup_libraries_input(wildcards):
     """Get deduplicated library BAMs for sample-level merge."""
     if not get_sample_mark_duplicates(wildcards.sample):
@@ -45,13 +55,7 @@ def merge_dedup_libraries_input(wildcards):
             f"Sample '{wildcards.sample}' has mark_duplicates=False, "
             "but merge_dedup_libraries was requested."
         )
-    libraries = get_sample_libraries(wildcards.sample)
-    return {
-        "bams": [
-            f"results/bams/library_markdup/{wildcards.sample}/{lib}.bam"
-            for lib in libraries
-        ],
-    }
+    return _library_bams(wildcards.sample, "library_markdup")
 
 
 def merge_library_level_bams_input(wildcards):
@@ -61,10 +65,7 @@ def merge_library_level_bams_input(wildcards):
             f"Sample '{wildcards.sample}' has mark_duplicates=True, "
             "but merge_library_level_bams was requested."
         )
-    libraries = get_sample_libraries(wildcards.sample)
-    return {
-        "bams": [f"results/bams/library/{wildcards.sample}/{lib}.bam" for lib in libraries],
-    }
+    return _library_bams(wildcards.sample, "library")
 
 
 rule stage_external_bam:
