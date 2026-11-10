@@ -12,6 +12,7 @@ if VARIANT_TOOL == "sentieon":
     include: "rules/variant_calling/sentieon.smk"
 elif VARIANT_TOOL == "gatk":
     include: "rules/variant_calling/gatk_gvcf.smk"
+    include: "rules/variant_calling/genomicsdb_mapfile.smk"
     if config["intervals"]["enabled"]:
         # Joint genotyping, shared with Parabricks; it also defines the staged
         # concat helpers that gatk_intervals.smk uses.
@@ -27,6 +28,7 @@ elif VARIANT_TOOL == "deepvariant":
     include: "rules/variant_calling/glnexus_gvcf.smk"
 elif VARIANT_TOOL == "parabricks":
     include: "rules/variant_calling/parabricks.smk"
+    include: "rules/variant_calling/genomicsdb_mapfile.smk"
     include: "rules/variant_calling/joint_gvcf_intervals.smk"
 else:
     raise ValueError(f"Unsupported variant_calling.tool: {VARIANT_TOOL}")
