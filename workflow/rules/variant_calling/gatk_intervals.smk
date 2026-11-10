@@ -49,40 +49,13 @@ def external_gvcf_input(wildcards):
 
 def get_interval_gvcfs(wc):
     """Get interval gVCF files for a sample."""
-    intervals_file = "results/intervals/gvcf/intervals.txt"
-    
-    if exists(intervals_file):
-        # Read directly from file if it exists
-        # We do this because checkpoint.get() doesn't seem to pick up the checkpoint output if it was created in previous run
-        # I.e if user does setup target rule, then rule all, the workflow fails 
-        # Related GH issue: https://github.com/snakemake/snakemake/issues/3879
-        with open(intervals_file) as f:
-            lines = [l.strip() for l in f.readlines()]
-    else:
-        # Fall back to checkpoint mechanism to trigger creation
-        checkpoint_output = checkpoints.create_gvcf_intervals.get(**wc).output[0]
-        with open(checkpoint_output) as f:
-            lines = [l.strip() for l in f.readlines()]
-
-    list_files = [os.path.basename(x) for x in lines]
-    intervals = [f.replace("-scattered.interval_list", "") for f in list_files]
+    intervals = interval_list_ids("gvcf", wc)
     return expand(INTERVAL_GVCF_PATTERN, sample=wc.sample, interval=intervals)
 
 
 def get_db_intervals(wc):
-    """Get DB interval IDs from checkpoint output."""
-    intervals_file = "results/intervals/db/intervals.txt"
-    
-    if exists(intervals_file):
-        with open(intervals_file) as f:
-            lines = [l.strip() for l in f.readlines()]
-    else:
-        checkpoint_output = checkpoints.create_db_intervals.get(**wc).output[0]
-        with open(checkpoint_output) as f:
-            lines = [l.strip() for l in f.readlines()]
-
-    list_files = [os.path.basename(x) for x in lines]
-    return [f.replace("-scattered.interval_list", "") for f in list_files]
+    """Get DB interval IDs."""
+    return interval_list_ids("db", wc)
 
 
 def get_interval_vcfs(wc):

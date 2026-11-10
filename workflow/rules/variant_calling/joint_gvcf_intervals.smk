@@ -2,19 +2,8 @@ localrules: create_db_mapfile
 
 
 def get_db_intervals(wc):
-    """Get DB interval IDs from checkpoint output."""
-    intervals_file = "results/intervals/db/intervals.txt"
-
-    if exists(intervals_file):
-        with open(intervals_file) as f:
-            lines = [l.strip() for l in f.readlines()]
-    else:
-        checkpoint_output = checkpoints.create_db_intervals.get(**wc).output[0]
-        with open(checkpoint_output) as f:
-            lines = [l.strip() for l in f.readlines()]
-
-    list_files = [os.path.basename(x) for x in lines]
-    return [f.replace("-scattered.interval_list", "") for f in list_files]
+    """Get DB interval IDs."""
+    return interval_list_ids("db", wc)
 
 
 def get_interval_vcfs(wc):
