@@ -26,8 +26,8 @@ The meaning of the `input` column depends on `input_type`:
 |--------------|----------------------|:------------------------:|-------|
 | `srr` | SRA run accession (e.g., `SRR12345678`) | yes | Each row represents one SRA run. FASTQ files are downloaded automatically. |
 | `fastq` | Semicolon-separated pair of FASTQ paths: `R1;R2` | yes | Paths can be absolute or relative to the working directory, and must not contain spaces. Files must be gzipped (`.fastq.gz`). |
-| `bam` | Path to an aligned BAM file | no | Exactly one row per sample. The BAM is used directly (no alignment step). |
-| `gvcf` | Path to a gVCF file | no | Exactly one row per sample. Skips alignment and per-sample variant calling. |
+| `bam` | Path to an aligned BAM file | no | Exactly one row per sample. The BAM is used directly (no alignment step). Output VCFs name the sample by `sample_id`, not the BAM's `SM`, except with `sentieon`, which needs `SM` to equal `sample_id`. |
+| `gvcf` | Path to a gVCF file | no | Exactly one row per sample. Skips alignment and per-sample variant calling. With `sentieon`, the sample name inside the gVCF must equal `sample_id`. |
 
 !!! warning "gVCF compatibility"
     `gvcf` input is only supported with the `gatk` and `sentieon` variant calling tools.
