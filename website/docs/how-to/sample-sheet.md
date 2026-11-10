@@ -70,6 +70,9 @@ sample_B,bam,/data/bams/sample_B.bam
 
 Each sample must have exactly one BAM row.
 
+The output VCFs name each sample by its `sample_id`, not by the read-group `SM` tag in its BAM, so the BAMs' `SM` values don't need to match the sheet.
+The exception is `sentieon`, which keeps the `SM` name: with it, each BAM's read groups must have a single `SM` equal to that row's `sample_id`.
+
 ## From gVCF files
 
 To start from per-sample gVCF files (skipping everything up to joint genotyping):
@@ -85,6 +88,9 @@ Each sample must have exactly one gVCF row.
 !!! note
     gVCF input is only supported with the `gatk` and `sentieon` variant callers.
     If you set `variant_calling.tool` to `bcftools`, `deepvariant`, or `parabricks`, gVCF rows will cause a validation error.
+
+With `gatk`, the output VCF names each sample by its `sample_id`, whatever the sample name inside its gVCF.
+With `sentieon`, the name inside each gVCF is kept, so it must equal that row's `sample_id`.
 
 ## Mixing input types
 

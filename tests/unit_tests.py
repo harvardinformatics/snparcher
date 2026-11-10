@@ -1,3 +1,4 @@
+import gzip
 import json
 import re
 import subprocess
@@ -142,6 +143,39 @@ def test_external_bam_staging_and_indexing(request):
 
 
 @pytest.mark.unit
+def test_bcftools_names_samples_by_sample_id(request):
+    """bcftools mpileup names samples by the BAMs' read-group SM, and merges
+    BAMs that share one into a single sample. Two external BAMs with the same
+    SM must stay two samples, named by their sample_ids."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
+        smk.link_fixtures("config", "data", "results/reference")
+
+        external_bam = FIXTURES_DIR / "results/bams/markdup/sample0.bam"  # SM:sample0
+        samples = tmpdir / "shared_sm_samples.csv"
+        samples.write_text(
+            "sample_id,input_type,input\n"
+            f"indA,bam,{external_bam}\n"
+            f"indB,bam,{external_bam}\n"
+        )
+        config = yaml.safe_load((FIXTURES_DIR / "config" / "config.yaml").read_text())
+        config["variant_calling"]["tool"] = "bcftools"
+        configfile = tmpdir / "bcftools_config.yaml"
+        configfile.write_text(yaml.safe_dump(config))
+
+        result = smk.run(target="call_variants", configfile=configfile, samples=samples)
+        result.print_log()
+        result.assert_success()
+
+        with gzip.open(tmpdir / "results/vcfs/raw.vcf.gz", "rt") as handle:
+            header = next(line for line in handle if line.startswith("#CHROM"))
+        assert header.rstrip("\n").split("\t")[9:] == ["indA", "indB"]
+
+
+@pytest.mark.unit
 def test_gvcfs(request):
     """Per-sample gVCF generation for one sample."""
     no_conda = request.config.getoption("--no-conda")
@@ -194,6 +228,125 @@ def test_qc_metrics(request):
         result.assert_output_exists(
             "results/qc_metrics/bam/sample0.json",
         )
+
+
+# samtools 1.24 `flagstat -O tsv` for three read pairs (one marked duplicate,
+# one with an unmapped mate) plus two secondary and one supplementary record.
+FLAGSTAT_PAIRED = """\
+9\t0\ttotal (QC-passed reads + QC-failed reads)
+6\t0\tprimary
+2\t0\tsecondary
+1\t0\tsupplementary
+3\t0\tduplicates
+2\t0\tprimary duplicates
+8\t0\tmapped
+88.89%\tN/A\tmapped %
+5\t0\tprimary mapped
+83.33%\tN/A\tprimary mapped %
+6\t0\tpaired in sequencing
+3\t0\tread1
+3\t0\tread2
+4\t0\tproperly paired
+66.67%\tN/A\tproperly paired %
+4\t0\twith itself and mate mapped
+1\t0\tsingletons
+16.67%\tN/A\tsingletons %
+0\t0\twith mate mapped to a different chr
+0\t0\twith mate mapped to a different chr (mapQ>=5)
+"""
+
+
+# The same for three single-end reads, two of them mapped.
+FLAGSTAT_UNPAIRED = """\
+3\t0\ttotal (QC-passed reads + QC-failed reads)
+3\t0\tprimary
+0\t0\tsecondary
+0\t0\tsupplementary
+0\t0\tduplicates
+0\t0\tprimary duplicates
+2\t0\tmapped
+66.67%\tN/A\tmapped %
+2\t0\tprimary mapped
+66.67%\tN/A\tprimary mapped %
+0\t0\tpaired in sequencing
+0\t0\tread1
+0\t0\tread2
+0\t0\tproperly paired
+N/A\tN/A\tproperly paired %
+0\t0\twith itself and mate mapped
+0\t0\tsingletons
+N/A\tN/A\tsingletons %
+0\t0\twith mate mapped to a different chr
+0\t0\twith mate mapped to a different chr (mapQ>=5)
+"""
+
+
+def run_parse_bam_stats(request, tmpdir, flagstat, target):
+    """Run only the BAM-stats parsing for one external-BAM sample, from given
+    samtools outputs, so no BAM has to be built."""
+    no_conda = request.config.getoption("--no-conda")
+    conda_prefix = request.config.getoption("--conda-prefix")
+    tmpdir = Path(tmpdir)
+    samples = tmpdir / "bam_samples.csv"
+    samples.write_text(
+        "sample_id,input_type,input\n"
+        f"sample_ext,bam,{FIXTURES_DIR / 'results/bams/markdup/sample0.bam'}\n"
+    )
+    stats_dir = tmpdir / "results/qc_metrics/bam"
+    stats_dir.mkdir(parents=True)
+    (stats_dir / "sample_ext_flagstat.txt").write_text(flagstat)
+    (stats_dir / "sample_ext_coverage.txt").write_text(
+        "#rname\tstartpos\tendpos\tnumreads\tcovbases\tcoverage\tmeandepth\tmeanbaseq\tmeanmapq\n"
+        "chr1\t1\t1000\t5\t50\t5\t0.25\t40\t60\n"
+    )
+
+    smk = SnakemakeRunner(tmpdir, use_conda=not no_conda, conda_prefix=conda_prefix)
+    smk.link_fixtures("config", "data", "results/reference")
+    return smk.run(
+        target=target,
+        samples=samples,
+        extra_args=["--allowed-rules", "parse_bam_stats", "combine_qc_metrics"],
+    )
+
+
+@pytest.mark.unit
+def test_bam_stats_count_primary_records(request):
+    """Secondary and supplementary records are extra alignments of reads already
+    counted, so read totals and rates must come from the primary records."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = run_parse_bam_stats(
+            request, tmpdir, FLAGSTAT_PAIRED, "results/qc_metrics/bam/sample_ext.json"
+        )
+        result.print_log()
+        result.assert_success()
+
+        stats = json.loads((Path(tmpdir) / "results/qc_metrics/bam/sample_ext.json").read_text())
+        assert stats["total_reads"] == 6
+        assert stats["num_duplicates"] == 2
+        assert stats["num_mapped"] == 5
+        assert stats["percent_mapped"] == 83.33
+        assert stats["percent_properly_paired"] == 66.67
+
+
+@pytest.mark.unit
+def test_bam_stats_unpaired_bam_reports_na(request):
+    """samtools flagstat prints N/A for the properly-paired percentage of an
+    unpaired BAM. Calling works on such BAMs, so QC must report NA, not crash."""
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = run_parse_bam_stats(
+            request, tmpdir, FLAGSTAT_UNPAIRED, "results/qc_metrics/qc_report.tsv"
+        )
+        result.print_log()
+        result.assert_success()
+
+        stats = json.loads((Path(tmpdir) / "results/qc_metrics/bam/sample_ext.json").read_text())
+        assert stats["total_reads"] == 3
+        assert stats["percent_properly_paired"] is None
+        header, row = (Path(tmpdir) / "results/qc_metrics/qc_report.tsv").read_text().splitlines()
+        report = dict(zip(header.split("\t"), row.split("\t")))
+        assert report["percent_properly_paired"] == "NA"
+        assert report["percent_mapped"] == "66.67"
 
 
 @pytest.mark.unit
@@ -725,6 +878,10 @@ def test_download_sra_completeness(request):
     rule merely checking that the files exist. A truncated extractor, or a pigz
     that compresses nothing and exits 0, fails here.
 
+    The output directory starts with a stale single-read file, as a retry finds
+    it: the raw FASTQs are temp(), but that file was never declared. The rule
+    must neither trip over it nor count its reads.
+
     Requires network access: prefetch pulls SRR000001 (~312 MB) from NCBI.
     """
     no_conda = request.config.getoption("--no-conda")
@@ -737,6 +894,10 @@ def test_download_sra_completeness(request):
 
         r1 = "results/fastqs/sample_mixed_reads/libA/u2/SRR000001_1.fastq.gz"
         r2 = "results/fastqs/sample_mixed_reads/libA/u2/SRR000001_2.fastq.gz"
+        leftover = Path(tmpdir) / "results/fastqs/sample_mixed_reads/libA/u2/SRR000001.fastq.gz"
+        leftover.parent.mkdir(parents=True)
+        with gzip.open(leftover, "wt") as handle:
+            handle.write("@stale\nACGT\n+\nIIII\n" * 3)
 
         result = smk.run(target=[r1, r2], samples=samples)
         result.print_log()

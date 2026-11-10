@@ -2068,6 +2068,9 @@ def test_deepvariant_dry_run(request):
         output = result.stdout + result.stderr
         assert "deepvariant_call" in output
         assert "/opt/deepvariant/bin/run_deepvariant" in output
+        # Named by sample_id: GLnexus keeps the gVCF's name, which is otherwise
+        # the BAM's read-group SM.
+        assert "--sample_name sample1 " in output
         assert "glnexus_joint" in output
 
         source = workflow_source("rules", "variant_calling", "glnexus_gvcf.smk")
@@ -2267,6 +2270,7 @@ def test_deepvariant_long_contig_dry_run_archives_compressed_csi_gvcfs(request):
         assert scheduled_rule_present(output, "archive_deepvariant_gvcf")
         assert "results/deepvariant/sample0.g.vcf" in output
         assert '--intermediate_results_dir "$WORK"' in output
+        assert "--sample_name sample0 " in output
         assert "results/gvcfs/sample0.g.vcf.gz.csi" in output
         assert "bcftools index -f -c" in output
 

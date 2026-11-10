@@ -49,9 +49,12 @@ if LONG_CONTIG_MODE:
             # binds (a custom tmpdir may not be), and remove it when the job ends.
             WORK=$(mktemp -d "results/deepvariant/{wildcards.sample}.XXXXXX")
             trap 'rm -rf "$WORK"' EXIT
+            # --sample_name overrides the BAM's read-group SM, which GLnexus
+            # would otherwise use for the sample's column.
             /opt/deepvariant/bin/run_deepvariant \
                 --ref {input.ref} \
                 --reads {input.bam} \
+                --sample_name {wildcards.sample} \
                 --output_vcf {output.vcf} \
                 --output_gvcf {output.gvcf} \
                 --model_type {params.model_type} \
@@ -107,9 +110,12 @@ else:
             # binds (a custom tmpdir may not be), and remove it when the job ends.
             WORK=$(mktemp -d "results/deepvariant/{wildcards.sample}.XXXXXX")
             trap 'rm -rf "$WORK"' EXIT
+            # --sample_name overrides the BAM's read-group SM, which GLnexus
+            # would otherwise use for the sample's column.
             /opt/deepvariant/bin/run_deepvariant \
                 --ref {input.ref} \
                 --reads {input.bam} \
+                --sample_name {wildcards.sample} \
                 --output_vcf {output.vcf} \
                 --output_gvcf {output.gvcf} \
                 --model_type {params.model_type} \
