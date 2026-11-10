@@ -135,6 +135,7 @@ snakemake \
   --snakefile /path/to/snpArcher/workflow/Snakefile \
   --directory /path/to/my_project \
   --use-conda \
+  --workflow-profile /path/to/snpArcher/workflow-profiles/default \
   --cores 8 \
   --rerun-incomplete
 ```

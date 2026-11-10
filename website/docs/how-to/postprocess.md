@@ -139,6 +139,7 @@ Suppose you ran snpArcher on 50 bird samples, reviewed the [QC report](qc-report
       --snakefile /path/to/snpArcher/workflow/Snakefile \
       --directory /path/to/my_project \
       --use-conda \
+      --workflow-profile /path/to/snpArcher/workflow-profiles/default \
       --cores 8
     ```
 
