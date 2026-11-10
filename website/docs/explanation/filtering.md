@@ -59,7 +59,7 @@ These filters operate on both samples and sites:
 **Site-level filtering:**
 
 - **Minor allele frequency (MAF)**: Remove sites below a frequency threshold (default 0.01).
-- **Missingness**: Remove sites where more than a fraction of samples have missing genotypes (default 0.75 = at most 75% of genotypes called).
+- **Missingness**: Remove sites where more than a fraction of samples have missing genotypes (default 0.75: a site is kept if at least 25% of samples have a called genotype).
 - **Scaffold/contig exclusion**: Remove sites on specific scaffolds (e.g., sex chromosomes, mitochondria, very small contigs).
 - **Minimum contig size**: Remove sites on scaffolds below a length threshold (default 10,000 bp).
 - **Callable sites intersection**: Restrict to regions that pass coverage and mappability filters.

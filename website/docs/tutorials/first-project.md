@@ -341,7 +341,7 @@ modules:
     filtering:
       contig_size: 10000     # exclude scaffolds smaller than 10 kb
       maf: 0.01              # minor allele frequency threshold
-      missingness: 0.75      # keep sites genotyped in at least 75% of samples
+      missingness: 0.75      # remove sites with more than 75% missing genotypes
       exclude_scaffolds: ""  # <-- comma-separated scaffold names to exclude, e.g. "mtDNA,W"
 ```
 
