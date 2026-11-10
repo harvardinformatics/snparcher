@@ -280,8 +280,8 @@ rule gatk_haplotypecaller_interval:
         idx=temp(get_vcf_index(INTERVAL_GVCF_PATTERN)),
     params:
         ploidy=config["variant_calling"]["ploidy"],
-        min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
-        min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
+        min_pruning=HC_MIN_PRUNING,
+        min_dangling=HC_MIN_DANGLING,
     threads: 1
     conda:
         "../../envs/gatk.yaml"

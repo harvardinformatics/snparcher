@@ -28,8 +28,8 @@ if LONG_CONTIG_MODE:
             idx=temp("results/gvcfs/work/{sample}.g.vcf.idx"),
         params:
             ploidy=config["variant_calling"]["ploidy"],
-            min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
-            min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
+            min_pruning=HC_MIN_PRUNING,
+            min_dangling=HC_MIN_DANGLING,
         threads: 1
         conda:
             "../../envs/gatk.yaml"
@@ -104,8 +104,8 @@ else:
             idx=get_compressed_vcf_index("results/gvcfs/{sample}.g.vcf.gz"),
         params:
             ploidy=config["variant_calling"]["ploidy"],
-            min_pruning=1 if config["variant_calling"]["expected_coverage"] == "low" else 2,
-            min_dangling=1 if config["variant_calling"]["expected_coverage"] == "low" else 4,
+            min_pruning=HC_MIN_PRUNING,
+            min_dangling=HC_MIN_DANGLING,
         threads: 1
         conda:
             "../../envs/gatk.yaml"

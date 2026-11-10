@@ -540,11 +540,18 @@ if VARIANT_TOOL == "parabricks":
 
 # Every Sentieon rule exports SENTIEON_LICENSE from this setting, so an empty
 # value fails every Sentieon job, after the run has started.
-if VARIANT_TOOL == "sentieon" and not str(config["variant_calling"]["sentieon"]["license"]).strip():
+SENTIEON_LICENSE = config["variant_calling"]["sentieon"]["license"]
+if VARIANT_TOOL == "sentieon" and not str(SENTIEON_LICENSE).strip():
     raise ValueError(
         "variant_calling.sentieon.license is required when variant_calling.tool='sentieon'. "
         "Set it to your Sentieon license server (host:port) or license file path."
     )
+
+# HaplotypeCaller graph pruning (GATK and Parabricks): keep more of the
+# assembly graph when coverage is low.
+_LOW_COVERAGE = config["variant_calling"]["expected_coverage"] == "low"
+HC_MIN_PRUNING = 1 if _LOW_COVERAGE else 2
+HC_MIN_DANGLING = 1 if _LOW_COVERAGE else 4
 
 samples_df["input_unit"] = (
     samples_df.groupby(["sample_id", "library_id"]).cumcount().add(1).map(lambda x: f"u{x}")
