@@ -65,7 +65,7 @@ Additional columns beyond those listed below are permitted (the schema allows `a
 | Column | Type | Required | Default | Constraints | Used by |
 |--------|------|:--------:|---------|-------------|---------|
 | `sample_id` | string | yes | | Must match a `sample_id` in the main samples CSV. Pattern `^[A-Za-z0-9._-]+$`. | All modules |
-| `exclude` | boolean | no | `false` | Boolean-like (same parsing as `mark_duplicates`). | Postprocess: excluded samples are removed from filtered VCFs. |
+| `exclude` | boolean | no | `false` | Boolean-like (same parsing as `mark_duplicates`). | Postprocess: excluded samples are removed from filtered VCFs. Callable sites: excluded samples are left out of the coverage mask, so changing exclusions rebuilds it. |
 | `lat` | number | no | | -90 to 90 | QC: latitude for geographic map panels. |
 | `long` | number | no | | -180 to 180 | QC: longitude for geographic map panels. |
 

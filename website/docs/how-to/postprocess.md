@@ -72,7 +72,7 @@ modules:
 | `contig_size` | `10000` | Sites on contigs/scaffolds shorter than this are excluded. |
 | `maf` | `0.01` | SNPs with minor allele frequency below this threshold are excluded. |
 | `missingness` | `0.75` | SNPs where more than this fraction of genotypes are missing are excluded. |
-| `exclude_scaffolds` | `"mtDNA,Y"` | SNPs on these scaffolds are excluded entirely. Comma-separated, no spaces. |
+| `exclude_scaffolds` | `"mtDNA,Y"` | SNPs on these scaffolds are excluded entirely. Comma-separated; spaces around names are ignored. |
 
 !!! tip
     For many organisms, you will want to exclude sex chromosomes and mitochondrial scaffolds.
@@ -143,7 +143,8 @@ Suppose you ran snpArcher on 50 bird samples, reviewed the [QC report](qc-report
       --cores 8
     ```
 
-    Snakemake will only run the postprocessing steps, since the core pipeline outputs already exist.
+    Snakemake runs the postprocessing steps. It first rebuilds callable sites, because excluded samples are left out of the coverage mask, so mosdepth reruns on each remaining BAM.
+    Variant calling is not rerun.
 
 ## Next steps
 

@@ -348,7 +348,7 @@ modules:
 ### Run postprocessing
 
 Rerun snpArcher with the same command as Step 6.
-Snakemake will detect that the core pipeline already completed and will only run the newly enabled postprocessing rules:
+Snakemake will detect that variant calling already completed. It rebuilds callable sites, because excluded samples are left out of the coverage mask (mosdepth reruns on each remaining BAM), and then runs the newly enabled postprocessing rules:
 
 ```bash
 snakemake \
@@ -370,7 +370,7 @@ ls -lh ~/projects/zebrafinch_reseq/results/postprocess/
 
 You should see:
 
-- **`filtered.vcf.gz`**: The VCF after removing excluded samples and sites failing the hard filters or with reference N alleles or zero allele frequency.
+- **`filtered.vcf.gz`**: Excluded samples removed; sites kept only if they passed the caller's filters, lie in `callable_sites_filtered.bed`, are biallelic, and pass the MAF and missingness thresholds.
 - **`clean_snps.vcf.gz`**: Biallelic SNPs from the filtered VCF, after applying your missingness, MAF, callable-site, and scaffold-exclusion filters. This is typically the file you want for downstream analyses.
 - **`clean_indels.vcf.gz`**: Indels with the same filters applied.
 

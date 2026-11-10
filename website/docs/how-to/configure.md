@@ -152,7 +152,7 @@ modules:
       contig_size: 10000  # exclude contigs smaller than this (bp)
       maf: 0.01  # minimum minor allele frequency
       missingness: 0.75  # maximum fraction of missing genotypes per site
-      exclude_scaffolds: "mtDNA,Y"  # <-- comma-separated, no spaces
+      exclude_scaffolds: "mtDNA,Y"  # <-- comma-separated
 ```
 
 Sample exclusions are controlled through a separate metadata file.
